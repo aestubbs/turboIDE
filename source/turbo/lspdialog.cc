@@ -28,6 +28,8 @@ const KnownLang kKnownLangs[] = {
     {"rust",       "Rust (rust-analyzer):",  "rust-analyzer"},
     {"go",         "Go (gopls):",            "gopls"},
     {"javascript", "JavaScript (tsserver):", "typescript-language-server --stdio"},
+    {"php",        "PHP (intelephense):",    "intelephense --stdio"},
+    {"elixir",     "Elixir (elixir-ls):",    "elixir-ls"},
 };
 
 constexpr int kNumLangs = sizeof(kKnownLangs) / sizeof(kKnownLangs[0]);
@@ -38,8 +40,11 @@ constexpr int kInputMax = 256;
 bool executeLspDialog(AppSettings &settings) noexcept
 {
     int rows = kNumLangs;
-    // Layout: title note, enable checkbox, one labelled input line per language.
-    int height = 6 + rows * 3 + 2;
+    // Compact layout (label and input on the same row) so the dialog fits on a
+    // standard 24-line terminal even with several languages. A blank gap row
+    // separates the last field from the OK/Cancel buttons.
+    const int firstY = 6;
+    int height = firstY + rows + 4; // last field, blank gap, 2-row buttons, border
     auto *d = new TDialog(TRect(0, 0, 64, height), "Language Servers");
     d->options |= ofCentered;
 
@@ -54,17 +59,18 @@ bool executeLspDialog(AppSettings &settings) noexcept
 
     std::vector<TInputLine *> lines;
     lines.reserve(kNumLangs);
-    int y = 6;
+    int y = firstY;
     for (int i = 0; i < kNumLangs; ++i)
     {
-        d->insert(new TLabel(TRect(3, y, 61, y + 1), kKnownLangs[i].label, nullptr));
-        auto *line = new TInputLine(TRect(3, y + 1, 61, y + 2), kInputMax);
+        d->insert(new TLabel(TRect(2, y, 25, y + 1), kKnownLangs[i].label, nullptr));
+        auto *line = new TInputLine(TRect(25, y, 61, y + 1), kInputMax);
         d->insert(line);
         lines.push_back(line);
-        y += 3;
+        y += 1;
     }
 
-    int by = height - 3;
+    // One blank row of gap, then the buttons.
+    int by = firstY + rows + 1;
     d->insert(new TButton(TRect(40, by, 50, by + 2), "O~K~", cmOK, bfDefault));
     d->insert(new TButton(TRect(51, by, 61, by + 2), "Cancel", cmCancel, bfNormal));
 

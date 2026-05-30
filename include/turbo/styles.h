@@ -57,7 +57,8 @@ struct Language
         Pascal,
         SQL,
         Go,
-        PHP;
+        PHP,
+        Elixir;
 };
 
 enum TextStyle : uchar

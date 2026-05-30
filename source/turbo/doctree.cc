@@ -310,6 +310,10 @@ DocumentTreeWindow::DocumentTreeWindow(const TRect &bounds, DocumentTreeWindow *
     TWindow(bounds, "Files", wnNoNumber),
     ptr(ptr)
 {
+    // Without ofFirstClick, the first click of a double-click is swallowed just
+    // to activate the window (when focus was in an editor), so the outline never
+    // sees a double-click and a file won't open. Forward that first click.
+    options |= ofFirstClick;
     auto *hsb = standardScrollBar(sbHorizontal),
          *vsb = standardScrollBar(sbVertical);
     tree = new DocumentTreeView(getExtent().grow(-1, -1), hsb, vsb, nullptr);

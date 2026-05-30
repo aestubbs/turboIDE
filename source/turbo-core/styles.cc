@@ -45,7 +45,8 @@ constexpr Language
     Language::Pascal {"//", "{", "}"},
     Language::SQL {"--", "/*", "*/"},
     Language::Go {"//", "/*", "*/"},
-    Language::PHP {"//", "/*", "*/"};
+    Language::PHP {"//", "/*", "*/"},
+    Language::Elixir {"#"};
 
 static const const_unordered_map<std::string_view, const Language *> mime2lang = {
     {"text/x-c++",                  &Language::CPP},

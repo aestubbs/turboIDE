@@ -57,6 +57,8 @@ std::string languageIdFor(const turbo::Language *lang) noexcept
     if (lang == &Language::Rust)        return "rust";
     if (lang == &Language::Go)          return "go";
     if (lang == &Language::JavaScript)  return "javascript";
+    if (lang == &Language::PHP)         return "php";
+    if (lang == &Language::Elixir)      return "elixir";
     return {};
 }
 
@@ -270,6 +272,8 @@ LspManager::ServerConfig LspManager::serverFor(const std::string &languageId) no
         {"rust",       "rust-analyzer",              ""},
         {"go",         "gopls",                      ""},
         {"javascript", "typescript-language-server", "--stdio"},
+        {"php",        "intelephense",               "--stdio"},
+        {"elixir",     "elixir-ls",                  ""},
     };
     for (auto &d : defaults)
         if (languageId == d.lang)
