@@ -137,6 +137,19 @@ if (MAGIC)
     target_compile_definitions(${TURBO}-core PRIVATE HAVE_MAGIC)
 endif()
 
+# Optional: Language Server Protocol support.
+option(TURBO_ENABLE_LSP "Enable Language Server Protocol support" ON)
+if (TURBO_ENABLE_LSP)
+    find_package(Threads REQUIRED)
+    # PUBLIC so the 'turbo' app target inherits the JSON include path and the
+    # feature macro (its LSP glue includes the turbo-core LSP headers).
+    target_link_libraries(${TURBO}-core PUBLIC Threads::Threads)
+    target_include_directories(${TURBO}-core PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/deps/json/single_include>"
+    )
+    target_compile_definitions(${TURBO}-core PUBLIC TURBO_ENABLE_LSP)
+endif()
+
 # Target 'turbo'
 
 if (TURBO_BUILD_APP)
