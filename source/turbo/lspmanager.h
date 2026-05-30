@@ -40,8 +40,9 @@ public:
     void didClose(EditorWindow &w) noexcept;
 
     // Language features.
-    void charAdded(EditorWindow &w, int ch) noexcept;       // completion triggers
+    void charAdded(EditorWindow &w, int ch) noexcept;       // (no auto-trigger)
     void requestCompletion(EditorWindow &w) noexcept;       // explicit (Alt-Space)
+    void showCompletion(EditorWindow &w) noexcept;          // display the popup (main loop)
     void hover(EditorWindow &w, long pos) noexcept;         // dwell start
     void hoverEnd(EditorWindow &w) noexcept;                // dwell end
 
@@ -75,6 +76,7 @@ private:
         int version {1};
         turbo::lsp::Client *client {nullptr};
         std::vector<Diagnostic> diagnostics;
+        std::vector<std::string> pendingCompletions; // awaiting display
     };
 
     // Lazily returns (spawning if needed) the client for 'languageId', or null
@@ -119,6 +121,7 @@ public:
     void didClose(EditorWindow &) noexcept {}
     void charAdded(EditorWindow &, int) noexcept {}
     void requestCompletion(EditorWindow &) noexcept {}
+    void showCompletion(EditorWindow &) noexcept {}
     void hover(EditorWindow &, long) noexcept {}
     void hoverEnd(EditorWindow &) noexcept {}
     void pump() noexcept {}

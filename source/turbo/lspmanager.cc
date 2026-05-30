@@ -2,8 +2,19 @@
 
 #ifdef TURBO_ENABLE_LSP
 
+// These Uses_ macros must precede the first include of <tvision/tv.h>
+// (pulled in transitively by editwindow.h) so the modal completion popup can
+// use TProgram/TDeskTop/execView and post events.
+#define Uses_TProgram
+#define Uses_TDeskTop
+#define Uses_TEvent
+#define Uses_TKeys
+#include <tvision/tv.h>
+
 #include "editwindow.h"
 #include "editor.h"
+#include "listviews.h"
+#include "cmds.h"
 
 #include <turbo/scintilla.h>
 #include <turbo/styles.h>
@@ -519,16 +530,18 @@ void LspManager::sendCompletion(EditorWindow &w) noexcept
                 items = &result["items"];
             if (!items || items->empty())
                 return;
-            // Scintilla shows a space-separated list; sort and de-dup labels.
+            Document *doc = docFor(*wp);
+            if (!doc) // editor closed while the request was in flight
+                return;
             std::vector<std::string> labels;
             labels.reserve(items->size());
             for (auto &it : *items)
             {
                 std::string label = it.value("label", std::string());
-                // Scintilla separates entries by space; drop spaces in labels.
-                auto sp = label.find(' ');
-                if (sp != std::string::npos)
-                    label = label.substr(0, sp);
+                // Some servers pad labels with a leading space; trim it.
+                auto a = label.find_first_not_of(' ');
+                if (a != std::string::npos)
+                    label = label.substr(a);
                 if (!label.empty())
                     labels.push_back(label);
             }
@@ -536,35 +549,79 @@ void LspManager::sendCompletion(EditorWindow &w) noexcept
                 return;
             std::sort(labels.begin(), labels.end());
             labels.erase(std::unique(labels.begin(), labels.end()), labels.end());
-            std::string list;
-            for (auto &l : labels)
+            doc->pendingCompletions = std::move(labels);
+            // Display happens on the main event loop, NOT here: this callback
+            // runs inside idle()'s pump(), and opening a modal view from there
+            // is unsafe. Post a command the app turns into showCompletion().
+            if (TProgram::application)
             {
-                if (!list.empty())
-                    list += ' ';
-                list += l;
+                TEvent ev {};
+                ev.what = evCommand;
+                ev.message.command = cmShowCompletion;
+                ev.message.infoPtr = wp;
+                TProgram::application->putEvent(ev);
             }
-            auto &ed = wp->getEditor();
-            // Length of the partial word already typed, so Scintilla filters.
-            long cur = ed.callScintilla(SCI_GETCURRENTPOS, 0U, 0U);
-            long wordStart = ed.callScintilla(SCI_WORDSTARTPOSITION, cur, true);
-            ed.callScintilla(SCI_AUTOCSETIGNORECASE, 1, 0U);
-            ed.callScintilla(SCI_AUTOCSHOW, cur - wordStart, (sptr_t) list.c_str());
         });
+}
+
+void LspManager::showCompletion(EditorWindow &w) noexcept
+{
+    Document *doc = docFor(w);
+    if (!doc || doc->pendingCompletions.empty())
+        return;
+    std::vector<std::string> labels = std::move(doc->pendingCompletions);
+    doc->pendingCompletions.clear();
+
+    // Build a list model over the labels. 'entries' references 'labels'; both
+    // stay alive for the duration of the modal execView below.
+    std::vector<SpanListModelEntry<int>> entries;
+    entries.reserve(labels.size());
+    for (int i = 0; i < (int) labels.size(); ++i)
+        entries.push_back({ i, TStringView(labels[i]) });
+    SpanListModel<int> model(
+        TSpan<const SpanListModelEntry<int>>(entries.data(), entries.size()));
+
+    TDeskTop *dt = TProgram::deskTop;
+    if (!dt)
+        return;
+    TRect r {0, 0, 0, 0};
+    r.b.x = min(max((int) ListModel::maxItemCStrLen(model) + 4, 20), dt->size.x - 6);
+    r.b.y = min(max((int) model.size() + 2, 5), dt->size.y - 4);
+    r.move((dt->size.x - r.b.x) / 2, (dt->size.y - r.b.y) / 3);
+
+    auto &lw = ListWindow::create<EditorListView>(r, "Completions", model, lvScrollBars);
+    int chosen = -1;
+    if (dt->execView(&lw) == cmOK)
+        if (auto *e = (SpanListModelEntry<int> *) lw.getCurrent())
+            chosen = e->data;
+    TObject::destroy(&lw);
+
+    // The window may have closed during the modal loop.
+    if (!docFor(w))
+        return;
+    if (chosen >= 0 && chosen < (int) labels.size())
+    {
+        auto &ed = w.getEditor();
+        // Replace the partial word at the caret with the chosen completion.
+        long cur = ed.callScintilla(SCI_GETCURRENTPOS, 0U, 0U);
+        long wordStart = ed.callScintilla(SCI_WORDSTARTPOSITION, cur, true);
+        ed.callScintilla(SCI_SETSEL, wordStart, cur);
+        ed.callScintilla(SCI_REPLACESEL, 0U, (sptr_t) labels[chosen].c_str());
+        ed.redraw();
+    }
+    w.focus();
 }
 
 void LspManager::charAdded(EditorWindow &w, int ch) noexcept
 {
-    Document *doc = docFor(w);
-    if (!doc)
-        return;
-    // Trigger completion on identifier characters and common member-access
-    // operators. The server's triggerCharacters would be more precise; this
-    // keeps it simple and language-agnostic for the MVP.
-    bool identifier = (ch == '_') || (ch >= 'a' && ch <= 'z') ||
-                      (ch >= 'A' && ch <= 'Z');
-    bool trigger = (ch == '.') || (ch == '>') || (ch == ':');
-    if (identifier || trigger)
-        sendCompletion(w);
+    // Completion is invoked explicitly (Alt-Space / Edit > Complete). We do NOT
+    // auto-trigger on keystrokes: the terminal build has no inline autocomplete
+    // popup, so completions are shown in a modal list, and auto-popping that on
+    // every character would be disruptive. (Previously this called Scintilla's
+    // SCI_AUTOCSHOW, which activated the stub list box and hijacked the keyboard,
+    // freezing the editor.)
+    (void) w;
+    (void) ch;
 }
 
 void LspManager::requestCompletion(EditorWindow &w) noexcept

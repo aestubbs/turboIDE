@@ -246,6 +246,11 @@ void TurboApp::handleEvent(TEvent &event)
             case cmToggleTree: toggleTreeView(); break;
             case cmToggleAutoSave: toggleAutoSave(); break;
             case cmLspSettings: editLspSettings(); break;
+            case cmShowCompletion:
+                if (lsp)
+                    if (auto *w = (EditorWindow *) event.message.infoPtr)
+                        lsp->showCompletion(*w);
+                break;
             case cmRevealInTree:
                 if (docTree) {
                     if (!(docTree->state & sfVisible))
