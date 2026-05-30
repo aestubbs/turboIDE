@@ -80,8 +80,12 @@ bool executeLspDialog(AppSettings &settings) noexcept
     for (int i = 0; i < kNumLangs; ++i)
     {
         std::string cmd = settings.lspCommandFor(kKnownLangs[i].id);
-        strncpy(lines[i]->data, cmd.c_str(), kInputMax);
-        lines[i]->data[kInputMax] = '\0';
+        // The TInputLine data buffer holds kInputMax bytes (valid indices
+        // 0..kInputMax-1). Copy at most kInputMax-1 chars and terminate within
+        // bounds: writing data[kInputMax] would overflow the heap allocation
+        // and corrupt memory, crashing the app when the dialog opens.
+        strncpy(lines[i]->data, cmd.c_str(), kInputMax - 1);
+        lines[i]->data[kInputMax - 1] = '\0';
     }
 
     d->selectNext(False);
