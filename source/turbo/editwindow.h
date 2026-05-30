@@ -56,6 +56,13 @@ struct EditorWindowParent
     // The document's text changed / was saved (for language-server sync).
     virtual void editorTextChanged(EditorWindow &w) noexcept {}
     virtual void editorSaved(EditorWindow &w) noexcept {}
+    // A character was typed (for completion trigger characters).
+    virtual void editorCharAdded(EditorWindow &w, int ch) noexcept {}
+    // Explicit completion request (Edit > Complete).
+    virtual void editorRequestCompletion(EditorWindow &w) noexcept {}
+    // Mouse dwell start/end over a document position (for hover).
+    virtual void editorHoverStart(EditorWindow &w, long pos) noexcept {}
+    virtual void editorHoverEnd(EditorWindow &w) noexcept {}
 };
 
 struct EditorWindow : public turbo::BasicEditorWindow

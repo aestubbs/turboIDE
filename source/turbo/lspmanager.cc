@@ -8,10 +8,12 @@
 #include <turbo/scintilla.h>
 #include <turbo/styles.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -86,6 +88,37 @@ std::string readEditorText(EditorWindow &w) noexcept
         return {};
     TStringView text = turbo::getRangePointer(ed.scintilla, 0, len);
     return std::string(text.data(), text.size());
+}
+
+// Converts a Scintilla byte offset to an LSP (line, character) position,
+// honouring the negotiated position encoding.
+void bytePosToLsp(turbo::Editor &ed, long pos, turbo::lsp::PositionEncoding enc,
+                  int &line, int &character) noexcept
+{
+    line = (int) ed.callScintilla(SCI_LINEFROMPOSITION, pos, 0U);
+    long lineStart = ed.callScintilla(SCI_POSITIONFROMLINE, line, 0U);
+    if (enc == turbo::lsp::PositionEncoding::UTF8)
+    {
+        character = (int) (pos - lineStart);
+        return;
+    }
+    // UTF-16: count code units between the line start and pos.
+    TStringView s = turbo::getRangePointer(ed.scintilla, lineStart, pos);
+    int utf16 = 0;
+    size_t i = 0;
+    while (i < s.size())
+    {
+        unsigned char c = (unsigned char) s[i];
+        int len;
+        if (c < 0x80)             len = 1;
+        else if ((c >> 5) == 0x6) len = 2;
+        else if ((c >> 4) == 0xE) len = 3;
+        else if ((c >> 3) == 0x1E) len = 4;
+        else                      len = 1;
+        utf16 += (len == 4) ? 2 : 1;
+        i += len;
+    }
+    character = utf16;
 }
 
 // Converts an LSP (line, character) position to a Scintilla byte offset.
@@ -279,6 +312,8 @@ void LspManager::didOpen(EditorWindow &w) noexcept
     TColorAttr warnAttr = 0x0E; // yellow foreground
     turbo::setIndicatorColor(ed.scintilla, turbo::idtrDiagnosticError, errAttr);
     turbo::setIndicatorColor(ed.scintilla, turbo::idtrDiagnosticWarning, warnAttr);
+    // Enable hover: SCN_DWELLSTART fires after the mouse rests this long (ms).
+    ed.callScintilla(SCI_SETMOUSEDWELLTIME, 500, 0U);
 
     Document doc;
     doc.uri = uriFromPath(path);
@@ -416,6 +451,146 @@ void LspManager::onServerMessage(const std::string &languageId, const Json &msg)
             applyDiagnostics(*w, params.value("diagnostics", Json::array()), enc);
         }
     }
+}
+
+LspManager::Document *LspManager::docFor(EditorWindow &w) noexcept
+{
+    auto it = docs.find(&w);
+    return it == docs.end() ? nullptr : &it->second;
+}
+
+Json LspManager::positionParams(EditorWindow &w, long pos) noexcept
+{
+    Document *doc = docFor(w);
+    auto &ed = w.getEditor();
+    int line = 0, character = 0;
+    bytePosToLsp(ed, pos, doc->client->positionEncoding(), line, character);
+    return Json{
+        {"textDocument", {{"uri", doc->uri}}},
+        {"position", {{"line", line}, {"character", character}}},
+    };
+}
+
+void LspManager::sendCompletion(EditorWindow &w) noexcept
+{
+    Document *doc = docFor(w);
+    if (!doc)
+        return;
+    // Flush any pending change so the server completes against current text.
+    if (dirty.erase(&w))
+        flushChange(w);
+    auto &ed = w.getEditor();
+    long pos = ed.callScintilla(SCI_GETCURRENTPOS, 0U, 0U);
+    Json params = positionParams(w, pos);
+    EditorWindow *wp = &w;
+    doc->client->request("textDocument/completion", params,
+        [this, wp](const Json &result, const Json *error) {
+            if (error || result.is_null())
+                return;
+            // Result is either CompletionItem[] or {items: CompletionItem[]}.
+            const Json *items = nullptr;
+            if (result.is_array())
+                items = &result;
+            else if (result.contains("items") && result["items"].is_array())
+                items = &result["items"];
+            if (!items || items->empty())
+                return;
+            // Scintilla shows a space-separated list; sort and de-dup labels.
+            std::vector<std::string> labels;
+            labels.reserve(items->size());
+            for (auto &it : *items)
+            {
+                std::string label = it.value("label", std::string());
+                // Scintilla separates entries by space; drop spaces in labels.
+                auto sp = label.find(' ');
+                if (sp != std::string::npos)
+                    label = label.substr(0, sp);
+                if (!label.empty())
+                    labels.push_back(label);
+            }
+            if (labels.empty())
+                return;
+            std::sort(labels.begin(), labels.end());
+            labels.erase(std::unique(labels.begin(), labels.end()), labels.end());
+            std::string list;
+            for (auto &l : labels)
+            {
+                if (!list.empty())
+                    list += ' ';
+                list += l;
+            }
+            auto &ed = wp->getEditor();
+            // Length of the partial word already typed, so Scintilla filters.
+            long cur = ed.callScintilla(SCI_GETCURRENTPOS, 0U, 0U);
+            long wordStart = ed.callScintilla(SCI_WORDSTARTPOSITION, cur, true);
+            ed.callScintilla(SCI_AUTOCSETIGNORECASE, 1, 0U);
+            ed.callScintilla(SCI_AUTOCSHOW, cur - wordStart, (sptr_t) list.c_str());
+        });
+}
+
+void LspManager::charAdded(EditorWindow &w, int ch) noexcept
+{
+    Document *doc = docFor(w);
+    if (!doc)
+        return;
+    // Trigger completion on identifier characters and common member-access
+    // operators. The server's triggerCharacters would be more precise; this
+    // keeps it simple and language-agnostic for the MVP.
+    bool identifier = (ch == '_') || (ch >= 'a' && ch <= 'z') ||
+                      (ch >= 'A' && ch <= 'Z');
+    bool trigger = (ch == '.') || (ch == '>') || (ch == ':');
+    if (identifier || trigger)
+        sendCompletion(w);
+}
+
+void LspManager::requestCompletion(EditorWindow &w) noexcept
+{
+    if (docFor(w))
+        sendCompletion(w);
+}
+
+void LspManager::hover(EditorWindow &w, long pos) noexcept
+{
+    Document *doc = docFor(w);
+    if (!doc)
+        return;
+    Json params = positionParams(w, pos);
+    EditorWindow *wp = &w;
+    doc->client->request("textDocument/hover", params,
+        [this, wp, pos](const Json &result, const Json *error) {
+            if (error || result.is_null() || !result.contains("contents"))
+                return;
+            // contents may be a string, a {kind,value} MarkupContent, or an
+            // array of MarkedString.
+            const Json &c = result["contents"];
+            std::string text;
+            if (c.is_string())
+                text = c.get<std::string>();
+            else if (c.is_object())
+                text = c.value("value", std::string());
+            else if (c.is_array() && !c.empty())
+            {
+                const Json &first = c[0];
+                text = first.is_string() ? first.get<std::string>()
+                                         : first.value("value", std::string());
+            }
+            if (text.empty())
+                return;
+            // Single line for the call tip; trim to a sane length.
+            auto nl = text.find('\n');
+            if (nl != std::string::npos)
+                text = text.substr(0, nl);
+            if (text.size() > 120)
+                text = text.substr(0, 120);
+            auto &ed = wp->getEditor();
+            ed.callScintilla(SCI_CALLTIPSHOW, pos, (sptr_t) text.c_str());
+        });
+}
+
+void LspManager::hoverEnd(EditorWindow &w) noexcept
+{
+    if (docFor(w))
+        w.getEditor().callScintilla(SCI_CALLTIPCANCEL, 0U, 0U);
 }
 
 void LspManager::pump() noexcept

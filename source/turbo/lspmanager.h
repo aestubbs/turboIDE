@@ -32,6 +32,12 @@ public:
     void didSave(EditorWindow &w) noexcept;
     void didClose(EditorWindow &w) noexcept;
 
+    // Language features.
+    void charAdded(EditorWindow &w, int ch) noexcept;       // completion triggers
+    void requestCompletion(EditorWindow &w) noexcept;       // explicit (Alt-Space)
+    void hover(EditorWindow &w, long pos) noexcept;         // dwell start
+    void hoverEnd(EditorWindow &w) noexcept;                // dwell end
+
     // Flush debounced changes and deliver queued server messages. Cheap to call
     // every idle tick.
     void pump() noexcept;
@@ -74,6 +80,10 @@ private:
     EditorWindow *findByUri(const std::string &uri) noexcept;
     void applyDiagnostics(EditorWindow &w, const turbo::lsp::Json &diagnostics,
                           turbo::lsp::PositionEncoding enc) noexcept;
+    // Builds the textDocument/position params for the editor's caret.
+    turbo::lsp::Json positionParams(EditorWindow &w, long pos) noexcept;
+    void sendCompletion(EditorWindow &w) noexcept;
+    Document *docFor(EditorWindow &w) noexcept;
 
     std::string rootUri;
     std::unordered_map<std::string, std::unique_ptr<turbo::lsp::Client>> clients;
@@ -93,6 +103,10 @@ public:
     void didChange(EditorWindow &) noexcept {}
     void didSave(EditorWindow &) noexcept {}
     void didClose(EditorWindow &) noexcept {}
+    void charAdded(EditorWindow &, int) noexcept {}
+    void requestCompletion(EditorWindow &) noexcept {}
+    void hover(EditorWindow &, long) noexcept {}
+    void hoverEnd(EditorWindow &) noexcept {}
     void pump() noexcept {}
     void shutdown() noexcept {}
 };

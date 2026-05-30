@@ -65,6 +65,10 @@ struct TurboApp : public TApplication, EditorWindowParent
     bool autoSaveOnFocusLoss() noexcept override;
     void editorTextChanged(EditorWindow &w) noexcept override;
     void editorSaved(EditorWindow &w) noexcept override;
+    void editorCharAdded(EditorWindow &w, int ch) noexcept override;
+    void editorRequestCompletion(EditorWindow &w) noexcept override;
+    void editorHoverStart(EditorWindow &w, long pos) noexcept override;
+    void editorHoverEnd(EditorWindow &w) noexcept override;
 };
 
 #endif

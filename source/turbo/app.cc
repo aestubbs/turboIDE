@@ -58,6 +58,7 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     ts += cmSelLowercase;
     ts += cmSelCapitalize;
     ts += cmToggleComment;
+    ts += cmCompletion;
     ts += cmUndo;
     ts += cmRedo;
     ts += cmCut;
@@ -134,6 +135,8 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             *new TMenuItem( "~G~o to Line...",cmGoToLine, kbCtrlG, hcNoContext, "Ctrl-G" ) +
             *new TMenuItem( "Find ~N~ext", cmSearchAgain, kbF3, hcNoContext, "F3" ) +
             *new TMenuItem( "Find ~P~revious", cmSearchPrev, kbShiftF3, hcNoContext, "Shift-F3" ) +
+            newLine() +
+            *new TMenuItem( "C~o~mplete", cmCompletion, kbAltSpace, hcNoContext, "Alt-Space" ) +
         *new TSubMenu( "Se~l~ection", kbAltL ) +
             *new TMenuItem( "~T~oggle Comment", cmToggleComment, kbCtrlE, hcNoContext, "Ctrl-E" ) +
             newLine() +
@@ -520,4 +523,28 @@ void TurboApp::editorSaved(EditorWindow &w) noexcept
 {
     if (lsp)
         lsp->didSave(w);
+}
+
+void TurboApp::editorCharAdded(EditorWindow &w, int ch) noexcept
+{
+    if (lsp)
+        lsp->charAdded(w, ch);
+}
+
+void TurboApp::editorRequestCompletion(EditorWindow &w) noexcept
+{
+    if (lsp)
+        lsp->requestCompletion(w);
+}
+
+void TurboApp::editorHoverStart(EditorWindow &w, long pos) noexcept
+{
+    if (lsp)
+        lsp->hover(w, pos);
+}
+
+void TurboApp::editorHoverEnd(EditorWindow &w) noexcept
+{
+    if (lsp)
+        lsp->hoverEnd(w);
 }

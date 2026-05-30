@@ -86,6 +86,7 @@ EditorWindow::EditorWindow( const TRect &bounds, TurboEditor &aEditor,
     enabledCmds += cmToggleComment;
     enabledCmds += cmReplaceOne;
     enabledCmds += cmReplaceAll;
+    enabledCmds += cmCompletion;
 
     // Commands that always get disabled when unfocusing the editor.
     disabledCmds += enabledCmds;
@@ -194,6 +195,9 @@ void EditorWindow::handleEvent(TEvent &ev)
                 case cmGoToLine:
                     openBottomView<GoToLineBox>(editor);
                     break;
+                case cmCompletion:
+                    parent.editorRequestCompletion(*this);
+                    break;
                 case cmCloseView:
                     if ((handled = bottomView && ev.message.infoPtr == bottomView))
                         closeBottomView();
@@ -275,6 +279,15 @@ void EditorWindow::handleNotification(const SCNotification &scn, turbo::Editor &
         case SCN_MODIFIED:
             if (scn.modificationType & (SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT))
                 parent.editorTextChanged(*this);
+            break;
+        case SCN_CHARADDED:
+            parent.editorCharAdded(*this, scn.ch);
+            break;
+        case SCN_DWELLSTART:
+            parent.editorHoverStart(*this, scn.position);
+            break;
+        case SCN_DWELLEND:
+            parent.editorHoverEnd(*this);
             break;
     }
 }
