@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <vector>
 
 #ifndef _WIN32
@@ -297,6 +298,29 @@ LspManager::ServerConfig LspManager::serverFor(const std::string &languageId) no
     return {};
 }
 
+Json LspManager::initOptionsFor(const std::string &languageId) noexcept
+{
+    // intelephense will not index or publish diagnostics unless it is given a
+    // writable 'storagePath'. Point it at a per-user cache directory (created if
+    // needed). Other servers receive no special options.
+    if (languageId == "php")
+    {
+        const char *home = getenv("HOME");
+        if (!home || !home[0])
+            home = getenv("USERPROFILE");
+        std::string base = (home && home[0]) ? std::string(home) + "/.cache/turbo-lsp"
+                                              : std::string("/tmp/turbo-lsp");
+        std::string dir = base + "/intelephense";
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        return Json{
+            {"storagePath", dir},
+            {"globalStoragePath", dir},
+        };
+    }
+    return Json(); // null -> omitted
+}
+
 Client *LspManager::clientFor(const std::string &languageId) noexcept
 {
     if (auto it = clients.find(languageId); it != clients.end())
@@ -313,6 +337,7 @@ Client *LspManager::clientFor(const std::string &languageId) noexcept
     }
 
     auto client = std::make_unique<Client>(languageId, cfg.command, cfg.args);
+    client->initializationOptions = initOptionsFor(languageId);
     if (!client->start(rootUri))
     {
         deadLanguages.insert(languageId);
@@ -614,14 +639,28 @@ void LspManager::showCompletion(EditorWindow &w) noexcept
 
 void LspManager::charAdded(EditorWindow &w, int ch) noexcept
 {
-    // Completion is invoked explicitly (Alt-Space / Edit > Complete). We do NOT
-    // auto-trigger on keystrokes: the terminal build has no inline autocomplete
-    // popup, so completions are shown in a modal list, and auto-popping that on
-    // every character would be disruptive. (Previously this called Scintilla's
-    // SCI_AUTOCSHOW, which activated the stub list box and hijacked the keyboard,
-    // freezing the editor.)
-    (void) w;
-    (void) ch;
+    // Auto-trigger completion only on member-access sequences ('.', '->', '::'),
+    // mirroring how IDEs behave for e.g. "$this->". We deliberately do NOT
+    // trigger on ordinary identifier characters: completions are shown in a
+    // modal list, and popping that on every keystroke would be disruptive.
+    // (Completions are no longer routed through Scintilla's SCI_AUTOCSHOW, which
+    // activated the stub list box and froze the editor.)
+    Document *doc = docFor(w);
+    if (!doc)
+        return;
+    auto &ed = w.getEditor();
+    bool trigger = (ch == '.');
+    if (!trigger && (ch == '>' || ch == ':'))
+    {
+        long pos = ed.callScintilla(SCI_GETCURRENTPOS, 0U, 0U);
+        if (pos >= 2)
+        {
+            char prev = (char) ed.callScintilla(SCI_GETCHARAT, pos - 2, 0U);
+            trigger = (ch == '>' && prev == '-') || (ch == ':' && prev == ':');
+        }
+    }
+    if (trigger)
+        sendCompletion(w);
 }
 
 void LspManager::requestCompletion(EditorWindow &w) noexcept

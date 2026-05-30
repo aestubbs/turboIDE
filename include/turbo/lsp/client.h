@@ -49,6 +49,12 @@ public:
     Client(const Client &) = delete;
     Client &operator=(const Client &) = delete;
 
+    // Server-specific options sent as 'initializationOptions' in the
+    // 'initialize' request. Set before start(); null (the default) omits them.
+    // Some servers (e.g. intelephense, which needs a 'storagePath') will not
+    // function without these.
+    Json initializationOptions;
+
     // Spawns the server and sends the 'initialize' request. Returns false if the
     // process could not be started.
     bool start(const std::string &rootUri) noexcept;

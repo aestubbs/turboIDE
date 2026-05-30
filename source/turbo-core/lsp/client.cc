@@ -63,6 +63,10 @@ bool Client::start(const std::string &rootUri) noexcept
                 {"contentFormat", {"plaintext", "markdown"}},
             }},
         }},
+        {"workspace", {
+            {"workspaceFolders", true},
+            {"configuration", true},
+        }},
     };
 
     Json params = {
@@ -71,6 +75,12 @@ bool Client::start(const std::string &rootUri) noexcept
         {"rootUri", rootUri.empty() ? Json(nullptr) : Json(rootUri)},
         {"capabilities", caps},
     };
+    if (!rootUri.empty())
+        params["workspaceFolders"] = Json::array({
+            Json{{"uri", rootUri}, {"name", "workspace"}},
+        });
+    if (!initializationOptions.is_null())
+        params["initializationOptions"] = initializationOptions;
 
     // The initialize request bypasses the until-ready queue.
     int id = nextId++;

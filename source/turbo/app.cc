@@ -138,7 +138,7 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             *new TMenuItem( "Find ~N~ext", cmSearchAgain, kbF3, hcNoContext, "F3" ) +
             *new TMenuItem( "Find ~P~revious", cmSearchPrev, kbShiftF3, hcNoContext, "Shift-F3" ) +
             newLine() +
-            *new TMenuItem( "C~o~mplete", cmCompletion, kbAltSpace, hcNoContext, "Alt-Space" ) +
+            *new TMenuItem( "C~o~mplete", cmCompletion, kbNoKey, hcNoContext, "Ctrl-Space" ) +
         *new TSubMenu( "Se~l~ection", kbAltL ) +
             *new TMenuItem( "~T~oggle Comment", cmToggleComment, kbCtrlE, hcNoContext, "Ctrl-E" ) +
             newLine() +

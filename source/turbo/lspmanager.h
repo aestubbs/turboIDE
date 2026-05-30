@@ -84,6 +84,8 @@ private:
     // retry spawning on every keystroke.
     turbo::lsp::Client *clientFor(const std::string &languageId) noexcept;
     ServerConfig serverFor(const std::string &languageId) noexcept;
+    // Server-specific 'initializationOptions' (e.g. intelephense's storagePath).
+    turbo::lsp::Json initOptionsFor(const std::string &languageId) noexcept;
     void onServerMessage(const std::string &languageId, const turbo::lsp::Json &msg) noexcept;
     void flushChange(EditorWindow &w) noexcept;
     EditorWindow *findByUri(const std::string &uri) noexcept;

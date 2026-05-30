@@ -109,6 +109,15 @@ void EditorWindow::handleEvent(TEvent &ev)
     switch (ev.what)
     {
         case evKeyDown:
+            // Ctrl+Space requests completion. We match on the raw key + control
+            // modifier rather than a fixed keyCode, since terminals encode it
+            // inconsistently (and macOS Option+Space rarely arrives as Alt).
+            if ( (ev.keyDown.controlKeyState & kbCtrlShift) &&
+                 ev.keyDown.charScan.charCode == ' ' )
+            {
+                parent.editorRequestCompletion(*this);
+                break;
+            }
             switch (ev.keyDown.keyCode)
             {
                 case kbEsc:
