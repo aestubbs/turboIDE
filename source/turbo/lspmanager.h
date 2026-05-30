@@ -47,12 +47,21 @@ private:
         bool valid() const noexcept { return !command.empty(); }
     };
 
+    struct Diagnostic
+    {
+        long start {0};     // Scintilla byte positions (at time of publish)
+        long end {0};
+        int severity {1};   // 1=Error, 2=Warning, 3=Info, 4=Hint
+        std::string message;
+    };
+
     struct Document
     {
         std::string uri;
         std::string languageId;
         int version {1};
         turbo::lsp::Client *client {nullptr};
+        std::vector<Diagnostic> diagnostics;
     };
 
     // Lazily returns (spawning if needed) the client for 'languageId', or null
@@ -62,6 +71,9 @@ private:
     ServerConfig serverFor(const std::string &languageId) noexcept;
     void onServerMessage(const std::string &languageId, const turbo::lsp::Json &msg) noexcept;
     void flushChange(EditorWindow &w) noexcept;
+    EditorWindow *findByUri(const std::string &uri) noexcept;
+    void applyDiagnostics(EditorWindow &w, const turbo::lsp::Json &diagnostics,
+                          turbo::lsp::PositionEncoding enc) noexcept;
 
     std::string rootUri;
     std::unordered_map<std::string, std::unique_ptr<turbo::lsp::Client>> clients;

@@ -64,6 +64,8 @@ void changeCaseOfSelection(TScintilla &, CaseConversion);
 enum Indicator
 {
     idtrReplaceHighlight = INDICATOR_CONTAINER,
+    idtrDiagnosticError,
+    idtrDiagnosticWarning,
 };
 
 void setIndicatorColor(TScintilla &, Indicator indicator, TColorAttr attr);

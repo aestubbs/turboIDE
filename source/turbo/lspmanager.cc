@@ -88,6 +88,47 @@ std::string readEditorText(EditorWindow &w) noexcept
     return std::string(text.data(), text.size());
 }
 
+// Converts an LSP (line, character) position to a Scintilla byte offset.
+// 'character' counts UTF-16 code units or UTF-8 bytes depending on the encoding
+// negotiated with the server.
+long lspToBytePos(turbo::Editor &ed, int line, int character,
+                  turbo::lsp::PositionEncoding enc) noexcept
+{
+    long lineCount = ed.callScintilla(SCI_GETLINECOUNT, 0U, 0U);
+    if (line < 0)
+        line = 0;
+    if (line >= lineCount)
+        return ed.callScintilla(SCI_GETLENGTH, 0U, 0U);
+    long lineStart = ed.callScintilla(SCI_POSITIONFROMLINE, line, 0U);
+    long lineEnd = ed.callScintilla(SCI_GETLINEENDPOSITION, line, 0U);
+    if (character <= 0)
+        return lineStart;
+    if (enc == turbo::lsp::PositionEncoding::UTF8)
+    {
+        long p = lineStart + character;
+        return p < lineEnd ? p : lineEnd;
+    }
+    // UTF-16: walk the line's bytes, counting UTF-16 code units.
+    TStringView s = turbo::getRangePointer(ed.scintilla, lineStart, lineEnd);
+    long bytePos = lineStart;
+    int utf16 = 0;
+    size_t i = 0;
+    while (i < s.size() && utf16 < character)
+    {
+        unsigned char c = (unsigned char) s[i];
+        int len;
+        if (c < 0x80)            len = 1;
+        else if ((c >> 5) == 0x6) len = 2;
+        else if ((c >> 4) == 0xE) len = 3;
+        else if ((c >> 3) == 0x1E) len = 4;
+        else                      len = 1;
+        utf16 += (len == 4) ? 2 : 1; // astral planes take two UTF-16 units
+        i += len;
+        bytePos += len;
+    }
+    return bytePos > lineEnd ? lineEnd : bytePos;
+}
+
 std::vector<std::string> splitArgs(const std::string &s) noexcept
 {
     // Naive whitespace split (good enough for config/env command lines).
@@ -232,6 +273,13 @@ void LspManager::didOpen(EditorWindow &w) noexcept
     if (!client)
         return;
 
+    // Set up the diagnostic indicators for this editor (idempotent).
+    auto &ed = w.getEditor();
+    TColorAttr errAttr = 0x0C;  // light red foreground
+    TColorAttr warnAttr = 0x0E; // yellow foreground
+    turbo::setIndicatorColor(ed.scintilla, turbo::idtrDiagnosticError, errAttr);
+    turbo::setIndicatorColor(ed.scintilla, turbo::idtrDiagnosticWarning, warnAttr);
+
     Document doc;
     doc.uri = uriFromPath(path);
     doc.languageId = langId;
@@ -303,12 +351,71 @@ void LspManager::didClose(EditorWindow &w) noexcept
     docs.erase(it);
 }
 
+EditorWindow *LspManager::findByUri(const std::string &uri) noexcept
+{
+    for (auto &kv : docs)
+        if (kv.second.uri == uri)
+            return kv.first;
+    return nullptr;
+}
+
+void LspManager::applyDiagnostics(EditorWindow &w, const Json &diagnostics,
+                                  turbo::lsp::PositionEncoding enc) noexcept
+{
+    auto &ed = w.getEditor();
+    long len = ed.callScintilla(SCI_GETLENGTH, 0U, 0U);
+
+    // Clear previously drawn diagnostic indicators across the whole document.
+    for (int ind : {turbo::idtrDiagnosticError, turbo::idtrDiagnosticWarning})
+    {
+        ed.callScintilla(SCI_SETINDICATORCURRENT, ind, 0U);
+        ed.callScintilla(SCI_INDICATORCLEARRANGE, 0, len);
+    }
+
+    auto &doc = docs[&w];
+    doc.diagnostics.clear();
+
+    for (auto &d : diagnostics)
+    {
+        if (!d.contains("range"))
+            continue;
+        const Json &r = d["range"];
+        long start = lspToBytePos(ed, r["start"].value("line", 0),
+                                  r["start"].value("character", 0), enc);
+        long end = lspToBytePos(ed, r["end"].value("line", 0),
+                                r["end"].value("character", 0), enc);
+        if (end < start)
+            std::swap(start, end);
+        int severity = d.value("severity", 1);
+        int ind = (severity == 1) ? turbo::idtrDiagnosticError
+                                   : turbo::idtrDiagnosticWarning;
+        ed.callScintilla(SCI_SETINDICATORCURRENT, ind, 0U);
+        ed.callScintilla(SCI_INDICATORFILLRANGE, start, (end > start) ? (end - start) : 1);
+        doc.diagnostics.push_back({start, end, severity, d.value("message", std::string())});
+    }
+
+    ed.redraw();
+    logLine("applied " + std::to_string(doc.diagnostics.size()) +
+            " diagnostic(s) to " + doc.uri);
+}
+
 void LspManager::onServerMessage(const std::string &languageId, const Json &msg) noexcept
 {
-    // Stage 2 just logs server-initiated traffic; later stages act on
-    // publishDiagnostics, etc.
     std::string method = msg.value("method", std::string());
     logLine("server[" + languageId + "] " + method);
+
+    if (method == "textDocument/publishDiagnostics" && msg.contains("params"))
+    {
+        const Json &params = msg["params"];
+        std::string uri = params.value("uri", std::string());
+        EditorWindow *w = findByUri(uri);
+        if (w)
+        {
+            auto it = docs.find(w);
+            auto enc = it->second.client->positionEncoding();
+            applyDiagnostics(*w, params.value("diagnostics", Json::array()), enc);
+        }
+    }
 }
 
 void LspManager::pump() noexcept
