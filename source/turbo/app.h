@@ -5,6 +5,8 @@
 #define Uses_TFileDialog
 #include <tvision/tv.h>
 
+#include <memory>
+
 #include <turbo/editstates.h>
 #include "doctree.h"
 #include "apputils.h"
@@ -14,6 +16,7 @@
 
 struct EditorWindow;
 class TClockView;
+class LspManager;
 
 struct TurboApp : public TApplication, EditorWindowParent
 {
@@ -29,8 +32,10 @@ struct TurboApp : public TApplication, EditorWindowParent
     turbo::SearchSettings searchSettings;
     std::string mostRecentDir;
     AppSettings settings;
+    std::unique_ptr<LspManager> lsp;
 
     TurboApp(int argc, const char **argv) noexcept;
+    ~TurboApp();
     static TMenuBar* initMenuBar(TRect r);
     static TStatusLine* initStatusLine(TRect r);
 
@@ -58,6 +63,8 @@ struct TurboApp : public TApplication, EditorWindowParent
     void removeEditor(EditorWindow &w) noexcept override;
     const char *getFileDialogDir() noexcept override;
     bool autoSaveOnFocusLoss() noexcept override;
+    void editorTextChanged(EditorWindow &w) noexcept override;
+    void editorSaved(EditorWindow &w) noexcept override;
 };
 
 #endif

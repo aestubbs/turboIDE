@@ -270,6 +270,11 @@ void EditorWindow::handleNotification(const SCNotification &scn, turbo::Editor &
             updateCommands();
             parent.handleTitleChange(*this);
             editor.redraw();
+            parent.editorSaved(*this);
+            break;
+        case SCN_MODIFIED:
+            if (scn.modificationType & (SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT))
+                parent.editorTextChanged(*this);
             break;
     }
 }

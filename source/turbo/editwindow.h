@@ -53,6 +53,9 @@ struct EditorWindowParent
     virtual void removeEditor(EditorWindow &w) noexcept = 0;
     virtual const char *getFileDialogDir() noexcept = 0;
     virtual bool autoSaveOnFocusLoss() noexcept = 0;
+    // The document's text changed / was saved (for language-server sync).
+    virtual void editorTextChanged(EditorWindow &w) noexcept {}
+    virtual void editorSaved(EditorWindow &w) noexcept {}
 };
 
 struct EditorWindow : public turbo::BasicEditorWindow

@@ -24,6 +24,7 @@
 #include "widgets.h"
 #include "listviews.h"
 #include "doctree.h"
+#include "lspmanager.h"
 #include <turbo/fileeditor.h>
 #include <turbo/tpath.h>
 
@@ -38,6 +39,7 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     argv(argv)
 {
     loadSettings(settings);
+    lsp = std::make_unique<LspManager>();
 
     TCommandSet ts;
     ts += cmSave;
@@ -190,8 +192,12 @@ TStatusLine *TurboApp::initStatusLine( TRect r )
             );
 }
 
+TurboApp::~TurboApp() = default;
+
 void TurboApp::shutDown()
 {
+    if (lsp)
+        lsp->shutdown();
     docTree = nullptr;
     clock = nullptr;
     TApplication::shutDown();
@@ -202,6 +208,8 @@ void TurboApp::idle()
     TApplication::idle();
     if (clock)
         clock->update();
+    if (lsp)
+        lsp->pump();
 }
 
 void TurboApp::getEvent(TEvent &event)
@@ -320,6 +328,8 @@ void TurboApp::scanWorkspace()
     if (cwd)
     {
         docTree->tree->scanDirectory(cwd);
+        if (lsp)
+            lsp->setRootPath(cwd);
         ::free(cwd);
     }
 }
@@ -377,6 +387,8 @@ void TurboApp::addEditor(turbo::TScintilla &scintilla, const char *path)
     w.listHead.insert_after(&MRUlist);
     deskTop->insert(&w);
     enableCommands(editorCmds);
+    if (lsp)
+        lsp->didOpen(w);
 }
 
 void TurboApp::showEditorList(TEvent *ev)
@@ -473,6 +485,8 @@ void TurboApp::handleTitleChange(EditorWindow &w) noexcept
 
 void TurboApp::removeEditor(EditorWindow &w) noexcept
 {
+    if (lsp)
+        lsp->didClose(w);
     w.listHead.remove();
     if (MRUlist.empty())
         disableCommands(editorCmds);
@@ -494,4 +508,16 @@ const char *TurboApp::getFileDialogDir() noexcept
 bool TurboApp::autoSaveOnFocusLoss() noexcept
 {
     return settings.autoSaveOnFocusLoss;
+}
+
+void TurboApp::editorTextChanged(EditorWindow &w) noexcept
+{
+    if (lsp)
+        lsp->didChange(w);
+}
+
+void TurboApp::editorSaved(EditorWindow &w) noexcept
+{
+    if (lsp)
+        lsp->didSave(w);
 }
