@@ -25,6 +25,7 @@
 #include "listviews.h"
 #include "doctree.h"
 #include "lspmanager.h"
+#include "lspdialog.h"
 #include <turbo/fileeditor.h>
 #include <turbo/tpath.h>
 
@@ -40,6 +41,7 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
 {
     loadSettings(settings);
     lsp = std::make_unique<LspManager>();
+    configureLsp();
 
     TCommandSet ts;
     ts += cmSave;
@@ -157,6 +159,8 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             *new TMenuItem( "Toggle Auto ~I~ndent", cmToggleIndent, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Toggle File ~T~ree View", cmToggleTree, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Toggle ~A~uto-save on Focus Loss", cmToggleAutoSave, kbNoKey, hcNoContext ) +
+            newLine() +
+            *new TMenuItem( "~L~anguage Servers...", cmLspSettings, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~H~elp", kbAltH ) +
             *new TMenuItem( "~K~eyboard shortcurs", cmHelp, kbF1, hcNoContext, "F1" ) +
             newLine() +
@@ -241,6 +245,7 @@ void TurboApp::handleEvent(TEvent &event)
             case cmCloseAll: closeAll(); break;
             case cmToggleTree: toggleTreeView(); break;
             case cmToggleAutoSave: toggleAutoSave(); break;
+            case cmLspSettings: editLspSettings(); break;
             case cmRevealInTree:
                 if (docTree) {
                     if (!(docTree->state & sfVisible))
@@ -341,6 +346,26 @@ void TurboApp::toggleAutoSave()
 {
     settings.autoSaveOnFocusLoss ^= true;
     saveSettings(settings);
+}
+
+void TurboApp::configureLsp()
+{
+    if (!lsp)
+        return;
+    std::vector<std::pair<std::string, std::string>> servers;
+    servers.reserve(settings.lspServers.size());
+    for (auto &s : settings.lspServers)
+        servers.emplace_back(s.language, s.command);
+    lsp->configure(settings.lspEnabled, std::move(servers));
+}
+
+void TurboApp::editLspSettings()
+{
+    if (executeLspDialog(settings))
+    {
+        saveSettings(settings);
+        configureLsp();
+    }
 }
 
 void TurboApp::closeAll()

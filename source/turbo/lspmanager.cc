@@ -226,24 +226,42 @@ void LspManager::setRootPath(const char *path) noexcept
         rootUri = uriFromPath(path);
 }
 
+void LspManager::configure(bool aEnabled,
+                           std::vector<std::pair<std::string, std::string>> servers) noexcept
+{
+    enabled = aEnabled;
+    configuredServers.clear();
+    for (auto &s : servers)
+        if (!s.first.empty() && !s.second.empty())
+            configuredServers[s.first] = s.second;
+    // A language that previously had no server may now be configured; clear the
+    // negative cache so it gets another chance on the next didOpen.
+    deadLanguages.clear();
+}
+
 LspManager::ServerConfig LspManager::serverFor(const std::string &languageId) noexcept
 {
+    auto fromCommandLine = [] (const std::string &cmdline) -> ServerConfig {
+        ServerConfig cfg;
+        auto parts = splitArgs(cmdline);
+        if (!parts.empty())
+        {
+            cfg.command = parts[0];
+            cfg.args.assign(parts.begin() + 1, parts.end());
+        }
+        return cfg;
+    };
+
     // An environment override (TURBO_LSP_SERVER_<LANG>) takes precedence; this
-    // also makes the transport testable against a mock server. Settings-based
-    // configuration arrives in a later stage.
+    // makes the transport testable against a mock server independent of config.
     std::string envKey = "TURBO_LSP_SERVER_" + languageId;
     for (auto &c : envKey) c = (char) std::toupper((unsigned char) c);
     if (const char *ov = getenv(envKey.c_str()); ov && ov[0])
-    {
-        auto parts = splitArgs(ov);
-        if (!parts.empty())
-        {
-            ServerConfig cfg;
-            cfg.command = parts[0];
-            cfg.args.assign(parts.begin() + 1, parts.end());
-            return cfg;
-        }
-    }
+        return fromCommandLine(ov);
+
+    // User-configured command (from ~/.turborc / the settings dialog).
+    if (auto it = configuredServers.find(languageId); it != configuredServers.end())
+        return fromCommandLine(it->second);
 
     // Built-in defaults.
     static const struct { const char *lang, *cmd, *args; } defaults[] = {
@@ -294,6 +312,8 @@ Client *LspManager::clientFor(const std::string &languageId) noexcept
 
 void LspManager::didOpen(EditorWindow &w) noexcept
 {
+    if (!enabled)
+        return;
     if (docs.count(&w))
         return;
     auto &path = w.filePath();

@@ -39,6 +39,7 @@ enum : ushort
     cmFindHelpWindow,
     cmToggleAutoSave,
     cmRevealInTree,
+    cmLspSettings,
 };
 
 #endif // TURBO_CMDS_H

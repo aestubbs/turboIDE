@@ -11,6 +11,7 @@ struct EditorWindow;
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 // Owns the language-server clients and bridges Turbo's editors to them.
@@ -25,6 +26,12 @@ public:
 
     // The workspace root (used as the LSP rootUri). Call before opening files.
     void setRootPath(const char *path) noexcept;
+
+    // Apply user configuration: whether LSP is enabled and per-language command
+    // overrides. Affects servers started after this call (already-running
+    // servers keep their current command). Pass language id -> command pairs.
+    void configure(bool enabled,
+                   std::vector<std::pair<std::string, std::string>> servers) noexcept;
 
     // Editor document lifecycle. No-ops for files whose language has no server.
     void didOpen(EditorWindow &w) noexcept;
@@ -86,6 +93,8 @@ private:
     Document *docFor(EditorWindow &w) noexcept;
 
     std::string rootUri;
+    bool enabled {true};
+    std::unordered_map<std::string, std::string> configuredServers; // lang -> command
     std::unordered_map<std::string, std::unique_ptr<turbo::lsp::Client>> clients;
     std::unordered_set<std::string> deadLanguages; // no server available
     std::unordered_map<EditorWindow *, Document> docs;
@@ -94,11 +103,16 @@ private:
 
 #else // !TURBO_ENABLE_LSP
 
+#include <string>
+#include <utility>
+#include <vector>
+
 // Stub so the rest of the app compiles unchanged when LSP is disabled.
 class LspManager
 {
 public:
     void setRootPath(const char *) noexcept {}
+    void configure(bool, std::vector<std::pair<std::string, std::string>>) noexcept {}
     void didOpen(EditorWindow &) noexcept {}
     void didChange(EditorWindow &) noexcept {}
     void didSave(EditorWindow &) noexcept {}

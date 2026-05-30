@@ -51,6 +51,8 @@ struct TurboApp : public TApplication, EditorWindowParent
     void openFileFromTree(const char *absPath);
     void scanWorkspace();
     void toggleAutoSave();
+    void configureLsp();
+    void editLspSettings();
     void closeAll();
     TRect newEditorBounds() const;
     turbo::TScintilla &createScintilla() noexcept;
