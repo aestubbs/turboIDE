@@ -36,6 +36,8 @@ enum : ushort
     cmClearReplace,
     cmAbout,
     cmFindHelpWindow,
+    cmToggleAutoSave,
+    cmRevealInTree,
 };
 
 #endif // TURBO_CMDS_H

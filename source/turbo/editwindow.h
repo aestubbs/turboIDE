@@ -7,6 +7,7 @@
 
 #include <turbo/fileeditor.h>
 #include <turbo/basicwindow.h>
+#include <turbo/basicframe.h>
 #include "apputils.h"
 #include "editor.h"
 #include "search.h"
@@ -36,12 +37,22 @@ struct TitleState
 
 struct EditorWindow;
 
+// Editor window frame with a "reveal in tree" [>] button at the top-right,
+// just left of the zoom icon. Clicking it highlights the file in the tree view.
+struct EditorFrame : public turbo::BasicEditorFrame
+{
+    EditorFrame(const TRect &bounds) noexcept;
+    void draw() override;
+    void handleEvent(TEvent &ev) override;
+};
+
 struct EditorWindowParent
 {
     virtual void handleFocus(EditorWindow &w) noexcept = 0;
     virtual void handleTitleChange(EditorWindow &w) noexcept = 0;
     virtual void removeEditor(EditorWindow &w) noexcept = 0;
     virtual const char *getFileDialogDir() noexcept = 0;
+    virtual bool autoSaveOnFocusLoss() noexcept = 0;
 };
 
 struct EditorWindow : public turbo::BasicEditorWindow
@@ -60,6 +71,8 @@ struct EditorWindow : public turbo::BasicEditorWindow
 
     EditorWindow( const TRect &bounds, TurboEditor &aEditor, active_counter &fileCounter,
                   turbo::SearchSettings &searchSettings, EditorWindowParent &aParent ) noexcept;
+
+    static TFrame *initFrame(TRect bounds);
 
     void shutDown() override;
     void handleEvent(TEvent &ev) override;

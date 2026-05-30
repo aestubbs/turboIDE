@@ -2,40 +2,41 @@
 #include "editwindow.h"
 #include "app.h"
 #include <utility>
-#include <cassert>
+#include <filesystem>
 #include <turbo/tpath.h>
 
 #define Uses_TProgram
+#define Uses_TDrawBuffer
+#define Uses_TKeys
 #include <tvision/tv.h>
 
 using Node = DocumentTreeView::Node;
 
-Node::Node(Node *parent, std::string_view p) noexcept :
+Node::Node(Node *parent, std::string_view p, bool isDir) noexcept :
     TNode(TPath::basename(p)),
     ptr(nullptr),
     parent(parent),
-    data(std::string {p})
+    path(p),
+    isDir(isDir),
+    editor(nullptr)
 {
 }
 
-Node::Node(Node *parent, EditorWindow *w) noexcept :
-    TNode(w->getTitle()),
-    ptr(nullptr),
-    parent(parent),
-    data(w)
+void Node::setEditor(EditorWindow *w) noexcept
 {
+    editor = w;
+    refreshText();
 }
 
-bool Node::hasEditor() const noexcept
+void Node::refreshText() noexcept
 {
-    return std::holds_alternative<EditorWindow *>(data);
-}
-
-EditorWindow* Node::getEditor() noexcept
-{
-    if (auto **pw = std::get_if<EditorWindow *>(&data))
-        return *pw;
-    return nullptr;
+    TStringView bn = TPath::basename(path);
+    std::string label {bn.data(), bn.size()};
+    // Mark files with unsaved changes.
+    if (editor && !editor->getEditor().inSavePoint())
+        label += " *";
+    delete[] text;
+    text = newStr(label);
 }
 
 void Node::remove() noexcept
@@ -46,27 +47,22 @@ void Node::remove() noexcept
         *ptr = next;
     next = nullptr;
     ptr = nullptr;
-    if (parent && !parent->childList)
-        parent->dispose();
     parent = nullptr;
 }
 
 void Node::dispose() noexcept
 {
-    assert(!childList);
     remove();
     delete this;
 }
 
-// Directories shall appear before files.
-enum NodeType { ntDir, ntEditor };
+// Directories shall appear before files, both sorted alphabetically.
+enum NodeType { ntDir, ntFile };
 using NodeKey = std::pair<NodeType, std::string_view>;
 
 static NodeKey getKey(Node *node) noexcept
 {
-    if (node->hasEditor())
-        return {ntEditor, node->text};
-    return {ntDir, node->text};
+    return {node->isDir ? ntDir : ntFile, node->text};
 }
 
 static void putNode(TNode **indirect, Node *node) noexcept
@@ -88,77 +84,155 @@ static void putNode(TNode **indirect, Node *node) noexcept
     node->ptr = indirect;
 }
 
-static void setParent(Node *node, Node *parent) noexcept
+static void scanInto(Node *parent, TNode **list, const std::string &dirPath, int depth) noexcept
 {
-    if (!parent)
-        node->dispose();
-    else if (parent != node->parent)
+    std::error_code ec;
+    std::filesystem::directory_iterator it(dirPath, ec), end;
+    if (ec)
+        return;
+    for (; it != end; it.increment(ec))
     {
-        node->remove(); // May free the parent, hence the 'parent != node->parent' check.
-        node->parent = parent;
-        putNode(&parent->childList, node);
+        if (ec)
+            break;
+        const auto &entry = *it;
+        std::string name = entry.path().filename().string();
+        // Skip hidden entries (dotfiles and dot-directories such as .git).
+        if (name.empty() || name[0] == '.')
+            continue;
+        std::error_code ec2;
+        bool isDir = entry.is_directory(ec2);
+        std::string full = entry.path().string();
+        auto *node = new Node(parent, full, isDir);
+        if (isDir)
+            // Expand only the top level by default to keep the tree manageable.
+            node->expanded = (depth == 0) ? True : False;
+        putNode(list, node);
+        if (isDir)
+            scanInto(node, &node->childList, full, depth + 1);
     }
 }
 
-void DocumentTreeView::focused(int i) noexcept
+void DocumentTreeView::scanDirectory(std::string_view rootPath) noexcept
 {
-    // Avoid reentrancy on focus:
-    // focused() => w->focus() => app->setFocusedEditor() => focusEditor() => focused()
-    if (!focusing)
-    {
-        focusing = true;
-        TOutline::focused(i);
-        if (auto *node = (Node *) getNode(i))
-            if (auto *w = node->getEditor())
-                w->focus();
-        update();
-        focusing = false;
-    }
-}
-
-void DocumentTreeView::addEditor(EditorWindow *w) noexcept
-{
-    Node *parent;
-    TNode **list;
-    if (w->filePath().empty()) {
-        parent = nullptr;
-        list = &root;
-    } else {
-        parent = getDirNode(TPath::dirname(w->filePath()));
-        list = &parent->childList;
-    }
-    putNode(list, new Node(parent, w));
+    scanInto(nullptr, &root, std::string {rootPath}, 0);
     update();
     drawView();
 }
 
-void DocumentTreeView::focusEditor(EditorWindow *w) noexcept
+void DocumentTreeView::selected(int i) noexcept
 {
-    // Avoid the reentrant case (see focused()).
-    if (focusing)
+    // Triggered by Enter or a double-click (not by moving the highlight).
+    auto *node = (Node *) getNode(i);
+    if (!node)
         return;
-    int i;
-    if (findByEditor(w, &i))
-        focused(i);
-    drawView();
+    if (node->isDir)
+    {
+        adjust(node, Boolean(!isExpanded(node)));
+        update();
+        drawView();
+    }
+    else if (node->editor)
+        node->editor->focus();
+    else if (auto *app = (TurboApp *) TProgram::application)
+        app->openFileFromTree(node->path.c_str());
 }
 
-void DocumentTreeView::removeEditor(EditorWindow *w) noexcept
+namespace {
+
+struct DrawCtx { TDrawBuffer *b; int last; };
+
+// Mirrors TOutlineViewer's internal drawTree(), with one addition: files that
+// are open in an editor (node->editor != null) are drawn in bold.
+Boolean drawNode( TOutlineViewer *v, TNode *cur, int level, int position,
+                  long lines, ushort flags, void *arg )
 {
-    Node *f = findByEditor(w);
-    if (f) {
-        f->dispose();
+    auto *ctx = (DrawCtx *) arg;
+    TDrawBuffer &dBuf = *ctx->b;
+    if (position >= v->delta.y)
+    {
+        if (position >= v->delta.y + v->size.y)
+            return True;
+        TAttrPair color;
+        if (position == v->foc && (v->state & sfFocused))
+            color = v->getColor(0x0202);
+        else if (v->isSelected(position))
+            color = v->getColor(0x0303);
+        else
+            color = v->getColor(0x0401);
+        dBuf.moveChar(0, ' ', color, v->size.x);
+        int x;
+        {
+            TStringView graph = v->getGraph(level, lines, flags);
+            x = strwidth(graph) - v->delta.x;
+            if (x > 0)
+                dBuf.moveStr(0, graph, color, (ushort) -1U, v->delta.x);
+            delete[] (char *) graph.data();
+        }
+        {
+            TStringView text = v->getText(cur);
+            TColorAttr c = (flags & ovExpanded) ? color : (color >> 8);
+            if (((Node *) cur)->editor)
+                setStyle(c, getStyle(c) | slBold);
+            dBuf.moveStr(max(0, x), text, c, (ushort) -1U, max(0, -x));
+        }
+        v->writeLine(0, position - v->delta.y, v->size.x, 1, dBuf);
+        ctx->last = position;
+    }
+    return False;
+}
+
+} // namespace
+
+void DocumentTreeView::draw()
+{
+    TDrawBuffer dBuf;
+    DrawCtx ctx {&dBuf, -1};
+    TOutlineViewer::firstThat(drawNode, &ctx);
+    TAttrPair nrmColor = getColor(0x0401);
+    dBuf.moveChar(0, ' ', nrmColor, size.x);
+    writeLine(0, ctx.last + 1, size.x, size.y - (ctx.last - delta.y), dBuf);
+}
+
+void DocumentTreeView::linkEditor(EditorWindow *w) noexcept
+{
+    if (w->filePath().empty())
+        return;
+    if (auto *node = findByPath(w->filePath()))
+    {
+        node->setEditor(w);
         update();
+        drawView();
+    }
+}
+
+void DocumentTreeView::unlinkEditor(EditorWindow *w) noexcept
+{
+    if (auto *node = findByEditor(w))
+    {
+        node->setEditor(nullptr);
+        update();
+        drawView();
+    }
+}
+
+void DocumentTreeView::focusEditor(EditorWindow *w) noexcept
+{
+    // Move the highlight onto the active editor's node and scroll it into view.
+    int i;
+    if (findByEditor(w, &i))
+    {
+        foc = i;
+        update();   // adjustFocus(foc) scrolls the node into view
         drawView();
     }
 }
 
 void DocumentTreeView::focusNext() noexcept
 {
-    firstThat([this] (auto *node, auto pos) {
-        if (((Node *) node)->hasEditor() && pos > foc) {
-            focused(pos);
-            drawView();
+    // Cycle forward to the next file currently open in an editor.
+    firstThat([this] (Node *node, int pos) {
+        if (node->editor && pos > foc) {
+            selected(pos);
             return true;
         }
         return false;
@@ -167,14 +241,14 @@ void DocumentTreeView::focusNext() noexcept
 
 void DocumentTreeView::focusPrev() noexcept
 {
+    // Cycle backward to the previous file currently open in an editor.
     int prevPos = -1;
-    firstThat([this, &prevPos] (auto *node, auto pos) {
-        if (((Node *) node)->hasEditor()) {
+    firstThat([this, &prevPos] (Node *node, int pos) {
+        if (node->editor) {
             if (pos < foc)
                 prevPos = pos;
             else if (prevPos >= 0) {
-                focused(prevPos);
-                drawView();
+                selected(prevPos);
                 return true;
             }
         }
@@ -182,35 +256,30 @@ void DocumentTreeView::focusPrev() noexcept
     });
 }
 
-Node* DocumentTreeView::getDirNode(std::string_view dirPath) noexcept
+static Node *findEditorNode(Node *list, EditorWindow *w) noexcept
 {
-    // The list where the dir will be inserted.
-    TNode **list {nullptr};
-    Node *parent {nullptr};
+    for (Node *n = list; n; n = (Node *) n->next)
     {
-        auto parentPath = TPath::dirname(dirPath);
-        if ((parent = findByPath(parentPath)))
-            list = &parent->childList;
+        if (n->editor == w)
+            return n;
+        if (n->childList)
+            if (Node *r = findEditorNode((Node *) n->childList, w))
+                return r;
     }
-    if (!list)
-        list = &root;
-    // The directory we are searching for.
-    auto *dir = (Node *) findInList(list, [dirPath] (Node *node) {
-        auto *ppath = std::get_if<std::string>(&node->data);
-        return ppath && *ppath == dirPath;
-    });
-    if (!dir) {
-        dir = new Node(parent, dirPath);
-        // Place already existing subdirectories under this dir.
-        findInList(&root, [dir, dirPath] (Node *node) {
-            auto *ppath = std::get_if<std::string>(&node->data);
-            if (ppath && TPath::dirname(*ppath) == TStringView(dirPath))
-                setParent(node, dir);
-            return false;
-        });
-        putNode(list, dir);
-    }
-    return dir;
+    return nullptr;
+}
+
+void DocumentTreeView::revealEditor(EditorWindow *w) noexcept
+{
+    // Search the whole tree (including collapsed branches) for the editor's
+    // node, expand its ancestors so it becomes visible, then highlight it.
+    Node *node = findEditorNode((Node *) root, w);
+    if (!node)
+        return;
+    for (Node *p = node->parent; p; p = p->parent)
+        p->expanded = True;
+    update();
+    focusEditor(w);
 }
 
 Node* DocumentTreeView::findByEditor(const EditorWindow *w, int *pos) noexcept
@@ -218,8 +287,7 @@ Node* DocumentTreeView::findByEditor(const EditorWindow *w, int *pos) noexcept
     return firstThat(
     [w, pos] (Node *node, int position)
     {
-        auto *w_ = node->getEditor();
-        if (w_ && w_ == w) {
+        if (node->editor && node->editor == w) {
             if (pos)
                 *pos = position;
             return true;
@@ -228,20 +296,18 @@ Node* DocumentTreeView::findByEditor(const EditorWindow *w, int *pos) noexcept
     });
 }
 
-
 Node* DocumentTreeView::findByPath(std::string_view path) noexcept
 {
     return firstThat(
     [path] (Node *node, int)
     {
-        auto *ppath = std::get_if<std::string>(&node->data);
-        return ppath && *ppath == path;
+        return !node->isDir && node->path == path;
     });
 }
 
 DocumentTreeWindow::DocumentTreeWindow(const TRect &bounds, DocumentTreeWindow **ptr) noexcept :
     TWindowInit(&DocumentTreeWindow::initFrame),
-    TWindow(bounds, "Open Editors", wnNoNumber),
+    TWindow(bounds, "Files", wnNoNumber),
     ptr(ptr)
 {
     auto *hsb = standardScrollBar(sbHorizontal),

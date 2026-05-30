@@ -9,6 +9,7 @@
 #include "doctree.h"
 #include "apputils.h"
 #include "editwindow.h"
+#include "settings.h"
 #include "cmds.h"
 
 struct EditorWindow;
@@ -27,6 +28,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     const char **argv;
     turbo::SearchSettings searchSettings;
     std::string mostRecentDir;
+    AppSettings settings;
 
     TurboApp(int argc, const char **argv) noexcept;
     static TMenuBar* initMenuBar(TRect r);
@@ -41,6 +43,9 @@ struct TurboApp : public TApplication, EditorWindowParent
     void fileNew();
     void fileOpen();
     void fileOpenOrNew(const char *path);
+    void openFileFromTree(const char *absPath);
+    void scanWorkspace();
+    void toggleAutoSave();
     void closeAll();
     TRect newEditorBounds() const;
     turbo::TScintilla &createScintilla() noexcept;
@@ -52,6 +57,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     void handleTitleChange(EditorWindow &w) noexcept override;
     void removeEditor(EditorWindow &w) noexcept override;
     const char *getFileDialogDir() noexcept override;
+    bool autoSaveOnFocusLoss() noexcept override;
 };
 
 #endif

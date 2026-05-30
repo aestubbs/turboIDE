@@ -37,6 +37,8 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     argc(argc),
     argv(argv)
 {
+    loadSettings(settings);
+
     TCommandSet ts;
     ts += cmSave;
     ts += cmSaveAs;
@@ -148,7 +150,8 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             *new TMenuItem( "Toggle Line ~N~umbers", cmToggleLineNums, kbF8, hcNoContext, "F8" ) +
             *new TMenuItem( "Toggle Line ~W~rapping", cmToggleWrap, kbF9, hcNoContext, "F9" ) +
             *new TMenuItem( "Toggle Auto ~I~ndent", cmToggleIndent, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "Toggle Document ~T~ree View", cmToggleTree, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Toggle File ~T~ree View", cmToggleTree, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Toggle ~A~uto-save on Focus Loss", cmToggleAutoSave, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~H~elp", kbAltH ) +
             *new TMenuItem( "~K~eyboard shortcurs", cmHelp, kbF1, hcNoContext, "F1" ) +
             newLine() +
@@ -205,6 +208,7 @@ void TurboApp::getEvent(TEvent &event)
 {
     if (!argsParsed) {
         argsParsed = true;
+        scanWorkspace();
         parseArgs();
     }
     TApplication::getEvent(event);
@@ -225,6 +229,15 @@ void TurboApp::handleEvent(TEvent &event)
                 break;
             case cmCloseAll: closeAll(); break;
             case cmToggleTree: toggleTreeView(); break;
+            case cmToggleAutoSave: toggleAutoSave(); break;
+            case cmRevealInTree:
+                if (docTree) {
+                    if (!(docTree->state & sfVisible))
+                        toggleTreeView();
+                    if (auto *w = (EditorWindow *) event.message.infoPtr)
+                        docTree->tree->revealEditor(w);
+                }
+                break;
             case cmTreeNext:
                 if (docTree)
                     docTree->tree->focusNext();
@@ -294,6 +307,29 @@ void TurboApp::fileOpenOrNew(const char *path)
         addEditor(scintilla, abspath);
 }
 
+void TurboApp::openFileFromTree(const char *absPath)
+{
+    fileOpenOrNew(absPath);
+}
+
+void TurboApp::scanWorkspace()
+{
+    if (!docTree)
+        return;
+    char *cwd = ::getcwd(nullptr, 0);
+    if (cwd)
+    {
+        docTree->tree->scanDirectory(cwd);
+        ::free(cwd);
+    }
+}
+
+void TurboApp::toggleAutoSave()
+{
+    settings.autoSaveOnFocusLoss ^= true;
+    saveSettings(settings);
+}
+
 void TurboApp::closeAll()
 {
     while (!MRUlist.empty()) {
@@ -337,7 +373,7 @@ void TurboApp::addEditor(turbo::TScintilla &scintilla, const char *path)
     auto &editor = *new TurboEditor(scintilla, path);
     EditorWindow &w = *new EditorWindow(r, editor, counter, searchSettings, *this);
     if (docTree)
-        docTree->tree->addEditor(&w);
+        docTree->tree->linkEditor(&w);
     w.listHead.insert_after(&MRUlist);
     deskTop->insert(&w);
     enableCommands(editorCmds);
@@ -412,14 +448,23 @@ void TurboApp::handleFocus(EditorWindow &w) noexcept
 void TurboApp::handleTitleChange(EditorWindow &w) noexcept
 {
     auto &counter = fileCount[TPath::basename(w.filePath())];
-    if (&counter != w.fileNumber.counter)
-    {
+    bool renamed = (&counter != w.fileNumber.counter);
+    if (renamed)
         w.fileNumber = {counter};
-        if (docTree)
+    if (docTree)
+    {
+        if (renamed)
         {
-            docTree->tree->removeEditor(&w);
-            docTree->tree->addEditor(&w);
+            // The file path may have changed (rename): relink to the new node.
+            docTree->tree->unlinkEditor(&w);
+            docTree->tree->linkEditor(&w);
             docTree->tree->focusEditor(&w);
+        }
+        else if (auto *node = docTree->tree->findByEditor(&w))
+        {
+            // Save point reached/lost: refresh the unsaved-changes marker.
+            node->refreshText();
+            docTree->tree->drawView();
         }
     }
     if (!w.filePath().empty() && w.state & sfActive)
@@ -433,7 +478,7 @@ void TurboApp::removeEditor(EditorWindow &w) noexcept
         disableCommands(editorCmds);
     if (docTree)
     {
-        docTree->tree->removeEditor(&w);
+        docTree->tree->unlinkEditor(&w);
         // Removing the editor causes the focus to stay on the same position
         // but maybe not on the right element.
         if (!MRUlist.empty())
@@ -444,4 +489,9 @@ void TurboApp::removeEditor(EditorWindow &w) noexcept
 const char *TurboApp::getFileDialogDir() noexcept
 {
     return mostRecentDir.c_str();
+}
+
+bool TurboApp::autoSaveOnFocusLoss() noexcept
+{
+    return settings.autoSaveOnFocusLoss;
 }

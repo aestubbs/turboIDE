@@ -1,5 +1,7 @@
 #define Uses_TScrollBar
 #define Uses_TFrame
+#define Uses_TDrawBuffer
+#define Uses_TProgram
 #define Uses_MsgBox
 #define Uses_TKeys
 #define __INC_EDITORS_H
@@ -16,11 +18,50 @@
 #include <sstream>
 using std::ios;
 
+EditorFrame::EditorFrame(const TRect &bounds) noexcept :
+    turbo::BasicEditorFrame(bounds)
+{
+}
+
+void EditorFrame::draw()
+{
+    turbo::BasicEditorFrame::draw();
+    // Draw the "[>]" reveal button left of the zoom icon (which sits at
+    // size.x-5..size.x-3). Only meaningful while the frame is active.
+    if ((state & sfActive) && size.x > 12)
+    {
+        TDrawBuffer b;
+        TAttrPair cFrame = getColor(0x0503);
+        b.moveCStr(0, "[\xE2\x96\xB6]", cFrame); // [►]
+        writeLine(size.x - 9, 0, 3, 1, b);
+    }
+}
+
+void EditorFrame::handleEvent(TEvent &ev)
+{
+    if (ev.what == evMouseDown && (state & sfActive))
+    {
+        TPoint m = makeLocal(ev.mouse.where);
+        if (m.y == 0 && m.x >= size.x - 9 && m.x <= size.x - 7)
+        {
+            message(TProgram::application, evCommand, cmRevealInTree, owner);
+            clearEvent(ev);
+            return;
+        }
+    }
+    turbo::BasicEditorFrame::handleEvent(ev);
+}
+
+TFrame *EditorWindow::initFrame(TRect bounds)
+{
+    return new EditorFrame(bounds);
+}
+
 EditorWindow::EditorWindow( const TRect &bounds, TurboEditor &aEditor,
                             active_counter &fileCounter,
                             turbo::SearchSettings &searchSettings,
                             EditorWindowParent &aParent ) noexcept :
-    TWindowInit(&initFrame),
+    TWindowInit(&EditorWindow::initFrame),
     super(bounds, aEditor),
     listHead(this),
     fileNumber(fileCounter),
@@ -178,6 +219,14 @@ void EditorWindow::setState(ushort aState, Boolean enable)
         updateCommands();
         if (enable)
             parent.handleFocus(*this);
+        else if ( parent.autoSaveOnFocusLoss() && !filePath().empty() &&
+                  !getEditor().inSavePoint() )
+        {
+            // Auto-save the file when the editor loses focus, if enabled.
+            // A non-empty path means save() writes directly without prompting.
+            TurboFileDialogs dlgs {parent};
+            getEditor().save(dlgs);
+        }
     }
 }
 
