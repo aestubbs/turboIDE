@@ -3,7 +3,7 @@
 
 #ifdef TURBO_ENABLE_LSP
 
-#include <turbo/lsp/process.h>
+#include <turbo/process.h>
 
 #include <nlohmann/json.hpp>
 
@@ -93,7 +93,7 @@ private:
     std::string command;
     std::vector<std::string> args;
 
-    Process proc;
+    turbo::Process proc;
     std::thread reader;
     std::thread writer;
     std::atomic<bool> running {false};

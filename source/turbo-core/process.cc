@@ -1,6 +1,4 @@
-#include <turbo/lsp/process.h>
-
-#ifdef TURBO_ENABLE_LSP
+#include <turbo/process.h>
 
 #ifdef _WIN32
 
@@ -9,9 +7,9 @@
 #include <string>
 
 namespace turbo {
-namespace lsp {
 
-bool Process::start(const std::string &command, const std::vector<std::string> &args)
+bool Process::start(const std::string &command, const std::vector<std::string> &args,
+                    const std::string &cwd, const std::vector<std::string> &env)
 {
     SECURITY_ATTRIBUTES sa {};
     sa.nLength = sizeof(sa);
@@ -30,6 +28,30 @@ bool Process::start(const std::string &command, const std::vector<std::string> &
     for (auto &a : args)
         cmdline += " \"" + a + "\"";
 
+    // Build the child environment: a copy of ours plus the requested overrides.
+    // CreateProcess wants a double-NUL-terminated block of NAME=value strings.
+    std::string envBlock;
+    bool haveEnv = !env.empty();
+    if (haveEnv)
+    {
+        if (const char *base = GetEnvironmentStringsA())
+        {
+            for (const char *p = base; *p; )
+            {
+                size_t len = strlen(p);
+                envBlock.append(p, len);
+                envBlock.push_back('\0');
+                p += len + 1;
+            }
+        }
+        for (auto &e : env)
+        {
+            envBlock.append(e);
+            envBlock.push_back('\0');
+        }
+        envBlock.push_back('\0');
+    }
+
     HANDLE nul = CreateFileA("NUL", GENERIC_WRITE, FILE_SHARE_WRITE, &sa,
                              OPEN_EXISTING, 0, nullptr);
 
@@ -43,8 +65,10 @@ bool Process::start(const std::string &command, const std::vector<std::string> &
     PROCESS_INFORMATION pi {};
     std::vector<char> mutableCmd(cmdline.begin(), cmdline.end());
     mutableCmd.push_back('\0');
+    const char *workdir = cwd.empty() ? nullptr : cwd.c_str();
     BOOL ok = CreateProcessA(nullptr, mutableCmd.data(), nullptr, nullptr, TRUE,
-                             CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+                             CREATE_NO_WINDOW, haveEnv ? (LPVOID) envBlock.data() : nullptr,
+                             workdir, &si, &pi);
 
     CloseHandle(inRead);
     CloseHandle(outWrite);
@@ -90,6 +114,21 @@ void Process::closeStdin()
     if (hStdinWrite) { CloseHandle(hStdinWrite); hStdinWrite = nullptr; }
 }
 
+int Process::waitExit()
+{
+    int code = -1;
+    if (hProcess)
+    {
+        WaitForSingleObject(hProcess, INFINITE);
+        DWORD ec = 0;
+        if (GetExitCodeProcess(hProcess, &ec))
+            code = (int) ec;
+        CloseHandle(hProcess);
+        hProcess = nullptr;
+    }
+    return code;
+}
+
 void Process::terminate()
 {
     closeStdin();
@@ -111,7 +150,6 @@ bool Process::running()
 
 Process::~Process() { terminate(); }
 
-} // namespace lsp
 } // namespace turbo
 
 #else // POSIX
@@ -122,13 +160,14 @@ Process::~Process() { terminate(); }
 #include <signal.h>
 #include <sys/wait.h>
 #include <cerrno>
+#include <cstring>
 
 extern char **environ;
 
 namespace turbo {
-namespace lsp {
 
-bool Process::start(const std::string &command, const std::vector<std::string> &args)
+bool Process::start(const std::string &command, const std::vector<std::string> &args,
+                    const std::string &cwd, const std::vector<std::string> &env)
 {
     int inPipe[2], outPipe[2];
     if (pipe(inPipe) != 0)
@@ -141,10 +180,17 @@ bool Process::start(const std::string &command, const std::vector<std::string> &
 
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
+    // Optionally change the child's working directory before exec. Not all
+    // platforms have posix_spawn_file_actions_addchdir_np, so fall back to a
+    // fork-less chdir is impossible here; use the _np variant where available.
+#if defined(__APPLE__) || defined(__GLIBC__)
+    if (!cwd.empty())
+        posix_spawn_file_actions_addchdir_np(&fa, cwd.c_str());
+#endif
     // Child stdin <- read end of inPipe; child stdout -> write end of outPipe.
     posix_spawn_file_actions_adddup2(&fa, inPipe[0], STDIN_FILENO);
     posix_spawn_file_actions_adddup2(&fa, outPipe[1], STDOUT_FILENO);
-    // Silence the server's stderr so it cannot draw over the terminal UI.
+    // Silence the child's stderr so it cannot draw over the terminal UI.
     posix_spawn_file_actions_addopen(&fa, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
     // Close the inherited pipe fds in the child.
     posix_spawn_file_actions_addclose(&fa, inPipe[0]);
@@ -158,7 +204,23 @@ bool Process::start(const std::string &command, const std::vector<std::string> &
         argv.push_back(const_cast<char *>(a.c_str()));
     argv.push_back(nullptr);
 
-    int rc = posix_spawnp(&pid, command.c_str(), &fa, nullptr, argv.data(), environ);
+    // Build the child environment: our environ plus any overrides.
+    std::vector<std::string> envStrings;
+    std::vector<char *> envp;
+    char **childEnv = environ;
+    if (!env.empty())
+    {
+        for (char **e = environ; e && *e; ++e)
+            envStrings.emplace_back(*e);
+        for (auto &e : env)
+            envStrings.push_back(e);
+        for (auto &e : envStrings)
+            envp.push_back(const_cast<char *>(e.c_str()));
+        envp.push_back(nullptr);
+        childEnv = envp.data();
+    }
+
+    int rc = posix_spawnp(&pid, command.c_str(), &fa, nullptr, argv.data(), childEnv);
     posix_spawn_file_actions_destroy(&fa);
 
     // Parent keeps the write end of inPipe and the read end of outPipe.
@@ -211,13 +273,28 @@ void Process::closeStdin()
     if (stdinFd >= 0) { ::close(stdinFd); stdinFd = -1; }
 }
 
+int Process::waitExit()
+{
+    int code = -1;
+    if (pid > 0)
+    {
+        int status = 0;
+        pid_t r;
+        do { r = ::waitpid(pid, &status, 0); } while (r < 0 && errno == EINTR);
+        if (r == pid && WIFEXITED(status))
+            code = WEXITSTATUS(status);
+        pid = -1;
+    }
+    return code;
+}
+
 void Process::terminate()
 {
     closeStdin();
     if (pid > 0)
     {
         ::kill(pid, SIGTERM);
-        // Reap, escalating to SIGKILL if the server ignores SIGTERM.
+        // Reap, escalating to SIGKILL if the child ignores SIGTERM.
         for (int i = 0; i < 20; ++i)
         {
             int status;
@@ -252,9 +329,34 @@ bool Process::running()
 
 Process::~Process() { terminate(); }
 
-} // namespace lsp
 } // namespace turbo
 
 #endif // _WIN32
 
-#endif // TURBO_ENABLE_LSP
+// --- Portable runToEnd (uses the platform primitives above) ----------------
+
+namespace turbo {
+
+int Process::runToEnd( const std::string &command,
+                       const std::vector<std::string> &args,
+                       std::string &output,
+                       const std::string &cwd,
+                       const std::vector<std::string> &env )
+{
+    output.clear();
+    Process p;
+    if (!p.start(command, args, cwd, env))
+        return -1;
+    p.closeStdin(); // we provide no input
+    char buf[16384];
+    for (;;)
+    {
+        long n = p.readStdout(buf, sizeof buf);
+        if (n <= 0)
+            break;
+        output.append(buf, (size_t) n);
+    }
+    return p.waitExit();
+}
+
+} // namespace turbo
