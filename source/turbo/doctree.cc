@@ -121,9 +121,70 @@ static void scanInto(Node *parent, TNode **list, const std::string &dirPath, int
     }
 }
 
-void DocumentTreeView::scanDirectory(std::string_view rootPath) noexcept
+void DocumentTreeView::scanDirectory(std::string_view aRootPath) noexcept
 {
-    scanInto(nullptr, &root, std::string {rootPath}, 0);
+    rootPath = std::string {aRootPath};
+    scanInto(nullptr, &root, rootPath, 0);
+    update();
+    drawView();
+}
+
+DocumentTreeView::Node *DocumentTreeView::findDir(std::string_view path) noexcept
+{
+    return firstThat([path] (Node *node, int) {
+        return node->isDir && node->path == path;
+    });
+}
+
+void DocumentTreeView::refreshNode(std::string_view path) noexcept
+{
+    if (auto *n = findByPath(path))
+    {
+        n->refreshText();
+        update();
+        drawView();
+    }
+}
+
+void DocumentTreeView::removeNode(std::string_view path) noexcept
+{
+    Node *n = findByPath(path);
+    if (!n)
+        n = findDir(path);
+    if (n)
+    {
+        n->dispose();
+        update();
+        drawView();
+    }
+}
+
+void DocumentTreeView::addNode(std::string_view path, bool isDir) noexcept
+{
+    // Already present, or a hidden entry we deliberately don't show.
+    if (findByPath(path) || (isDir && findDir(path)))
+        return;
+    TStringView base = TPath::basename(path);
+    if (base.empty() || base[0] == '.')
+        return;
+    // Locate the parent list: the root list for a top-level entry, else the
+    // parent directory's child list (only if that directory is in the tree).
+    TStringView dir = TPath::dirname(path);
+    TNode **list;
+    Node *parent = nullptr;
+    if (dir == TStringView(rootPath))
+        list = &root;
+    else
+    {
+        parent = findDir(dir);
+        if (!parent)
+            return; // parent dir not in the tree (collapsed/unknown): skip
+        list = &parent->childList;
+    }
+    auto *node = new Node(parent, std::string(path), isDir);
+    putNode(list, node);
+    if (isDir)
+        scanInto(node, &node->childList, std::string(path), 1);
     update();
     drawView();
 }

@@ -31,6 +31,7 @@
 #include "gitdialog.h"
 #include <turbo/fileeditor.h>
 #include <turbo/tpath.h>
+#include <filesystem>
 
 using namespace Scintilla;
 
@@ -46,6 +47,7 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     lsp = std::make_unique<LspManager>();
     configureLsp();
     git = std::make_unique<GitManager>();
+    watcher = std::make_unique<turbo::FileWatcher>();
 
     TCommandSet ts;
     ts += cmSave;
@@ -244,6 +246,8 @@ void TurboApp::shutDown()
         lsp->shutdown();
     if (git)
         git->shutdown();
+    if (watcher)
+        watcher->stop();
     docTree = nullptr;
     clock = nullptr;
     TApplication::shutDown();
@@ -256,6 +260,8 @@ void TurboApp::idle()
         clock->update();
     if (lsp)
         lsp->pump();
+    if (watcher)
+        onFilesChanged();
     if (git)
         git->pump(docTree);
 }
@@ -391,6 +397,8 @@ void TurboApp::scanWorkspace()
             lsp->setRootPath(cwd);
         if (git)
             git->setWorkspace(cwd);
+        if (watcher)
+            watcher->start(cwd);
         ::free(cwd);
     }
 }
@@ -424,6 +432,35 @@ void TurboApp::editLspSettings()
 void TurboApp::gitRefresh()
 {
     if (git)
+        git->requestStatus();
+}
+
+void TurboApp::onFilesChanged()
+{
+    std::vector<std::string> changed;
+    if (!watcher->poll(changed))
+        return;
+    bool gitTouched = false;
+    for (auto &p : changed)
+    {
+        gitTouched = true; // any change under the worktree may affect git status
+        // Skip git's own internals for tree structure (they are hidden anyway);
+        // they only matter for the status refresh below.
+        if (p.find("/.git/") != std::string::npos)
+            continue;
+        if (!docTree)
+            continue;
+        std::error_code ec;
+        if (std::filesystem::exists(p, ec))
+        {
+            bool isDir = std::filesystem::is_directory(p, ec);
+            // No-op if already present or hidden; adds a node for new files/dirs.
+            docTree->tree->addNode(p, isDir);
+        }
+        else
+            docTree->tree->removeNode(p); // no-op if not in the tree
+    }
+    if (gitTouched && git)
         git->requestStatus();
 }
 

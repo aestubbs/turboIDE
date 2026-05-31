@@ -113,6 +113,11 @@ target_link_libraries(${TURBO}-core PUBLIC
     tvision
 )
 
+# The filesystem watcher uses FSEvents on macOS (CoreServices framework).
+if (APPLE)
+    target_link_libraries(${TURBO}-core PUBLIC "-framework CoreServices")
+endif()
+
 if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.13.0")
     install(TARGETS ${TURBO}-core
         EXPORT ${TURBO}-config

@@ -8,6 +8,7 @@
 #include <memory>
 
 #include <turbo/editstates.h>
+#include <turbo/filewatcher.h>
 #include "doctree.h"
 #include "apputils.h"
 #include "editwindow.h"
@@ -35,6 +36,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     AppSettings settings;
     std::unique_ptr<LspManager> lsp;
     std::unique_ptr<GitManager> git;
+    std::unique_ptr<turbo::FileWatcher> watcher;
 
     TurboApp(int argc, const char **argv) noexcept;
     ~TurboApp();
@@ -53,6 +55,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     void openFileFromTree(const char *absPath);
     void scanWorkspace();
     void toggleAutoSave();
+    void onFilesChanged();
     void gitRefresh();
     void gitCommitDialog();
     void gitRemote(int which); // 0=fetch 1=pull 2=push
