@@ -1,4 +1,5 @@
 #define Uses_TApplication
+#define Uses_MsgBox
 #define Uses_TDeskTop
 #define Uses_TKeys
 #define Uses_TMenuBar
@@ -26,6 +27,8 @@
 #include "doctree.h"
 #include "lspmanager.h"
 #include "lspdialog.h"
+#include "gitmanager.h"
+#include "gitdialog.h"
 #include <turbo/fileeditor.h>
 #include <turbo/tpath.h>
 
@@ -42,6 +45,7 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     loadSettings(settings);
     lsp = std::make_unique<LspManager>();
     configureLsp();
+    git = std::make_unique<GitManager>();
 
     TCommandSet ts;
     ts += cmSave;
@@ -186,6 +190,14 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             *new TMenuItem( "Toggle Long Line G~u~ide", cmToggleEdge, kbNoKey, hcNoContext ) +
             newLine() +
             *new TMenuItem( "~L~anguage Servers...", cmLspSettings, kbNoKey, hcNoContext ) +
+        *new TSubMenu( "~G~it", kbAltG ) +
+            *new TMenuItem( "~C~ommit...", cmGitCommit, kbNoKey, hcNoContext ) +
+            newLine() +
+            *new TMenuItem( "~F~etch", cmGitFetch, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Pu~l~l", cmGitPull, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~P~ush", cmGitPush, kbNoKey, hcNoContext ) +
+            newLine() +
+            *new TMenuItem( "~R~efresh Status", cmGitRefresh, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~H~elp", kbAltH ) +
             *new TMenuItem( "~K~eyboard shortcurs", cmHelp, kbF1, hcNoContext, "F1" ) +
             newLine() +
@@ -230,6 +242,8 @@ void TurboApp::shutDown()
 {
     if (lsp)
         lsp->shutdown();
+    if (git)
+        git->shutdown();
     docTree = nullptr;
     clock = nullptr;
     TApplication::shutDown();
@@ -242,6 +256,8 @@ void TurboApp::idle()
         clock->update();
     if (lsp)
         lsp->pump();
+    if (git)
+        git->pump(docTree);
 }
 
 void TurboApp::getEvent(TEvent &event)
@@ -271,6 +287,11 @@ void TurboApp::handleEvent(TEvent &event)
             case cmToggleTree: toggleTreeView(); break;
             case cmToggleAutoSave: toggleAutoSave(); break;
             case cmLspSettings: editLspSettings(); break;
+            case cmGitRefresh: gitRefresh(); break;
+            case cmGitCommit: gitCommitDialog(); break;
+            case cmGitFetch: gitRemote(0); break;
+            case cmGitPull: gitRemote(1); break;
+            case cmGitPush: gitRemote(2); break;
             case cmShowCompletion:
                 if (lsp)
                     if (auto *w = (EditorWindow *) event.message.infoPtr)
@@ -368,6 +389,8 @@ void TurboApp::scanWorkspace()
         docTree->tree->scanDirectory(cwd);
         if (lsp)
             lsp->setRootPath(cwd);
+        if (git)
+            git->setWorkspace(cwd);
         ::free(cwd);
     }
 }
@@ -395,6 +418,48 @@ void TurboApp::editLspSettings()
     {
         saveSettings(settings);
         configureLsp();
+    }
+}
+
+void TurboApp::gitRefresh()
+{
+    if (git)
+        git->requestStatus();
+}
+
+void TurboApp::gitCommitDialog()
+{
+    if (!git || !git->isRepo())
+    {
+        messageBox("This folder is not a git repository.", mfInformation | mfOKButton);
+        return;
+    }
+    if (executeGitCommitDialog(*git))
+        ; // GitManager queues a status refresh after committing.
+}
+
+void TurboApp::gitRemote(int which)
+{
+    if (!git || !git->isRepo())
+    {
+        messageBox("This folder is not a git repository.", mfInformation | mfOKButton);
+        return;
+    }
+    auto report = [] (const char *what) {
+        return [what] (int code, const std::string &output) {
+            if (code != 0)
+            {
+                std::string msg = std::string("git ") + what + " failed:\n" +
+                    (output.empty() ? "(see terminal)" : output.substr(0, 400));
+                messageBox(msg.c_str(), mfError | mfOKButton);
+            }
+        };
+    };
+    switch (which)
+    {
+        case 0: git->fetch(report("fetch")); break;
+        case 1: git->pull(report("pull")); break;
+        case 2: git->push(report("push")); break;
     }
 }
 
@@ -578,6 +643,8 @@ void TurboApp::editorSaved(EditorWindow &w) noexcept
 {
     if (lsp)
         lsp->didSave(w);
+    if (git)
+        git->requestStatus(); // a save may change the file's git status
 }
 
 void TurboApp::editorCharAdded(EditorWindow &w, int ch) noexcept

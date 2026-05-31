@@ -7,8 +7,10 @@
 
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 struct EditorWindow;
+struct GitFileStatus;
 
 struct DocumentTreeView : public TOutline {
 
@@ -19,6 +21,9 @@ struct DocumentTreeView : public TOutline {
         std::string path;       // Absolute path of this file or directory.
         bool isDir;
         EditorWindow *editor;   // Non-null iff this file is open in an editor.
+        // Git status badge char: 0 = clean, else 'M' 'A' 'D' 'R' '?' 'U' for a
+        // file, or '.' for a directory that contains changes.
+        char gitStatus {0};
 
         Node(Node *parent, std::string_view path, bool isDir) noexcept;
         void setEditor(EditorWindow *w) noexcept;
@@ -48,6 +53,10 @@ struct DocumentTreeView : public TOutline {
     // Expand ancestors of the editor's node and scroll it into view.
     void revealEditor(EditorWindow *w) noexcept;
 
+    // Apply git per-file status: clear all badges, set the given files, roll
+    // changed state up to ancestor directories, then redraw.
+    void applyGitStatus(const std::unordered_map<std::string, GitFileStatus> &files) noexcept;
+
     Node *findByEditor(const EditorWindow *w, int *pos=nullptr) noexcept;
     Node *findByPath(std::string_view path) noexcept;
     template <class Func>
@@ -72,9 +81,15 @@ struct DocumentTreeWindow : public TWindow {
 
     DocumentTreeView *tree;
     DocumentTreeWindow **ptr;
+    std::string baseTitle {"Files"};
+    std::string titleBuf;   // backing store for getTitle()
 
     DocumentTreeWindow(const TRect &bounds, DocumentTreeWindow **ptr) noexcept;
     ~DocumentTreeWindow();
+
+    // Set the branch/ahead-behind shown in the window title (empty = none).
+    void setBranchInfo(std::string_view info) noexcept;
+    const char *getTitle(short) override;
 
     void close() override;
 

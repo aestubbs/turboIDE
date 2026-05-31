@@ -17,6 +17,7 @@
 struct EditorWindow;
 class TClockView;
 class LspManager;
+class GitManager;
 
 struct TurboApp : public TApplication, EditorWindowParent
 {
@@ -33,6 +34,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     std::string mostRecentDir;
     AppSettings settings;
     std::unique_ptr<LspManager> lsp;
+    std::unique_ptr<GitManager> git;
 
     TurboApp(int argc, const char **argv) noexcept;
     ~TurboApp();
@@ -51,6 +53,9 @@ struct TurboApp : public TApplication, EditorWindowParent
     void openFileFromTree(const char *absPath);
     void scanWorkspace();
     void toggleAutoSave();
+    void gitRefresh();
+    void gitCommitDialog();
+    void gitRemote(int which); // 0=fetch 1=pull 2=push
     void configureLsp();
     void editLspSettings();
     void closeAll();

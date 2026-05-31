@@ -1,6 +1,7 @@
 #include "doctree.h"
 #include "editwindow.h"
 #include "app.h"
+#include "gitclient.h"
 #include <utility>
 #include <filesystem>
 #include <turbo/tpath.h>
@@ -35,6 +36,14 @@ void Node::refreshText() noexcept
     // Mark files with unsaved changes.
     if (editor && !editor->getEditor().inSavePoint())
         label += " *";
+    // Git status badge, to the right of the name (mirrors the " *" idiom).
+    if (gitStatus && gitStatus != '.')
+    {
+        label += "  ";
+        label += gitStatus;
+    }
+    else if (gitStatus == '.')
+        label += "  \xC2\xB7"; // middle dot: directory contains changes
     delete[] text;
     text = newStr(label);
 }
@@ -173,6 +182,24 @@ Boolean drawNode( TOutlineViewer *v, TNode *cur, int level, int position,
             TColorAttr c = (flags & ovExpanded) ? color : (color >> 8);
             if (((Node *) cur)->editor)
                 setStyle(c, getStyle(c) | slBold);
+            // Tint rows by git status (only when not the focused/selected row,
+            // which keep their highlight colours for legibility).
+            char gs = ((Node *) cur)->gitStatus;
+            if (gs && !(position == v->foc && (v->state & sfFocused))
+                   && !v->isSelected(position))
+            {
+                char fg;
+                switch (gs)
+                {
+                    case 'M': case 'R': fg = '\x0E'; break; // yellow
+                    case 'A': case '?': fg = '\x0A'; break; // green
+                    case 'D':           fg = '\x0C'; break; // red
+                    case 'U':           fg = '\x0D'; break; // magenta
+                    case '.':           fg = '\x06'; break; // dim (dir)
+                    default:            fg = '\x07'; break;
+                }
+                setFore(c, TColorDesired(fg));
+            }
             dBuf.moveStr(max(0, x), text, c, (ushort) -1U, max(0, -x));
         }
         v->writeLine(0, position - v->delta.y, v->size.x, 1, dBuf);
@@ -305,6 +332,56 @@ Node* DocumentTreeView::findByPath(std::string_view path) noexcept
     });
 }
 
+static char badgeFor(const GitFileStatus &s) noexcept
+{
+    switch (s.state)
+    {
+        case GitFileState::Modified:   return 'M';
+        case GitFileState::Added:      return 'A';
+        case GitFileState::Deleted:    return 'D';
+        case GitFileState::Renamed:    return 'R';
+        case GitFileState::Untracked:  return '?';
+        case GitFileState::Conflicted: return 'U';
+        default:                       return 0;
+    }
+}
+
+static void clearStatusRecursive(Node *list) noexcept
+{
+    for (Node *n = list; n; n = (Node *) n->next)
+    {
+        bool had = n->gitStatus != 0;
+        n->gitStatus = 0;
+        if (had)
+            n->refreshText();
+        if (n->childList)
+            clearStatusRecursive((Node *) n->childList);
+    }
+}
+
+void DocumentTreeView::applyGitStatus(
+    const std::unordered_map<std::string, GitFileStatus> &files) noexcept
+{
+    clearStatusRecursive((Node *) root);
+    for (auto &kv : files)
+    {
+        Node *node = findByPath(kv.first);
+        if (!node)
+            continue; // file outside the scanned tree (e.g. ignored dir)
+        node->gitStatus = badgeFor(kv.second);
+        node->refreshText();
+        // Roll the "contains changes" marker up to ancestor directories.
+        for (Node *p = node->parent; p; p = p->parent)
+            if (p->gitStatus == 0)
+            {
+                p->gitStatus = '.';
+                p->refreshText();
+            }
+    }
+    update();
+    drawView();
+}
+
 DocumentTreeWindow::DocumentTreeWindow(const TRect &bounds, DocumentTreeWindow **ptr) noexcept :
     TWindowInit(&DocumentTreeWindow::initFrame),
     TWindow(bounds, "Files", wnNoNumber),
@@ -325,6 +402,20 @@ DocumentTreeWindow::~DocumentTreeWindow()
 {
     if (ptr)
         *ptr = nullptr;
+}
+
+void DocumentTreeWindow::setBranchInfo(std::string_view info) noexcept
+{
+    if (info.empty())
+        titleBuf = baseTitle;
+    else
+        titleBuf = baseTitle + " - " + std::string(info);
+    frame->drawView();
+}
+
+const char *DocumentTreeWindow::getTitle(short)
+{
+    return titleBuf.empty() ? baseTitle.c_str() : titleBuf.c_str();
 }
 
 void DocumentTreeWindow::close()

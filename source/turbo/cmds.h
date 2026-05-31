@@ -52,6 +52,11 @@ enum : ushort
     cmRevealInTree,
     cmLspSettings,
     cmShowCompletion,
+    cmGitRefresh,
+    cmGitCommit,
+    cmGitFetch,
+    cmGitPull,
+    cmGitPush,
 };
 
 #endif // TURBO_CMDS_H
