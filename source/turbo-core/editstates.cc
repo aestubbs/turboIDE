@@ -556,6 +556,10 @@ void applyTheming(const LexerSettings *lexer, const ColorScheme *aScheme, TScint
             call(scintilla, SCI_SETKEYWORDS, k.id, (sptr_t) k.keywords);
         for (const auto &p : lexer->properties)
             call(scintilla, SCI_SETPROPERTY, (sptr_t) p.name, (sptr_t) p.value);
+        // Enable fold-point computation for every lexer, so the fold margin
+        // works when the user turns folding on. Overrides any per-lexer
+        // "fold"="0" default.
+        call(scintilla, SCI_SETPROPERTY, (sptr_t) "fold", (sptr_t) "1");
     }
     else
         call(scintilla, SCI_SETLEXER, SCLEX_CONTAINER, 0U);

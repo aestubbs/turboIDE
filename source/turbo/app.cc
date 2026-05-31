@@ -61,6 +61,17 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     ts += cmSelCapitalize;
     ts += cmToggleComment;
     ts += cmCompletion;
+    ts += cmSelectNextOccurrence;
+    ts += cmSelectAllOccurrences;
+    ts += cmToggleBookmark;
+    ts += cmNextBookmark;
+    ts += cmPrevBookmark;
+    ts += cmToggleFolding;
+    ts += cmFoldAtCursor;
+    ts += cmFoldAll;
+    ts += cmUnfoldAll;
+    ts += cmToggleChangeHistory;
+    ts += cmToggleEdge;
     ts += cmUndo;
     ts += cmRedo;
     ts += cmCut;
@@ -145,6 +156,18 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             *new TMenuItem( "~U~ppercase", cmSelUppercase, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~L~owercase", cmSelLowercase, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~C~apitalize", cmSelCapitalize, kbNoKey, hcNoContext ) +
+            newLine() +
+            *new TMenuItem( "Select ~N~ext Occurrence", cmSelectNextOccurrence, kbCtrlD, hcNoContext, "Ctrl-D" ) +
+            *new TMenuItem( "Select ~A~ll Occurrences", cmSelectAllOccurrences, kbNoKey, hcNoContext ) +
+        *new TSubMenu( "~C~ode", kbAltC ) +
+            *new TMenuItem( "~T~oggle Fold", cmFoldAtCursor, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~F~old All", cmFoldAll, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~U~nfold All", cmUnfoldAll, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Toggle Folding ~M~argin", cmToggleFolding, kbNoKey, hcNoContext ) +
+            newLine() +
+            *new TMenuItem( "Toggle ~B~ookmark", cmToggleBookmark, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~N~ext Bookmark", cmNextBookmark, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~P~revious Bookmark", cmPrevBookmark, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~W~indows", kbAltW ) +
             *new TMenuItem( "~Z~oom", cmZoom, kbF5, hcNoContext, "F5" ) +
             *new TMenuItem( "~R~esize/move",cmResize, kbCtrlF5, hcNoContext, "Ctrl-F5" ) +
@@ -159,6 +182,8 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             *new TMenuItem( "Toggle Auto ~I~ndent", cmToggleIndent, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Toggle File ~T~ree View", cmToggleTree, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Toggle ~A~uto-save on Focus Loss", cmToggleAutoSave, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Toggle Chan~g~e History", cmToggleChangeHistory, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Toggle Long Line G~u~ide", cmToggleEdge, kbNoKey, hcNoContext ) +
             newLine() +
             *new TMenuItem( "~L~anguage Servers...", cmLspSettings, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~H~elp", kbAltH ) +

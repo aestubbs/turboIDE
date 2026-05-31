@@ -87,6 +87,17 @@ EditorWindow::EditorWindow( const TRect &bounds, TurboEditor &aEditor,
     enabledCmds += cmReplaceOne;
     enabledCmds += cmReplaceAll;
     enabledCmds += cmCompletion;
+    enabledCmds += cmSelectNextOccurrence;
+    enabledCmds += cmSelectAllOccurrences;
+    enabledCmds += cmToggleBookmark;
+    enabledCmds += cmNextBookmark;
+    enabledCmds += cmPrevBookmark;
+    enabledCmds += cmToggleFolding;
+    enabledCmds += cmFoldAtCursor;
+    enabledCmds += cmFoldAll;
+    enabledCmds += cmUnfoldAll;
+    enabledCmds += cmToggleChangeHistory;
+    enabledCmds += cmToggleEdge;
 
     // Commands that always get disabled when unfocusing the editor.
     disabledCmds += enabledCmds;
@@ -200,6 +211,50 @@ void EditorWindow::handleEvent(TEvent &ev)
                 case cmClearReplace:
                     editor.clearReplaceIndicator();
                     editor.partialRedraw();
+                    break;
+                case cmSelectNextOccurrence:
+                    editor.selectNextOccurrence();
+                    editor.redraw();
+                    break;
+                case cmSelectAllOccurrences:
+                    editor.selectAllOccurrences();
+                    editor.redraw();
+                    break;
+                case cmToggleBookmark:
+                    editor.toggleBookmark();
+                    editor.redraw();
+                    break;
+                case cmNextBookmark:
+                    editor.nextBookmark();
+                    editor.redraw();
+                    break;
+                case cmPrevBookmark:
+                    editor.prevBookmark();
+                    editor.redraw();
+                    break;
+                case cmToggleFolding:
+                    editor.toggleFolding();
+                    editor.redraw();
+                    break;
+                case cmFoldAtCursor:
+                    editor.toggleFoldAtCursor();
+                    editor.redraw();
+                    break;
+                case cmFoldAll:
+                    editor.foldAll(true);
+                    editor.redraw();
+                    break;
+                case cmUnfoldAll:
+                    editor.foldAll(false);
+                    editor.redraw();
+                    break;
+                case cmToggleChangeHistory:
+                    editor.toggleChangeHistory();
+                    editor.redraw();
+                    break;
+                case cmToggleEdge:
+                    editor.toggleEdge();
+                    editor.redraw();
                     break;
                 case cmGoToLine:
                     openBottomView<GoToLineBox>(editor);

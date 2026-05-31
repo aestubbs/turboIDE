@@ -48,6 +48,7 @@ class Editor : protected TScintillaParent
 
     void drawViews() noexcept;
     void updateMarginWidth() noexcept;
+    void setUpExtraMargins() noexcept; // bookmark / change-history / fold margins
 
 protected:
 
@@ -66,6 +67,12 @@ public:
     LineNumbersWidth lineNumbers {minLineNumbersWidth};
     WrapState wrapping;
     AutoIndent autoIndent;
+    // IDE feature state. Off by default so the default appearance is unchanged.
+    bool foldingEnabled {false};
+    bool changeHistoryEnabled {false};
+    bool bookmarksUsed {false}; // becomes true once the bookmark margin is shown
+    bool edgeEnabled {false};
+    int edgeColumn {80};
     const Language *language {nullptr};
     const LexerSettings *lexer {nullptr};
     const ColorScheme *scheme {nullptr};
@@ -102,6 +109,26 @@ public:
     template <class Func>
     inline void lockReflow(Func &&func);
     inline sptr_t callScintilla(unsigned int iMessage, uptr_t wParam, sptr_t lParam);
+
+    // --- IDE features (see editor.cc) -------------------------------------
+    // Multiple selections / multi-cursor.
+    void selectNextOccurrence() noexcept; // add next match of the selection/word
+    void selectAllOccurrences() noexcept; // select every match at once
+    // Code folding (keyboard-driven; the terminal margin isn't clickable).
+    void toggleFolding() noexcept;        // show/hide the fold margin
+    void toggleFoldAtCursor() noexcept;   // collapse/expand the current block
+    void foldAll(bool contract) noexcept; // collapse or expand the whole file
+    // Bookmarks (line markers).
+    void toggleBookmark() noexcept;
+    void nextBookmark() noexcept;
+    void prevBookmark() noexcept;
+    // Change history margin (modified-since-save indicators). Tracked manually
+    // because this Scintilla predates SCI_SETCHANGEHISTORY.
+    void toggleChangeHistory() noexcept;
+    void markLineChanged(long pos, long linesAdded) noexcept; // from SCN_MODIFIED
+    void clearChangeHistory() noexcept;                       // on save
+    // Long-line guide (background tint past a column).
+    void toggleEdge() noexcept;
 
     inline void uppercase();
     inline void lowercase();
