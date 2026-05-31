@@ -8,6 +8,8 @@ As a text editor, Turbo aims at being intuitive and easy to use. Usability and p
 
 The original location of this project is https://github.com/magiblot/turbo.
 
+> **About this fork.** This is a fork of the original [`magiblot/turbo`](https://github.com/magiblot/turbo) that adds simple IDE-style features on top of the upstream editor, with the goal of turning Turbo into a lightweight, terminal-based IDE while staying as close to the original as possible. So far this includes a recursive directory file tree, opening files from the tree, auto-save when an editor loses focus, and Language Server Protocol (LSP) support — diagnostics, completion and hover — configurable per language. All upstream functionality is preserved; for the canonical version, please refer to the original repository linked above.
+
 ![Turbo](https://user-images.githubusercontent.com/20713561/89552632-b7053380-d80c-11ea-92e0-a8c30f80cd49.png)
 
 ## Downloads
@@ -19,7 +21,17 @@ The original location of this project is https://github.com/magiblot/turbo.
 
 ## Building
 
-First of all, you should clone this repository along its submodules with the `--recursive` option of `git clone`.
+First of all, you should clone this repository along its submodules with the `--recursive` option of `git clone`. This is **required**: the build depends on the submodules in `deps/` — Turbo Vision (`deps/tvision`) and, for the LSP support, [nlohmann/json](https://github.com/nlohmann/json) (`deps/json`). A non-recursive clone will fail to build with missing headers such as `nlohmann/json.hpp`.
+
+```sh
+git clone --recursive https://github.com/aestubbs/turbo.git
+```
+
+If you have already cloned the repository without `--recursive`, initialise the submodules afterwards:
+
+```sh
+git submodule update --init --recursive
+```
 
 Then, make sure the following dependencies are installed:
 
