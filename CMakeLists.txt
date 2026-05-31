@@ -118,6 +118,16 @@ if (APPLE)
     target_link_libraries(${TURBO}-core PUBLIC "-framework CoreServices")
 endif()
 
+# CoreServices/Cocoa headers clash with tvision's `Boolean` typedef (bool vs
+# unsigned char) when they share a translation unit. The watcher would see
+# tvision via both the unity batch and the precompiled header, so opt it out of
+# BOTH and compile it on its own with only its own includes + CoreServices.
+set_source_files_properties(
+    "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}-core/filewatcher.cc"
+    PROPERTIES
+        SKIP_UNITY_BUILD_INCLUSION ON
+        SKIP_PRECOMPILE_HEADERS ON)
+
 if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.13.0")
     install(TARGETS ${TURBO}-core
         EXPORT ${TURBO}-config

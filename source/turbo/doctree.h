@@ -57,6 +57,16 @@ struct DocumentTreeView : public TOutline {
     // changed state up to ancestor directories, then redraw.
     void applyGitStatus(const std::unordered_map<std::string, GitFileStatus> &files) noexcept;
 
+    // Incremental structural updates (used by the filesystem watcher) so the
+    // tree stays live without a full rescan, which would lose expand/scroll
+    // state. No-ops when the change is outside the scanned tree or hidden.
+    void addNode(std::string_view path, bool isDir) noexcept;
+    void removeNode(std::string_view path) noexcept;
+    void refreshNode(std::string_view path) noexcept;
+    Node *findDir(std::string_view path) noexcept;
+
+    std::string rootPath;   // absolute path scanned by scanDirectory()
+
     Node *findByEditor(const EditorWindow *w, int *pos=nullptr) noexcept;
     Node *findByPath(std::string_view path) noexcept;
     template <class Func>

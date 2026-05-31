@@ -31,8 +31,11 @@ public:
     // 'out' was filled with at least one path. Cheap; call every idle tick.
     bool poll(std::vector<std::string> &out) noexcept;
 
-private:
+    // Opaque backend state; defined in filewatcher.cc. Public so the C-style
+    // FSEvents callback (a free function) can reach it.
     struct Impl;
+
+private:
     std::unique_ptr<Impl> impl;
 };
 
