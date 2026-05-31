@@ -25,6 +25,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <map>
 #include <vector>
 
 #ifndef _WIN32
@@ -33,6 +34,37 @@
 
 using turbo::lsp::Client;
 using turbo::lsp::Json;
+
+// Diagnostics are decorated with Scintilla annotations: a line drawn *below* the
+// offending code showing a '~~~~' run aligned under the span plus the message.
+// (Real squiggly underlines are not possible here -- the terminal Surface leaves
+// the line-drawing primitives every Scintilla squiggle style relies on as empty
+// stubs, and a terminal cell has no sub-character row to draw a wave in.)
+//
+// Annotation text is coloured via two dedicated styles, placed high above the
+// lexer style range through SCI_ANNOTATIONSETSTYLEOFFSET so they never clash
+// with a language's syntax styles.
+namespace {
+constexpr int kAnnoStyleOffset = 200;
+constexpr int kAnnoError = 0;   // -> real style kAnnoStyleOffset + 0
+constexpr int kAnnoWarning = 1; // -> real style kAnnoStyleOffset + 1
+
+// Configure annotation visibility and the error/warning colours for one editor.
+// Idempotent; safe to call repeatedly.
+void setupAnnotations(turbo::Editor &ed) noexcept
+{
+    ed.callScintilla(SCI_ANNOTATIONSETVISIBLE, ANNOTATION_STANDARD, 0U);
+    ed.callScintilla(SCI_ANNOTATIONSETSTYLEOFFSET, kAnnoStyleOffset, 0U);
+    // Keep the editor's normal background; only recolour the foreground so the
+    // annotation reads like dimmed inline text in red/yellow.
+    TColorAttr base = turbo::getStyleColor(ed.scintilla, STYLE_DEFAULT);
+    TColorAttr err = base, warn = base;
+    ::setFore(err, TColorDesired(TColorBIOS(0xC)));  // light red
+    ::setFore(warn, TColorDesired(TColorBIOS(0xE))); // yellow
+    turbo::setStyleColor(ed.scintilla, kAnnoStyleOffset + kAnnoError, err);
+    turbo::setStyleColor(ed.scintilla, kAnnoStyleOffset + kAnnoWarning, warn);
+}
+} // namespace
 
 // --- small helpers ---------------------------------------------------------
 
@@ -366,12 +398,9 @@ void LspManager::didOpen(EditorWindow &w) noexcept
     if (!client)
         return;
 
-    // Set up the diagnostic indicators for this editor (idempotent).
+    // Set up diagnostic annotation styles for this editor (idempotent).
     auto &ed = w.getEditor();
-    TColorAttr errAttr = 0x0C;  // light red foreground
-    TColorAttr warnAttr = 0x0E; // yellow foreground
-    turbo::setIndicatorColor(ed.scintilla, turbo::idtrDiagnosticError, errAttr);
-    turbo::setIndicatorColor(ed.scintilla, turbo::idtrDiagnosticWarning, warnAttr);
+    setupAnnotations(ed);
     // Enable hover: SCN_DWELLSTART fires after the mouse rests this long (ms).
     ed.callScintilla(SCI_SETMOUSEDWELLTIME, 500, 0U);
 
@@ -458,14 +487,7 @@ void LspManager::applyDiagnostics(EditorWindow &w, const Json &diagnostics,
                                   turbo::lsp::PositionEncoding enc) noexcept
 {
     auto &ed = w.getEditor();
-    long len = ed.callScintilla(SCI_GETLENGTH, 0U, 0U);
-
-    // Clear previously drawn diagnostic indicators across the whole document.
-    for (int ind : {turbo::idtrDiagnosticError, turbo::idtrDiagnosticWarning})
-    {
-        ed.callScintilla(SCI_SETINDICATORCURRENT, ind, 0U);
-        ed.callScintilla(SCI_INDICATORCLEARRANGE, 0, len);
-    }
+    setupAnnotations(ed); // (re)assert visibility/colours in case theming changed
 
     auto &doc = docs[&w];
     doc.diagnostics.clear();
@@ -482,16 +504,76 @@ void LspManager::applyDiagnostics(EditorWindow &w, const Json &diagnostics,
         if (end < start)
             std::swap(start, end);
         int severity = d.value("severity", 1);
-        int ind = (severity == 1) ? turbo::idtrDiagnosticError
-                                   : turbo::idtrDiagnosticWarning;
-        ed.callScintilla(SCI_SETINDICATORCURRENT, ind, 0U);
-        ed.callScintilla(SCI_INDICATORFILLRANGE, start, (end > start) ? (end - start) : 1);
         doc.diagnostics.push_back({start, end, severity, d.value("message", std::string())});
     }
+
+    renderAnnotations(w);
 
     ed.redraw();
     logLine("applied " + std::to_string(doc.diagnostics.size()) +
             " diagnostic(s) to " + doc.uri);
+}
+
+void LspManager::renderAnnotations(EditorWindow &w) noexcept
+{
+    auto &ed = w.getEditor();
+    Document *doc = docFor(w);
+    if (!doc)
+        return;
+
+    ed.callScintilla(SCI_ANNOTATIONCLEARALL, 0U, 0U);
+
+    // Group diagnostics by the (display) line their span starts on, preserving
+    // document order so earlier diagnostics list first.
+    std::map<long, std::vector<const Diagnostic *>> byLine;
+    for (auto &d : doc->diagnostics)
+    {
+        long line = ed.callScintilla(SCI_LINEFROMPOSITION, d.start, 0U);
+        byLine[line].push_back(&d);
+    }
+
+    for (auto &entry : byLine)
+    {
+        long line = entry.first;
+        const auto &diags = entry.second;
+        std::string text;
+        int worst = 4; // 1=Error is "worst"; default to hint
+        for (size_t i = 0; i < diags.size(); ++i)
+        {
+            const Diagnostic *d = diags[i];
+            worst = std::min(worst, d->severity);
+            // Column of the span start, and how many columns it covers on this
+            // line (so the '~~~~' sits directly under the offending text).
+            int startCol = (int) ed.callScintilla(SCI_GETCOLUMN, d->start, 0U);
+            long endLine = ed.callScintilla(SCI_LINEFROMPOSITION, d->end, 0U);
+            int endCol;
+            if (endLine == line)
+                endCol = (int) ed.callScintilla(SCI_GETCOLUMN, d->end, 0U);
+            else
+            {
+                long lineEnd = ed.callScintilla(SCI_GETLINEENDPOSITION, line, 0U);
+                endCol = (int) ed.callScintilla(SCI_GETCOLUMN, lineEnd, 0U);
+            }
+            int width = endCol - startCol;
+            if (width < 1) width = 1;
+
+            // One condensed message line (annotations don't wrap); collapse any
+            // embedded newlines so multi-line server messages stay on one row.
+            std::string msg = d->message;
+            for (char &c : msg)
+                if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+
+            if (i > 0)
+                text += '\n';
+            text.append((size_t) startCol, ' ');
+            text.append((size_t) width, '~');
+            text += ' ';
+            text += msg;
+        }
+        ed.callScintilla(SCI_ANNOTATIONSETTEXT, line, (sptr_t) text.c_str());
+        ed.callScintilla(SCI_ANNOTATIONSETSTYLE, line,
+                         (worst == 1) ? kAnnoError : kAnnoWarning);
+    }
 }
 
 void LspManager::onServerMessage(const std::string &languageId, const Json &msg) noexcept

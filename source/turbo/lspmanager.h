@@ -91,6 +91,9 @@ private:
     EditorWindow *findByUri(const std::string &uri) noexcept;
     void applyDiagnostics(EditorWindow &w, const turbo::lsp::Json &diagnostics,
                           turbo::lsp::PositionEncoding enc) noexcept;
+    // Draws the stored diagnostics as annotations (a '~~~~' run plus the message
+    // on the line below each diagnostic's span).
+    void renderAnnotations(EditorWindow &w) noexcept;
     // Builds the textDocument/position params for the editor's caret.
     turbo::lsp::Json positionParams(EditorWindow &w, long pos) noexcept;
     void sendCompletion(EditorWindow &w) noexcept;
