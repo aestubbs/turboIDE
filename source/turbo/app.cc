@@ -498,10 +498,12 @@ void TurboApp::refreshWindowList() noexcept
     MRUlist.forEach([&] (EditorWindow *w) {
         if (i >= windowListMax || !w)
             return;
-        // "N filename" -- a 1-based index plus the window's title. Escape '~'
-        // (TVision's hotkey marker) so titles containing it render literally.
-        std::string label = std::to_string(i + 1) + " ";
-        for (char c : w->title)
+        // Entries are MRU-ordered, but each is prefixed with the window's stable
+        // 1..9 number -- the same one Alt-1..9 selects -- so the menu and the
+        // keyboard shortcut always agree. Windows past nine show no number.
+        std::string label = (w->number >= 1 && w->number <= 9)
+            ? std::to_string(w->number) + " " : "  ";
+        for (char c : w->title) // escape '~' (TVision's hotkey marker)
         {
             if (c == '~') label += '~';
             label += c;
@@ -660,6 +662,11 @@ void TurboApp::addEditor(turbo::TScintilla &scintilla, const char *path)
     auto &counter = fileCount[TPath::basename(path)];
     auto &editor = *new TurboEditor(scintilla, path);
     EditorWindow &w = *new EditorWindow(r, editor, counter, searchSettings, *this);
+    // Give it a stable 1..9 number for Turbo Vision's built-in Alt-1..9 window
+    // selection. Assigned before inserting into the MRU list so the new window
+    // isn't counted as already using a number; it stays fixed for the window's
+    // lifetime and is freed for reuse when the window closes.
+    w.number = lowestFreeWindowNumber();
     if (docTree)
         docTree->tree->linkEditor(&w);
     w.listHead.insert_after(&MRUlist);
@@ -667,6 +674,19 @@ void TurboApp::addEditor(turbo::TScintilla &scintilla, const char *path)
     enableCommands(editorCmds);
     if (lsp)
         lsp->didOpen(w);
+}
+
+short TurboApp::lowestFreeWindowNumber() noexcept
+{
+    bool used[10] = {}; // index 1..9
+    MRUlist.forEach([&] (EditorWindow *win) {
+        if (win && win->number >= 1 && win->number <= 9)
+            used[win->number] = true;
+    });
+    for (short n = 1; n <= 9; ++n)
+        if (!used[n])
+            return n;
+    return wnNoNumber; // more than 9 windows: extras are unnumbered
 }
 
 void TurboApp::showEditorList(TEvent *ev)

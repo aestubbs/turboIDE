@@ -74,6 +74,9 @@ struct TurboApp : public TApplication, EditorWindowParent
     void refreshWindowList() noexcept;
     // Focus the i-th most-recently-used editor window (Windows menu list).
     void focusRecentWindow(int index) noexcept;
+    // Lowest window number in [1, 9] not currently used by an open editor, or
+    // wnNoNumber if all nine are taken. Drives the built-in Alt-1..9 selection.
+    short lowestFreeWindowNumber() noexcept;
     void onFilesChanged();
     void gitRefresh();
     void gitCommitDialog();

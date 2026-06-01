@@ -27,11 +27,13 @@ struct TitleState
     active_counter *counter;
     uint number;
     bool inSavePoint;
+    short windowNumber;
 
     bool operator!=(const TitleState &other) const noexcept
     {
         return !( counter == other.counter && number == other.number &&
-                  inSavePoint == other.inSavePoint );
+                  inSavePoint == other.inSavePoint &&
+                  windowNumber == other.windowNumber );
     }
 };
 

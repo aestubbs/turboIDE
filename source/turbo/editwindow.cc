@@ -406,12 +406,16 @@ void EditorWindow::openBottomView(Args&& ...args)
 const char* EditorWindow::formatTitle(ushort flags) noexcept
 {
     bool inSavePoint = (flags & tfNoSavePoint) || editor.inSavePoint();
-    TitleState titleState {fileNumber.counter, fileNumber.number, inSavePoint};
+    TitleState titleState {fileNumber.counter, fileNumber.number, inSavePoint, number};
     if (lastTitleState != titleState)
     {
         lastTitleState = titleState;
         TStringView name = filePath().empty() ? "Untitled" : TPath::basename(filePath());
         std::ostringstream os;
+        // Lead with the stable 1..9 window number (the Alt-N target) when set,
+        // since this Turbo Vision frame style hides the built-in number badge.
+        if (number >= 1 && number <= 9)
+            os << number << ": ";
         os << name;
         if (fileNumber.number > 1)
             os << " (" << fileNumber.number << ')';
