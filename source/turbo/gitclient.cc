@@ -153,6 +153,22 @@ bool status(const std::string &root, GitRepoStatus &out) noexcept
         }
         // '!' (ignored) is not requested, so it won't appear.
     }
+
+    // Local branch names (cheap local op), for the menu-bar branch dropdown.
+    std::string brBuf;
+    if (turbo::Process::runToEnd(
+            "git", {"for-each-ref", "--format=%(refname:short)", "refs/heads"},
+            brBuf, root, nonInteractiveEnv()) == 0)
+    {
+        size_t start = 0;
+        for (size_t i = 0; i <= brBuf.size(); ++i)
+            if (i == brBuf.size() || brBuf[i] == '\n')
+            {
+                if (i > start)
+                    out.branches.emplace_back(brBuf, start, i - start);
+                start = i + 1;
+            }
+    }
     return true;
 }
 
@@ -172,6 +188,39 @@ int unstage(const std::string &root, const std::vector<std::string> &paths,
     std::vector<std::string> args = {"restore", "--staged", "--"};
     for (auto &p : paths) args.push_back(p);
     return turbo::Process::runToEnd("git", args, output, root, nonInteractiveEnv());
+}
+
+int revert(const std::string &root, const std::vector<std::string> &paths,
+           std::string &output) noexcept
+{
+    // `checkout HEAD -- <paths>` rewrites both the index and the working tree
+    // from the last commit, so it discards staged AND unstaged changes in one
+    // step (and restores a file deleted in the work tree).
+    std::vector<std::string> args = {"checkout", "HEAD", "--"};
+    for (auto &p : paths) args.push_back(p);
+    return turbo::Process::runToEnd("git", args, output, root, nonInteractiveEnv());
+}
+
+int checkout(const std::string &root, const std::string &branch, bool force,
+             std::string &output) noexcept
+{
+    std::vector<std::string> args = {"checkout"};
+    if (force)
+        args.push_back("--force");
+    args.push_back(branch);
+    return turbo::Process::runToEnd("git", args, output, root, nonInteractiveEnv());
+}
+
+int stashPush(const std::string &root, std::string &output) noexcept
+{
+    return turbo::Process::runToEnd(
+        "git", {"stash", "push"}, output, root, nonInteractiveEnv());
+}
+
+int stashPop(const std::string &root, std::string &output) noexcept
+{
+    return turbo::Process::runToEnd(
+        "git", {"stash", "pop"}, output, root, nonInteractiveEnv());
 }
 
 int commit(const std::string &root, const std::string &message,

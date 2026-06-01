@@ -10,9 +10,35 @@
 #define Uses_TProgram
 #define Uses_TDrawBuffer
 #define Uses_TKeys
+#define Uses_TEvent
+#define Uses_TMenuItem
 #include <tvision/tv.h>
 
 using Node = DocumentTreeView::Node;
+
+namespace {
+
+// Depth-first search over the WHOLE tree, including collapsed branches. The
+// inherited TOutlineViewer::firstThat only visits expanded (on-screen) nodes,
+// which is right for display-position work (focus/scroll) but wrong for looking
+// a node up by path or editor: those must succeed regardless of what the user
+// has expanded -- otherwise git badges and open-file links would vanish for any
+// folder that happens to be collapsed.
+template <class Pred>
+Node *findNodeRec(TNode *list, Pred &&pred) noexcept
+{
+    for (TNode *n = list; n; n = n->next)
+    {
+        if (pred((Node *) n))
+            return (Node *) n;
+        if (n->childList)
+            if (Node *r = findNodeRec(n->childList, pred))
+                return r;
+    }
+    return nullptr;
+}
+
+} // namespace
 
 DocumentTreeView::DocumentTreeView(const TRect &bounds, TScrollBar *hsb,
                                    TScrollBar *vsb, TNode *aRoot) noexcept :
@@ -131,8 +157,10 @@ static void scanInto(Node *parent, TNode **list, const std::string &dirPath,
         std::string full = entry.path().string();
         auto *node = new Node(parent, full, isDir);
         if (isDir)
-            // Expand only the top level by default to keep the tree manageable.
-            node->expanded = (depth == 0) ? True : False;
+            // Every directory starts collapsed (including the top level), so the
+            // tree opens compact; the user expands what they want, like any
+            // other folder. (depth is no longer used to force expansion.)
+            node->expanded = False;
         putNode(list, node);
         if (isDir)
             scanInto(node, &node->childList, full, depth + 1, showHidden);
@@ -174,7 +202,7 @@ void DocumentTreeView::setShowHidden(bool show) noexcept
 
 DocumentTreeView::Node *DocumentTreeView::findDir(std::string_view path) noexcept
 {
-    return firstThat([path] (Node *node, int) {
+    return findNodeRec(root, [path] (Node *node) {
         return node->isDir && node->path == path;
     });
 }
@@ -235,10 +263,8 @@ void DocumentTreeView::addNode(std::string_view path, bool isDir) noexcept
     drawView();
 }
 
-void DocumentTreeView::selected(int i) noexcept
+void DocumentTreeView::openOrToggle(Node *node) noexcept
 {
-    // Triggered by Enter or a double-click (not by moving the highlight).
-    auto *node = (Node *) getNode(i);
     if (!node)
         return;
     if (node->isDir)
@@ -251,6 +277,129 @@ void DocumentTreeView::selected(int i) noexcept
         node->editor->focus();
     else if (auto *app = (TurboApp *) TProgram::application)
         app->openFileFromTree(node->path.c_str());
+}
+
+void DocumentTreeView::selected(int i) noexcept
+{
+    // Triggered by Enter or a double-click (not by moving the highlight).
+    openOrToggle((Node *) getNode(i));
+}
+
+void DocumentTreeView::handleEvent(TEvent &ev)
+{
+    if (ev.what == evMouseDown)
+    {
+        TPoint local = makeLocal(ev.mouse.where);
+        int row = delta.y + local.y;
+        bool onRow = row >= 0 && row < limit.y;
+        // Right-click: open the context menu for the clicked node. Handle it
+        // ourselves so the base outline doesn't also treat it as a select/toggle.
+        if (ev.mouse.buttons & mbRightButton)
+        {
+            if (onRow)
+            {
+                foc = row;
+                update();
+                drawView();
+                showContextMenu(row, ev.mouse.where);
+            }
+            clearEvent(ev);
+            return;
+        }
+        // Left double-click: open/toggle the clicked node directly. The base
+        // class would do this on meDoubleClick too, but only reliably once the
+        // tree already has focus; doing it here makes a plain double-click work
+        // even when arriving from another window. clearEvent() stops the base
+        // from acting on the same event (which would open the file twice).
+        if ((ev.mouse.buttons & mbLeftButton) &&
+            (ev.mouse.eventFlags & meDoubleClick) && onRow)
+        {
+            foc = row;
+            openOrToggle((Node *) getNode(row));
+            clearEvent(ev);
+            return;
+        }
+    }
+    TOutline::handleEvent(ev);
+}
+
+void DocumentTreeView::showContextMenu(int row, TPoint where) noexcept
+{
+    auto *node = (Node *) getNode(row);
+    if (!node)
+        return;
+    // Capture identity by value: the menu is modal, and while it is up the idle
+    // loop can still run the filesystem watcher, which may rebuild the tree and
+    // free 'node'. So below we act on these copies and re-resolve by path, never
+    // touching 'node' again.
+    std::string path = node->path;
+    bool isDir = node->isDir;
+    char gs = node->gitStatus;
+
+    // Build the item chain by hand so the optional Revert entry is easy to add.
+    auto *items  = new TMenuItem("~O~pen", cmTreeOpen, kbNoKey, hcNoContext);
+    auto *rename = new TMenuItem("~R~ename...", cmTreeRename, kbNoKey, hcNoContext);
+    auto *newf   = new TMenuItem("~N~ew File...", cmTreeNewFile, kbNoKey, hcNoContext);
+    auto *sep    = &newLine();
+    auto *add    = new TMenuItem("Git ~A~dd", cmTreeGitAdd, kbNoKey, hcNoContext);
+    items->append(rename);
+    rename->append(newf);
+    newf->append(sep);
+    sep->append(add);
+    TMenuItem *tail = add;
+    // Offer Revert only for a tracked file with committed content to restore
+    // from: modified ('M'), deleted ('D') or conflicted ('U'). Not for new/
+    // untracked files (nothing at HEAD), renames, or directories.
+    if (!isDir && (gs == 'M' || gs == 'D' || gs == 'U'))
+    {
+        auto *revert = new TMenuItem("Git Re~v~ert", cmTreeGitRevert, kbNoKey, hcNoContext);
+        tail->append(revert);
+        tail = revert;
+    }
+
+    ushort cmd = popupMenu(where, *items, nullptr);
+
+    auto *app = (TurboApp *) TProgram::application;
+    switch (cmd)
+    {
+        case cmTreeOpen:
+            // Re-resolve by path (see note above) rather than reuse 'node'.
+            if (isDir)
+            {
+                if (auto *n = findDir(path))
+                    openOrToggle(n);
+            }
+            else if (auto *n = findByPath(path))
+                openOrToggle(n);                 // focus existing editor, else open
+            else if (app)
+                app->openFileFromTree(path.c_str());
+            break;
+        case cmTreeRename:
+            if (app)
+                app->treeRenamePath(path, isDir);
+            break;
+        case cmTreeNewFile:
+        {
+            // Create inside a folder; for a file, create alongside it.
+            std::string dir = path;
+            if (!isDir)
+            {
+                TStringView d = TPath::dirname(path);
+                dir.assign(d.data(), d.size());
+            }
+            if (app)
+                app->treeCreateFile(dir);
+            break;
+        }
+        case cmTreeGitAdd:
+            if (app)
+                app->treeStagePath(path);
+            break;
+        case cmTreeGitRevert:
+            if (app)
+                app->treeRevertPath(path);
+            break;
+    }
 }
 
 namespace {
@@ -317,6 +466,42 @@ Boolean drawNode( TOutlineViewer *v, TNode *cur, int level, int position,
 
 } // namespace
 
+char *DocumentTreeView::getGraph(int level, long lines, ushort flags)
+{
+    if (level == 0)
+    {
+        // One ASCII column, aligned across root entries:
+        //   '+' collapsed folder, '-' expanded folder, ' ' file/empty dir.
+        char *g = new char[2];
+        if (!(flags & ovExpanded))
+            g[0] = '+';                 // has children, currently collapsed
+        else if (flags & ovChildren)
+            g[0] = '-';                 // has children, currently expanded
+        else
+            g[0] = ' ';                 // leaf
+        g[1] = '\0';
+        return g;
+    }
+    // Deeper levels, built as tight as possible: one column per ancestor level
+    // (a vertical 'lines' bar or a gap) followed immediately by this item's
+    // connector and then the name -- no filler and no trailing marker column.
+    // The connector sits directly under the first letter of the parent name.
+    // A collapsed folder shows '+' in the connector slot (the classic
+    // expandable-node marker), so the affordance survives without any extra
+    // width; files and expanded folders show the usual branch glyph.
+    char *g = new char[level + 2]; // 'level' ancestor cols + connector + NUL
+    char *p = g;
+    long l = lines;
+    for (int i = 0; i < level; ++i, l >>= 1)
+        *p++ = (l & 1) ? '\xB3' : ' ';          // │ (continues) or gap
+    if (!(flags & ovExpanded))
+        *p++ = '+';                             // collapsed folder
+    else
+        *p++ = (flags & ovLast) ? '\xC0' : '\xC3'; // └ (last) or ├
+    *p = '\0';
+    return g;
+}
+
 void DocumentTreeView::draw()
 {
     TDrawBuffer dBuf;
@@ -341,7 +526,10 @@ void DocumentTreeView::linkEditor(EditorWindow *w) noexcept
 
 void DocumentTreeView::unlinkEditor(EditorWindow *w) noexcept
 {
-    if (auto *node = findByEditor(w))
+    // Full-tree search (not findByEditor, which is visible-only): the link must
+    // be cleared even if the file's folder is collapsed, or a closed editor's
+    // dangling pointer would linger on a hidden node and crash when next drawn.
+    if (auto *node = findNodeRec(root, [w] (Node *n) { return n->editor == w; }))
     {
         node->setEditor(nullptr);
         update();
@@ -432,9 +620,7 @@ Node* DocumentTreeView::findByEditor(const EditorWindow *w, int *pos) noexcept
 
 Node* DocumentTreeView::findByPath(std::string_view path) noexcept
 {
-    return firstThat(
-    [path] (Node *node, int)
-    {
+    return findNodeRec(root, [path] (Node *node) {
         return !node->isDir && node->path == path;
     });
 }

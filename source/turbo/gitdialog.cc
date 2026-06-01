@@ -157,3 +157,26 @@ bool executeGitCommitDialog(GitManager &git) noexcept
     TObject::destroy(d);
     return committed;
 }
+
+unsigned short executeBranchSwitchDialog(const char *branch) noexcept
+{
+    auto *d = new TDialog(TRect(0, 0, 60, 13), "Switch Branch");
+    d->options |= ofCentered;
+
+    std::string b = branch ? branch : "";
+    std::string msg =
+        "Switching to '" + b + "', but you have uncommitted changes.\n\n"
+        "Stash & Switch: set them aside and re-apply on '" + b + "'.\n"
+        "Force: discard them.\n"
+        "Cancel: stay on the current branch.";
+    d->insert(new TStaticText(TRect(3, 2, 57, 9), msg));
+
+    int by = 10;
+    d->insert(new TButton(TRect(3, by, 23, by + 2), "~S~tash & Switch", cmYes, bfDefault));
+    d->insert(new TButton(TRect(24, by, 35, by + 2), "~F~orce", cmNo, bfNormal));
+    d->insert(new TButton(TRect(45, by, 57, by + 2), "Cancel", cmCancel, bfNormal));
+
+    unsigned short res = TProgram::deskTop->execView(d);
+    TObject::destroy(d);
+    return res;
+}

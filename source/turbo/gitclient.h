@@ -40,6 +40,8 @@ struct GitRepoStatus
     bool detached {false};
     // Absolute path -> status, for every non-clean file.
     std::unordered_map<std::string, GitFileStatus> files;
+    // Local branch short-names (refs/heads), sorted; includes the current one.
+    std::vector<std::string> branches;
 };
 
 namespace GitClient
@@ -57,8 +59,18 @@ namespace GitClient
               std::string &output) noexcept;
     int unstage(const std::string &root, const std::vector<std::string> &paths,
                 std::string &output) noexcept;
+    // Discard local changes: restore 'paths' to their committed (HEAD) content,
+    // dropping both staged and working-tree modifications.
+    int revert(const std::string &root, const std::vector<std::string> &paths,
+               std::string &output) noexcept;
     int commit(const std::string &root, const std::string &message,
                std::string &output) noexcept;
+
+    // Branch switching and stash, for the menu-bar branch dropdown.
+    int checkout(const std::string &root, const std::string &branch, bool force,
+                 std::string &output) noexcept;
+    int stashPush(const std::string &root, std::string &output) noexcept;
+    int stashPop(const std::string &root, std::string &output) noexcept;
 
     // Remote operations. Run non-interactively (no credential prompts); rely on
     // the user's credential helper / SSH agent.

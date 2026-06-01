@@ -44,6 +44,17 @@ public:
     void commit(const std::string &message, OpCallback onDone = {}) noexcept;
     void stage(const std::vector<std::string> &paths, OpCallback onDone = {}) noexcept;
     void unstage(const std::vector<std::string> &paths, OpCallback onDone = {}) noexcept;
+    void revert(const std::vector<std::string> &paths, OpCallback onDone = {}) noexcept;
+
+    // How to deal with uncommitted changes when switching branch.
+    enum class SwitchMode {
+        Plain,  // plain `git checkout` (fails if it would clobber local changes)
+        Stash,  // stash, checkout, then pop the stash onto the new branch
+        Force,  // `git checkout --force` (discards local changes)
+    };
+    // Switch to 'branch'. 'onDone' reports the checkout's exit code/output.
+    void switchBranch(const std::string &branch, SwitchMode mode,
+                      OpCallback onDone = {}) noexcept;
     void fetch(OpCallback onDone = {}) noexcept;
     void pull(OpCallback onDone = {}) noexcept;
     void push(OpCallback onDone = {}) noexcept;

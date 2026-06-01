@@ -39,8 +39,22 @@ struct DocumentTreeView : public TOutline {
     // Opening a file happens here (Enter / double-click), not on mere
     // highlight movement, so the arrow keys only move the selection.
     void selected(int i) noexcept override;
+    // Intercept right-click (context menu) and left double-click (open/toggle)
+    // before the base outline handling; everything else falls through.
+    void handleEvent(TEvent &ev) override;
     // Custom draw so that files open in an editor are shown in bold.
     void draw() override;
+    // Root entries (level 0) get a compact 1-char marker instead of the 3-char
+    // connector graph: the tree lines convey no hierarchy at the top level and
+    // only waste columns in the narrow pane. Deeper levels keep the full graph.
+    char *getGraph(int level, long lines, ushort flags) override;
+
+    // Open a file in the editor (or focus it if already open), or toggle a
+    // directory's expanded state. Shared by Enter, double-click and the menu.
+    void openOrToggle(Node *node) noexcept;
+    // Pop up the file/folder context menu for the node on display row 'row',
+    // anchored at the absolute screen position 'where', and run the chosen action.
+    void showContextMenu(int row, TPoint where) noexcept;
 
     // Build the tree by recursively scanning 'rootPath'.
     void scanDirectory(std::string_view rootPath) noexcept;

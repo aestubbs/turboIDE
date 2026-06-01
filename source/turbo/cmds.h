@@ -58,11 +58,21 @@ enum : ushort
     cmGitPull,
     cmGitPush,
     cmToggleHidden,
+    // File-tree right-click context menu actions.
+    cmTreeOpen,
+    cmTreeRename,
+    cmTreeNewFile,
+    cmTreeGitAdd,
+    cmTreeGitRevert,
     // Recent-windows list in the Windows menu: cmWindowBase + i selects the
     // i-th most-recently-used editor window (i in [0, windowListMax)).
     cmWindowBase = 1100,
+    // Branch dropdown in the menu bar: cmBranchBase + i checks out the i-th
+    // branch shown in the list (i in [0, branchListMax)).
+    cmBranchBase = 1200,
 };
 
 enum { windowListMax = 10 };
+enum { branchListMax = 100 };
 
 #endif // TURBO_CMDS_H

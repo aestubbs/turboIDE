@@ -21,6 +21,7 @@ struct EditorWindow;
 class TClockView;
 class LspManager;
 class GitManager;
+struct BranchView;
 
 // TMenuView::menu (the root of the menu tree) is protected; expose it so the app
 // can rewrite toggle-item labels to show check marks.
@@ -47,6 +48,12 @@ struct TurboApp : public TApplication, EditorWindowParent
     std::unique_ptr<LspManager> lsp;
     std::unique_ptr<GitManager> git;
     std::unique_ptr<turbo::FileWatcher> watcher;
+
+    // Branch indicator at the right of the menu bar (clickable; opens a popup of
+    // the other branches). 'branchTextShown' is the last text written to it, so
+    // the idle refresh only repaints/resizes on change.
+    BranchView *branchView {nullptr};
+    std::string branchTextShown;
 
     TurboApp(int argc, const char **argv) noexcept;
     ~TurboApp();
@@ -78,6 +85,24 @@ struct TurboApp : public TApplication, EditorWindowParent
     // wnNoNumber if all nine are taken. Drives the built-in Alt-1..9 selection.
     short lowestFreeWindowNumber() noexcept;
     void onFilesChanged();
+    // File-tree context-menu actions. Paths are absolute.
+    void treeCreateFile(const std::string &dirPath);     // prompt + create + open
+    void treeRenamePath(const std::string &path, bool isDir); // prompt + rename
+    void treeStagePath(const std::string &path);         // git add
+    void treeRevertPath(const std::string &path);        // confirm + git checkout HEAD
+    // Reload an open editor's buffer from the file on disk (used after a revert,
+    // so the editor doesn't keep -- and re-save -- the discarded changes). No-op
+    // if 'path' isn't open in any editor.
+    void reloadEditorFromDisk(const std::string &path) noexcept;
+    // Reload every open editor that has no unsaved changes from disk (used after
+    // a branch switch). Dirty buffers and files absent on the new branch are
+    // left untouched, so no in-progress work is lost.
+    void reloadCleanEditorsFromDisk() noexcept;
+
+    // Menu-bar branch indicator (top-right view + on-demand popup).
+    void refreshBranchView() noexcept;        // idle: update the indicator's text
+    void showBranchMenu(TPoint where) noexcept; // build & run the branch popup
+    void switchToBranch(const std::string &branch) noexcept; // confirm + checkout
     void gitRefresh();
     void gitCommitDialog();
     void gitRemote(int which); // 0=fetch 1=pull 2=push

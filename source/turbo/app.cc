@@ -16,6 +16,8 @@
 #define Uses_TParamText
 #define Uses_TScreen
 #define Uses_TButton
+#define Uses_TDrawBuffer
+#define Uses_TMenu
 #include <tvision/tv.h>
 
 #include "app.h"
@@ -33,8 +35,56 @@
 #include <turbo/fileeditor.h>
 #include <turbo/tpath.h>
 #include <filesystem>
+#include <fstream>
 
 using namespace Scintilla;
+
+// Branch indicator that lives at the right of the menu bar. It draws the current
+// branch (icon + name) like the clock used to, and a click opens a popup listing
+// the other branches (built fresh each time, so there is no persistent item list
+// to keep in sync). The list and the switch logic live in TurboApp.
+struct BranchView : public TView
+{
+    std::string text {"\xE2\x8E\x87 \xE2\x80\xA6"}; // "⎇ …" until git status loads
+
+    BranchView(const TRect &r) noexcept : TView(r)
+    {
+        eventMask |= evMouseDown;
+        growMode = gfGrowLoX | gfGrowHiX; // hug the right edge on resize
+    }
+
+    void draw() override
+    {
+        TDrawBuffer buf;
+        TColorAttr c = getColor(2); // same menu-row colour the clock used
+        buf.moveChar(0, ' ', c, size.x);
+        buf.moveStr(0, text.c_str(), c);
+        writeLine(0, 0, size.x, 1, buf);
+    }
+
+    void setText(const char *t) noexcept
+    {
+        if (text != t)
+        {
+            text = t;
+            drawView();
+        }
+    }
+
+    void handleEvent(TEvent &ev) override
+    {
+        TView::handleEvent(ev);
+        if (ev.what == evMouseDown)
+        {
+            // Anchor the popup at this view's top-left; popupMenu drops it one row
+            // down and nudges it left to stay on screen.
+            TPoint p = makeGlobal(TPoint {0, 0});
+            if (auto *app = (TurboApp *) TProgram::application)
+                app->showBranchMenu(p);
+            clearEvent(ev);
+        }
+    }
+};
 
 TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     TProgInit( &TurboApp::initStatusLine,
@@ -95,13 +145,22 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     editorCmds += cmCloseEditor;
     disableCommands(editorCmds);
 
-    // Create the clock view.
-    TRect r = getExtent();
-    r.a.x = r.b.x - 9;
-    r.b.y = r.a.y + 1;
-    clock = new TClockView(r);
-    clock->growMode = gfGrowLoX | gfGrowHiX;
-    insert(clock);
+    // Clock: bottom-right of the status line (out of the way; the menu-bar right
+    // is now used by the branch indicator).
+    TRect ext = getExtent();
+    {
+        TRect r {ext.b.x - 9, ext.b.y - 1, ext.b.x, ext.b.y};
+        clock = new TClockView(r);
+        clock->growMode = gfGrowLoX | gfGrowHiX | gfGrowLoY | gfGrowHiY;
+        insert(clock);
+    }
+    // Branch indicator: top-right of the menu bar. refreshBranchView() sizes it
+    // to the current branch name; this is just an initial placeholder slot.
+    {
+        TRect r {ext.b.x - 12, ext.a.y, ext.b.x, ext.a.y + 1};
+        branchView = new BranchView(r);
+        insert(branchView);
+    }
 
     // Create the document tree view
     {
@@ -272,6 +331,7 @@ void TurboApp::shutDown()
         watcher->stop();
     docTree = nullptr;
     clock = nullptr;
+    branchView = nullptr;
     TApplication::shutDown();
 }
 
@@ -290,6 +350,7 @@ void TurboApp::idle()
     // editor. Cheap: only rewrites a label when its checked state changes.
     refreshMenuChecks();
     refreshWindowList();
+    refreshBranchView();
 }
 
 void TurboApp::getEvent(TEvent &event)
@@ -582,6 +643,304 @@ void TurboApp::onFilesChanged()
     }
     if (gitTouched && git)
         git->requestStatus();
+}
+
+static std::string trimmed(const char *s)
+{
+    std::string v = s;
+    auto a = v.find_first_not_of(" \t");
+    if (a == std::string::npos)
+        return {};
+    auto b = v.find_last_not_of(" \t");
+    return v.substr(a, b - a + 1);
+}
+
+void TurboApp::treeCreateFile(const std::string &dirPath)
+{
+    char name[256] = "";
+    if (inputBox("New File", "File ~n~ame:", name, sizeof(name) - 1) != cmOK)
+        return;
+    std::string n = trimmed(name);
+    if (n.empty())
+        return;
+    std::string full = dirPath + "/" + n;
+    std::error_code ec;
+    if (std::filesystem::exists(full, ec))
+    {
+        messageBox(mfError | mfOKButton, "'%s' already exists.", n.c_str());
+        return;
+    }
+    // Allow a relative path in the name (e.g. "sub/new.txt"): make the parents.
+    auto parent = std::filesystem::path(full).parent_path();
+    if (!parent.empty())
+        std::filesystem::create_directories(parent, ec);
+    {
+        std::ofstream f(full, std::ios::out);
+        if (!f)
+        {
+            messageBox(mfError | mfOKButton, "Unable to create '%s'.", full.c_str());
+            return;
+        }
+    }
+    // Show the new node immediately (the watcher would also pick it up), then
+    // open it for editing.
+    if (docTree)
+        docTree->tree->addNode(full, false);
+    fileOpenOrNew(full.c_str());
+    if (git)
+        git->requestStatus();
+}
+
+void TurboApp::treeRenamePath(const std::string &path, bool isDir)
+{
+    TStringView baseSv = TPath::basename(path);
+    std::string base {baseSv.data(), baseSv.size()};
+    char name[256] = "";
+    strnzcpy(name, base.c_str(), sizeof name);
+    if (inputBox(isDir ? "Rename Folder" : "Rename File",
+                 "New ~n~ame:", name, sizeof(name) - 1) != cmOK)
+        return;
+    std::string n = trimmed(name);
+    if (n.empty() || n == base)
+        return;
+    TStringView dirSv = TPath::dirname(path);
+    std::string newPath {dirSv.data(), dirSv.size()};
+    newPath += "/";
+    newPath += n;
+    std::error_code ec;
+    if (std::filesystem::exists(newPath, ec))
+    {
+        messageBox(mfError | mfOKButton, "'%s' already exists.", n.c_str());
+        return;
+    }
+    std::filesystem::rename(path, newPath, ec);
+    if (ec)
+    {
+        messageBox(mfError | mfOKButton, "Unable to rename: %s.", ec.message().c_str());
+        return;
+    }
+    // Re-point any open editor whose file is the renamed file, or lives inside
+    // the renamed directory, at its new location.
+    std::vector<EditorWindow *> affected;
+    std::string oldPrefix = path + "/";
+    std::string newPrefix = newPath + "/";
+    MRUlist.forEach([&] (EditorWindow *w) {
+        if (!w)
+            return;
+        const std::string &fp = w->filePath();
+        std::string np;
+        if (!isDir && fp == path)
+            np = newPath;
+        else if (isDir && fp.size() > oldPrefix.size() &&
+                 fp.compare(0, oldPrefix.size(), oldPrefix) == 0)
+            np = newPrefix + fp.substr(oldPrefix.size());
+        else
+            return;
+        w->getEditor().filePath = np;
+        w->getEditor().onFilePathSet(); // re-detect language for the new name
+        affected.push_back(w);
+    });
+    // Rebuild the affected part of the tree (the watcher would reconcile this
+    // eventually, but do it now so the rename is immediate and links are kept).
+    if (docTree)
+    {
+        docTree->tree->removeNode(path);
+        docTree->tree->addNode(newPath, isDir);
+        for (auto *w : affected)
+        {
+            docTree->tree->linkEditor(w);   // attach to the freshly created node
+            handleTitleChange(*w);          // renumber/retitle a renamed file
+        }
+    }
+    if (git)
+        git->requestStatus();
+}
+
+void TurboApp::treeStagePath(const std::string &path)
+{
+    if (!git || !git->isRepo())
+    {
+        messageBox("This folder is not a git repository.", mfInformation | mfOKButton);
+        return;
+    }
+    git->stage({path}, [] (int code, const std::string &output) {
+        if (code != 0)
+        {
+            std::string m = "git add failed:\n" +
+                (output.empty() ? std::string("(see terminal)") : output.substr(0, 400));
+            messageBox(m.c_str(), mfError | mfOKButton);
+        }
+    });
+    // GitManager queues a status refresh after staging, so the badge updates.
+}
+
+void TurboApp::treeRevertPath(const std::string &path)
+{
+    if (!git || !git->isRepo())
+    {
+        messageBox("This folder is not a git repository.", mfInformation | mfOKButton);
+        return;
+    }
+    TStringView baseSv = TPath::basename(path);
+    std::string base {baseSv.data(), baseSv.size()};
+    // Discarding local changes is irreversible, so confirm first.
+    if (messageBox(mfConfirmation | mfYesButton | mfNoButton,
+                   "Discard all local changes to '%s'?\nThis cannot be undone.",
+                   base.c_str()) != cmYes)
+        return;
+    std::string p = path;
+    git->revert({p}, [this, p] (int code, const std::string &output) {
+        if (code != 0)
+        {
+            std::string m = "git revert failed:\n" +
+                (output.empty() ? std::string("(see terminal)") : output.substr(0, 400));
+            messageBox(m.c_str(), mfError | mfOKButton);
+            return;
+        }
+        // The file on disk is now the committed version; pull it into any open
+        // editor so the buffer matches (and a later save doesn't undo the revert).
+        reloadEditorFromDisk(p);
+    });
+    // GitManager queues a status refresh after the checkout, clearing the badge.
+}
+
+void TurboApp::reloadEditorFromDisk(const std::string &path) noexcept
+{
+    EditorWindow *target = nullptr;
+    MRUlist.forEach([&] (EditorWindow *w) {
+        if (w && w->filePath() == path)
+            target = w;
+    });
+    if (!target)
+        return;
+    auto &ed = target->getEditor();
+    ed.callScintilla(SCI_CLEARALL, 0U, 0U);
+    turbo::readFile(ed.scintilla, path.c_str(), turbo::showNoDialogs);
+    ed.callScintilla(SCI_EMPTYUNDOBUFFER, 0U, 0U);
+    ed.callScintilla(SCI_SETSAVEPOINT, 0U, 0U); // mark the buffer clean (= on disk)
+    ed.redraw();
+}
+
+void TurboApp::reloadCleanEditorsFromDisk() noexcept
+{
+    MRUlist.forEach([&] (EditorWindow *w) {
+        if (!w || w->filePath().empty())
+            return;
+        auto &ed = w->getEditor();
+        if (!ed.inSavePoint())
+            return; // unsaved buffer: leave the user's work alone
+        std::error_code ec;
+        if (!std::filesystem::exists(w->filePath(), ec))
+            return; // file absent on the new branch: keep what's in the editor
+        ed.callScintilla(SCI_CLEARALL, 0U, 0U);
+        turbo::readFile(ed.scintilla, w->filePath().c_str(), turbo::showNoDialogs);
+        ed.callScintilla(SCI_EMPTYUNDOBUFFER, 0U, 0U);
+        ed.callScintilla(SCI_SETSAVEPOINT, 0U, 0U);
+        ed.redraw();
+    });
+}
+
+void TurboApp::refreshBranchView() noexcept
+{
+    if (!branchView)
+        return;
+    // Text: branch icon (U+2387) + current branch (or a placeholder).
+    std::string text = "\xE2\x8E\x87 ";
+    bool repo = git && git->isRepo();
+    if (!repo)
+        text += "no repo";
+    else
+    {
+        const std::string &cur = git->currentStatus().branch;
+        text += cur.empty() ? "\xE2\x80\xA6" : cur; // ellipsis: not loaded yet
+    }
+    if (text == branchTextShown)
+        return;
+    branchTextShown = text;
+    branchView->setText(text.c_str());
+    // Size the indicator to its text and keep it pinned to the right edge.
+    int w = strwidth(text.c_str());
+    TRect ext = getExtent();
+    TRect r {ext.b.x - w, ext.a.y, ext.b.x, ext.a.y + 1};
+    branchView->locate(r);
+}
+
+void TurboApp::showBranchMenu(TPoint where) noexcept
+{
+    if (!git || !git->isRepo())
+    {
+        messageBox("This folder is not a git repository.", mfInformation | mfOKButton);
+        return;
+    }
+    // Build the list of the OTHER branches fresh each time (no persistent items).
+    const GitRepoStatus &st = git->currentStatus();
+    std::vector<std::string> others;
+    for (auto &b : st.branches)
+        if (b != st.branch)
+            others.push_back(b);
+
+    TMenuItem *head = nullptr, *tail = nullptr;
+    auto append = [&] (TMenuItem *it) {
+        if (!head) head = tail = it;
+        else { tail->next = it; tail = it; }
+    };
+    int n = (int) others.size();
+    if (n > branchListMax)
+        n = branchListMax;
+    for (int i = 0; i < n; ++i)
+        append(new TMenuItem(others[i].c_str(), cmBranchBase + i, kbNoKey, hcNoContext));
+    if (!head)
+    {
+        auto *it = new TMenuItem("(no other branches)", cmBranchBase, kbNoKey, hcNoContext);
+        it->disabled = True;
+        append(it);
+    }
+
+    // popupMenu takes ownership of the chain (wraps it in a TMenu it deletes).
+    unsigned short cmd = popupMenu(where, *head, nullptr);
+    int idx = (int) cmd - cmBranchBase;
+    if (idx >= 0 && idx < n)
+        switchToBranch(others[idx]);
+}
+
+void TurboApp::switchToBranch(const std::string &branch) noexcept
+{
+    if (!git || !git->isRepo())
+        return;
+
+    // "Dirty" for checkout purposes = any change to a tracked file. Untracked
+    // files don't block a normal checkout, so they don't trigger the prompt.
+    bool dirty = false;
+    for (auto &kv : git->currentStatus().files)
+        if (kv.second.state != GitFileState::Untracked)
+        {
+            dirty = true;
+            break;
+        }
+
+    auto onDone = [this, branch] (int code, const std::string &output) {
+        if (code != 0)
+        {
+            std::string m = "Could not switch to '" + branch + "':\n" +
+                (output.empty() ? std::string("(see terminal)") : output.substr(0, 400));
+            messageBox(m.c_str(), mfError | mfOKButton);
+            return;
+        }
+        // Working tree now matches the new branch; refresh editors to suit.
+        reloadCleanEditorsFromDisk();
+    };
+
+    if (!dirty)
+    {
+        git->switchBranch(branch, GitManager::SwitchMode::Plain, onDone);
+        return;
+    }
+    unsigned short choice = executeBranchSwitchDialog(branch.c_str());
+    if (choice == cmYes)
+        git->switchBranch(branch, GitManager::SwitchMode::Stash, onDone);
+    else if (choice == cmNo)
+        git->switchBranch(branch, GitManager::SwitchMode::Force, onDone);
+    // cmCancel (or closing the dialog): stay on the current branch.
 }
 
 void TurboApp::gitCommitDialog()

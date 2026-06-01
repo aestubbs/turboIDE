@@ -98,6 +98,48 @@ std::string GitManager::branchInfo(const GitRepoStatus &st) const
     return s;
 }
 
+void GitManager::revert(const std::vector<std::string> &paths, OpCallback onDone) noexcept
+{
+    if (root.empty()) return;
+    enqueue([this, paths, onDone] {
+        std::string out;
+        int code = GitClient::revert(root, paths, out);
+        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out}); }
+        runStatus();
+    });
+}
+
+void GitManager::switchBranch(const std::string &branch, SwitchMode mode,
+                              OpCallback onDone) noexcept
+{
+    if (root.empty()) return;
+    enqueue([this, branch, mode, onDone] {
+        std::string out;
+        int code;
+        if (mode == SwitchMode::Stash)
+        {
+            // Set local changes aside, switch, then re-apply them on the new
+            // branch (the usual "move my WIP" flow). If the checkout fails, the
+            // pop restores the changes onto the branch we never left.
+            int stashCode = GitClient::stashPush(root, out);
+            if (stashCode != 0)
+                code = stashCode; // nothing stashed / stash failed: report it
+            else
+            {
+                code = GitClient::checkout(root, branch, false, out);
+                std::string popOut;
+                GitClient::stashPop(root, popOut);
+                out += popOut;
+            }
+        }
+        else
+            code = GitClient::checkout(root, branch,
+                                       mode == SwitchMode::Force, out);
+        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out}); }
+        runStatus(); // refreshes file badges, current branch and branch list
+    });
+}
+
 void GitManager::commit(const std::string &message, OpCallback onDone) noexcept
 {
     if (root.empty()) return;
@@ -177,9 +219,18 @@ void GitManager::pump(DocumentTreeWindow *treeWindow) noexcept
     for (auto &op : ops)
         if (op.cb)
             op.cb(op.code, op.output);
-    if (status && treeWindow && treeWindow->tree)
+    if (status)
     {
-        treeWindow->tree->applyGitStatus(status->files);
-        treeWindow->setBranchInfo(status->isRepo ? branchInfo(*status) : std::string());
+        // Update the main-thread cache BEFORE touching the tree, and regardless
+        // of whether a tree window exists: currentStatus() feeds the commit
+        // dialog, which otherwise always saw an empty file list ("nothing to
+        // commit") because lastStatus was never assigned here.
+        lastStatus = std::move(*status);
+        if (treeWindow && treeWindow->tree)
+        {
+            treeWindow->tree->applyGitStatus(lastStatus.files);
+            treeWindow->setBranchInfo(
+                lastStatus.isRepo ? branchInfo(lastStatus) : std::string());
+        }
     }
 }
