@@ -70,3 +70,27 @@ void setMenuItemCheck(TMenu *menu, unsigned short command, bool checked) noexcep
         }
     }
 }
+
+void setMenuItemLabel(TMenu *menu, unsigned short command,
+                      const char *label, bool enabled) noexcept
+{
+    if (!menu)
+        return;
+    for (TMenuItem *p = menu->items; p; p = p->next)
+    {
+        if (p->command == 0 && p->subMenu)
+            setMenuItemLabel(p->subMenu, command, label, enabled);
+        else if (p->command == command)
+        {
+            if (!p->name || std::strcmp(p->name, label) != 0)
+            {
+                delete[] (char *) p->name;
+                char *buf = new char[std::strlen(label) + 1];
+                std::strcpy(buf, label);
+                p->name = buf;
+            }
+            p->disabled = enabled ? False : True;
+            return;
+        }
+    }
+}

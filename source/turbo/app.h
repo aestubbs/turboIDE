@@ -70,6 +70,10 @@ struct TurboApp : public TApplication, EditorWindowParent
     // Reflects the active editor for per-editor toggles. Call when state that a
     // check depends on changes (toggles, editor focus, tree show/hide).
     void refreshMenuChecks() noexcept;
+    // Refresh the recent-windows list in the Windows menu from the MRU order.
+    void refreshWindowList() noexcept;
+    // Focus the i-th most-recently-used editor window (Windows menu list).
+    void focusRecentWindow(int index) noexcept;
     void onFilesChanged();
     void gitRefresh();
     void gitCommitDialog();

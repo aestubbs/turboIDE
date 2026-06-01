@@ -11,4 +11,10 @@ class TMenu;
 // not found. Safe to call repeatedly; only touches the label when it changes.
 void setMenuItemCheck(TMenu *menu, unsigned short command, bool checked) noexcept;
 
+// Set the label and enabled state of the menu item with the given command,
+// used for the dynamic recent-windows list. Replaces the owned name string only
+// when it actually changes. No-op if the command is not found.
+void setMenuItemLabel(TMenu *menu, unsigned short command,
+                      const char *label, bool enabled) noexcept;
+
 #endif // TURBO_MENUCHECK_H

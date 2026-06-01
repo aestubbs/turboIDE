@@ -79,6 +79,7 @@ void Editor::associate( EditorParent *aParent,
         TRect r = aView->getBounds();
         r.b.x = r.a.x;
         aLeftMargin->setBounds(r);
+        aLeftMargin->editor = this; // so it can route fold-margin clicks
     }
     leftMargin = aLeftMargin;
     hScrollBar = aHScrollBar;
@@ -103,6 +104,8 @@ void Editor::disassociate() noexcept
         view->editor = nullptr;
         view->state &= ~sfCursorVis;
     }
+    if (leftMargin)
+        leftMargin->editor = nullptr;
     view = nullptr;
     leftMargin = nullptr;
     hScrollBar = nullptr;
@@ -384,6 +387,33 @@ void Editor::foldAll(bool contract) noexcept
          contract ? SC_FOLDACTION_CONTRACT : SC_FOLDACTION_EXPAND, 0U);
 }
 
+bool Editor::marginClick(int localX, int localY) noexcept
+{
+    // The terminal margin isn't a real Scintilla margin (it's our own surface
+    // composite), so route the click ourselves. Only the fold column is
+    // interactive: it is the last column of the left margin when folding is on.
+    if (!foldingEnabled)
+        return false;
+    int foldWidth = (int) call(scintilla, SCI_GETMARGINWIDTHN, 3, 0U);
+    if (foldWidth <= 0)
+        return false;
+    int marginWidth = 0;
+    int marginCount = (int) call(scintilla, SCI_GETMARGINS, 0U, 0U);
+    for (int i = 0; i < marginCount; ++i)
+        marginWidth += (int) call(scintilla, SCI_GETMARGINWIDTHN, i, 0U);
+    // Fold column occupies [marginWidth - foldWidth, marginWidth).
+    if (localX < marginWidth - foldWidth || localX >= marginWidth)
+        return false;
+    long firstVisible = call(scintilla, SCI_GETFIRSTVISIBLELINE, 0U, 0U);
+    long docLine = call(scintilla, SCI_DOCLINEFROMVISIBLE, firstVisible + localY, 0U);
+    long level = call(scintilla, SCI_GETFOLDLEVEL, docLine, 0U);
+    if (!(level & SC_FOLDLEVELHEADERFLAG))
+        return false; // not a foldable line
+    call(scintilla, SCI_TOGGLEFOLD, docLine, 0U);
+    redraw();
+    return true;
+}
+
 void Editor::toggleBookmark() noexcept
 {
     bookmarksUsed = true;
@@ -423,18 +453,18 @@ void Editor::prevBookmark() noexcept
 
 void Editor::toggleChangeHistory() noexcept
 {
+    // Only toggles *display*: changes are tracked continuously (see
+    // markLineChanged) so that enabling the feature immediately shows every
+    // line edited since the last save, not just edits made afterwards. The
+    // markers are rendered as a green tint on the line-number area
+    // (tintChangedLines), not a glyph that would collide with the border.
     changeHistoryEnabled = !changeHistoryEnabled;
-    // Margin 2 stays width 0: changed lines are tracked with the markChanged
-    // marker but rendered as a green tint on the line-number area (see
-    // tintChangedLines), not as a glyph that would collide with the border.
-    if (!changeHistoryEnabled)
-        call(scintilla, SCI_MARKERDELETEALL, markChanged, 0U);
 }
 
 void Editor::markLineChanged(long pos, long linesAdded) noexcept
 {
-    if (!changeHistoryEnabled)
-        return;
+    // Track unconditionally, even when display is off, so toggling the feature
+    // on reveals pre-existing unsaved edits.
     long line = call(scintilla, SCI_LINEFROMPOSITION, pos, 0U);
     long last = line + (linesAdded > 0 ? linesAdded : 0);
     for (long l = line; l <= last; ++l)
@@ -444,8 +474,7 @@ void Editor::markLineChanged(long pos, long linesAdded) noexcept
 void Editor::clearChangeHistory() noexcept
 {
     // Called on save: the file on disk now matches, so nothing is "modified".
-    if (changeHistoryEnabled)
-        call(scintilla, SCI_MARKERDELETEALL, markChanged, 0U);
+    call(scintilla, SCI_MARKERDELETEALL, markChanged, 0U);
 }
 
 void Editor::tintChangedLines() noexcept

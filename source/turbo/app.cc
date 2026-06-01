@@ -125,6 +125,24 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     }
 }
 
+// Builds the windowListMax placeholder items for the recent-windows section of
+// the Windows menu. They start disabled with a blank label; refreshMenuChecks()
+// fills in the names of the most-recently-used editor windows at runtime.
+static TMenuItem &recentWindowsItems()
+{
+    TMenuItem *head = nullptr;
+    TMenuItem *tail = nullptr;
+    for (int i = 0; i < windowListMax; ++i)
+    {
+        auto *item = new TMenuItem(" ", cmWindowBase + i, kbNoKey, hcNoContext);
+        item->disabled = True;
+        if (!head)
+            head = tail = item;
+        else { tail->append(item); tail = item; }
+    }
+    return *head;
+}
+
 TMenuBar *TurboApp::initMenuBar(TRect r)
 {
     r.b.y = r.a.y+1;
@@ -167,22 +185,14 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             *new TMenuItem( "Select ~N~ext Occurrence", cmSelectNextOccurrence, kbCtrlD, hcNoContext, "Ctrl-D" ) +
             *new TMenuItem( "Select ~A~ll Occurrences", cmSelectAllOccurrences, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~C~ode", kbAltC ) +
-            *new TMenuItem( "~T~oggle Fold", cmFoldAtCursor, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "~F~old All", cmFoldAll, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Code ~F~olding", cmToggleFolding, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~T~oggle Fold at Cursor", cmFoldAtCursor, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Fold ~A~ll", cmFoldAll, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~U~nfold All", cmUnfoldAll, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "Toggle Folding ~M~argin", cmToggleFolding, kbNoKey, hcNoContext ) +
             newLine() +
             *new TMenuItem( "Toggle ~B~ookmark", cmToggleBookmark, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~N~ext Bookmark", cmNextBookmark, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~P~revious Bookmark", cmPrevBookmark, kbNoKey, hcNoContext ) +
-        *new TSubMenu( "~W~indows", kbAltW ) +
-            *new TMenuItem( "~Z~oom", cmZoom, kbF5, hcNoContext, "F5" ) +
-            *new TMenuItem( "~R~esize/move",cmResize, kbCtrlF5, hcNoContext, "Ctrl-F5" ) +
-            *new TMenuItem( "~N~ext", cmEditorNext, kbF6, hcNoContext, "F6" ) +
-            *new TMenuItem( "~P~revious", cmEditorPrev, kbShiftF6, hcNoContext, "Shift-F6" ) +
-            *new TMenuItem( "~C~lose", cmClose, kbAltF3, hcNoContext, "Alt-F3" ) +
-            *new TMenuItem( "Previous (in tree)", cmTreePrev, kbAltUp, hcNoContext, "Alt-Up" ) +
-            *new TMenuItem( "Next (in tree)", cmTreeNext, kbAltDown, hcNoContext, "Alt-Down" ) +
         *new TSubMenu( "~S~ettings", kbAltS ) +
             *new TMenuItem( "Toggle Line ~N~umbers", cmToggleLineNums, kbF8, hcNoContext, "F8" ) +
             *new TMenuItem( "Toggle Line ~W~rapping", cmToggleWrap, kbF9, hcNoContext, "F9" ) +
@@ -202,6 +212,16 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             *new TMenuItem( "~P~ush", cmGitPush, kbNoKey, hcNoContext ) +
             newLine() +
             *new TMenuItem( "~R~efresh Status", cmGitRefresh, kbNoKey, hcNoContext ) +
+        *new TSubMenu( "~W~indows", kbAltW ) +
+            *new TMenuItem( "~Z~oom", cmZoom, kbF5, hcNoContext, "F5" ) +
+            *new TMenuItem( "~R~esize/move",cmResize, kbCtrlF5, hcNoContext, "Ctrl-F5" ) +
+            *new TMenuItem( "~N~ext", cmEditorNext, kbF6, hcNoContext, "F6" ) +
+            *new TMenuItem( "~P~revious", cmEditorPrev, kbShiftF6, hcNoContext, "Shift-F6" ) +
+            *new TMenuItem( "~C~lose", cmClose, kbAltF3, hcNoContext, "Alt-F3" ) +
+            *new TMenuItem( "Previous (in tree)", cmTreePrev, kbAltUp, hcNoContext, "Alt-Up" ) +
+            *new TMenuItem( "Next (in tree)", cmTreeNext, kbAltDown, hcNoContext, "Alt-Down" ) +
+            newLine() +
+            recentWindowsItems() +
         *new TSubMenu( "~H~elp", kbAltH ) +
             *new TMenuItem( "~K~eyboard shortcurs", cmHelp, kbF1, hcNoContext, "F1" ) +
             newLine() +
@@ -269,6 +289,7 @@ void TurboApp::idle()
     // Keep menu check marks in sync with per-editor toggle state and the active
     // editor. Cheap: only rewrites a label when its checked state changes.
     refreshMenuChecks();
+    refreshWindowList();
 }
 
 void TurboApp::getEvent(TEvent &event)
@@ -332,7 +353,11 @@ void TurboApp::handleEvent(TEvent &event)
                 TurboHelp::showOrFocusHelpWindow(*deskTop);
                 break;
             default:
-                handled = false;
+                if (event.message.command >= cmWindowBase &&
+                    event.message.command < cmWindowBase + windowListMax)
+                    focusRecentWindow(event.message.command - cmWindowBase);
+                else
+                    handled = false;
                 break;
         }
     }
@@ -459,7 +484,47 @@ void TurboApp::refreshMenuChecks() noexcept
     setMenuItemCheck(m, cmToggleWrap,          wrap);
     setMenuItemCheck(m, cmToggleIndent,        indent);
     setMenuItemCheck(m, cmToggleChangeHistory, chHist);
+    setMenuItemCheck(m, cmToggleFolding,       w && w->getEditor().foldingEnabled);
     setMenuItemCheck(m, cmToggleEdge,          edge);
+}
+
+void TurboApp::refreshWindowList() noexcept
+{
+    auto *bar = (TurboMenuBar *) menuBar;
+    if (!bar)
+        return;
+    TMenu *m = bar->rootMenu();
+    int i = 0;
+    MRUlist.forEach([&] (EditorWindow *w) {
+        if (i >= windowListMax || !w)
+            return;
+        // "N filename" -- a 1-based index plus the window's title. Escape '~'
+        // (TVision's hotkey marker) so titles containing it render literally.
+        std::string label = std::to_string(i + 1) + " ";
+        for (char c : w->title)
+        {
+            if (c == '~') label += '~';
+            label += c;
+        }
+        setMenuItemLabel(m, cmWindowBase + i, label.c_str(), true);
+        ++i;
+    });
+    // Blank and disable the unused slots.
+    for (; i < windowListMax; ++i)
+        setMenuItemLabel(m, cmWindowBase + i, " ", false);
+}
+
+void TurboApp::focusRecentWindow(int index) noexcept
+{
+    int i = 0;
+    EditorWindow *target = nullptr;
+    MRUlist.forEach([&] (EditorWindow *w) {
+        if (i == index)
+            target = w;
+        ++i;
+    });
+    if (target)
+        target->focus();
 }
 
 void TurboApp::configureLsp()

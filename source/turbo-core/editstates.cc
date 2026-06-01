@@ -19,10 +19,15 @@ int LineNumbersWidth::update(TScintilla &scintilla)
 
 int LineNumbersWidth::calcWidth(TScintilla &scintilla)
 {
-    int width = 1;
+    // Count the digits needed for the last line number, then add one cell of
+    // left padding so the number isn't flush against the frame. Sized to the
+    // file's line count, which is stable, so the margin (and the border after
+    // it) doesn't shift around as you scroll.
+    int digits = 1;
     size_t lines = call(scintilla, SCI_GETLINECOUNT, 0U, 0U);
     while (lines /= 10)
-        ++width;
+        ++digits;
+    int width = digits + 1; // one space of left padding
     if (width < minWidth)
         width = minWidth;
     return width;

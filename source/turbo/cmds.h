@@ -58,6 +58,11 @@ enum : ushort
     cmGitPull,
     cmGitPush,
     cmToggleHidden,
+    // Recent-windows list in the Windows menu: cmWindowBase + i selects the
+    // i-th most-recently-used editor window (i in [0, windowListMax)).
+    cmWindowBase = 1100,
 };
+
+enum { windowListMax = 10 };
 
 #endif // TURBO_CMDS_H

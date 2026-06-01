@@ -38,7 +38,7 @@ class Editor : protected TScintillaParent
         bool empty() const { return a.x < 0; }
     };
 
-    enum { minLineNumbersWidth = 5 };
+    enum { minLineNumbersWidth = 3 }; // fits up to 2 digits + 1 padding cell
 
     // Draw state.
     TDrawSurface surface;
@@ -114,10 +114,14 @@ public:
     // Multiple selections / multi-cursor.
     void selectNextOccurrence() noexcept; // add next match of the selection/word
     void selectAllOccurrences() noexcept; // select every match at once
-    // Code folding (keyboard-driven; the terminal margin isn't clickable).
+    // Code folding.
     void toggleFolding() noexcept;        // show/hide the fold margin
     void toggleFoldAtCursor() noexcept;   // collapse/expand the current block
     void foldAll(bool contract) noexcept; // collapse or expand the whole file
+    // Handle a click in the left margin at the given margin-view-local cell.
+    // If it lands on the fold column of a fold-header line, toggles that fold.
+    // Returns true if the click was consumed.
+    bool marginClick(int localX, int localY) noexcept;
     // Bookmarks (line markers).
     void toggleBookmark() noexcept;
     void nextBookmark() noexcept;
@@ -231,8 +235,12 @@ class LeftMarginView : public TSurfaceView
 public:
 
     int distanceFromView;
+    Editor *editor {nullptr}; // Non-owning; set by Editor::associate.
 
     LeftMarginView(int aDistance) noexcept;
+
+    // Clicking the fold column toggles the fold at that line.
+    void handleEvent(TEvent &ev) override;
 };
 
 inline void drawWithSurface(TSurfaceView &view, TDrawSurface *surface)
