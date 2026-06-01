@@ -18,6 +18,7 @@ struct AppSettings
 {
     bool autoSaveOnFocusLoss {true};
     bool lspEnabled {true};
+    bool showHidden {false}; // include dotfiles/dot-dirs in the file tree
     // Language-server command overrides. Empty by default; the LSP manager
     // falls back to built-in defaults for languages not listed here.
     std::vector<LspServerConfig> lspServers;

@@ -3,6 +3,7 @@
 #include "app.h"
 #include "gitclient.h"
 #include <utility>
+#include <vector>
 #include <filesystem>
 #include <turbo/tpath.h>
 
@@ -12,6 +13,18 @@
 #include <tvision/tv.h>
 
 using Node = DocumentTreeView::Node;
+
+DocumentTreeView::DocumentTreeView(const TRect &bounds, TScrollBar *hsb,
+                                   TScrollBar *vsb, TNode *aRoot) noexcept :
+    TOutline(bounds, hsb, vsb, aRoot)
+{
+    // The inner outline view is the one that swallows the first click of a
+    // double-click (TView::handleEvent clears it when the view is selectable
+    // but lacks ofFirstClick), so without this a double-click never reaches
+    // selected() and a file won't open. The enclosing window sets ofFirstClick
+    // too, but it is this view that does the swallowing.
+    options |= ofFirstClick;
+}
 
 Node::Node(Node *parent, std::string_view p, bool isDir) noexcept :
     TNode(TPath::basename(p)),
@@ -93,7 +106,8 @@ static void putNode(TNode **indirect, Node *node) noexcept
     node->ptr = indirect;
 }
 
-static void scanInto(Node *parent, TNode **list, const std::string &dirPath, int depth) noexcept
+static void scanInto(Node *parent, TNode **list, const std::string &dirPath,
+                     int depth, bool showHidden) noexcept
 {
     std::error_code ec;
     std::filesystem::directory_iterator it(dirPath, ec), end;
@@ -105,8 +119,12 @@ static void scanInto(Node *parent, TNode **list, const std::string &dirPath, int
             break;
         const auto &entry = *it;
         std::string name = entry.path().filename().string();
-        // Skip hidden entries (dotfiles and dot-directories such as .git).
-        if (name.empty() || name[0] == '.')
+        // Hidden entries (dotfiles and dot-directories such as .git) are skipped
+        // unless the user has opted to show them. The .git directory in
+        // particular stays hidden either way (it is noise, not source).
+        if (name.empty())
+            continue;
+        if (name[0] == '.' && (!showHidden || name == ".git"))
             continue;
         std::error_code ec2;
         bool isDir = entry.is_directory(ec2);
@@ -117,14 +135,39 @@ static void scanInto(Node *parent, TNode **list, const std::string &dirPath, int
             node->expanded = (depth == 0) ? True : False;
         putNode(list, node);
         if (isDir)
-            scanInto(node, &node->childList, full, depth + 1);
+            scanInto(node, &node->childList, full, depth + 1, showHidden);
     }
 }
 
 void DocumentTreeView::scanDirectory(std::string_view aRootPath) noexcept
 {
     rootPath = std::string {aRootPath};
-    scanInto(nullptr, &root, rootPath, 0);
+    scanInto(nullptr, &root, rootPath, 0, showHidden);
+    update();
+    drawView();
+}
+
+void DocumentTreeView::setShowHidden(bool show) noexcept
+{
+    if (show == showHidden)
+        return;
+    showHidden = show;
+    if (rootPath.empty())
+        return; // not scanned yet; the flag will take effect on the first scan
+    // Remember which editors are open so we can re-link them after the rebuild
+    // (disposeNode frees every node, dropping the old editor links).
+    std::vector<EditorWindow *> openEditors;
+    firstThat([&] (Node *node, int) {
+        if (node->editor)
+            openEditors.push_back(node->editor);
+        return false; // visit all
+    });
+    disposeNode(root);
+    root = nullptr;
+    foc = 0;
+    scanInto(nullptr, &root, rootPath, 0, showHidden);
+    for (auto *w : openEditors)
+        linkEditor(w);
     update();
     drawView();
 }
@@ -165,7 +208,10 @@ void DocumentTreeView::addNode(std::string_view path, bool isDir) noexcept
     if (findByPath(path) || (isDir && findDir(path)))
         return;
     TStringView base = TPath::basename(path);
-    if (base.empty() || base[0] == '.')
+    if (base.empty())
+        return;
+    // Honour the show-hidden setting (mirrors scanInto); .git stays hidden.
+    if (base[0] == '.' && (!showHidden || base == ".git"))
         return;
     // Locate the parent list: the root list for a top-level entry, else the
     // parent directory's child list (only if that directory is in the tree).
@@ -184,7 +230,7 @@ void DocumentTreeView::addNode(std::string_view path, bool isDir) noexcept
     auto *node = new Node(parent, std::string(path), isDir);
     putNode(list, node);
     if (isDir)
-        scanInto(node, &node->childList, std::string(path), 1);
+        scanInto(node, &node->childList, std::string(path), 1, showHidden);
     update();
     drawView();
 }

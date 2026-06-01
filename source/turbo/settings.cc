@@ -63,6 +63,8 @@ void loadSettings(AppSettings &s) noexcept
             s.autoSaveOnFocusLoss = (v != 0);
         else if (sscanf(line, "lsp.enabled=%d", &v) == 1)
             s.lspEnabled = (v != 0);
+        else if (sscanf(line, "showhidden=%d", &v) == 1)
+            s.showHidden = (v != 0);
         else if (strncmp(line, serverPrefix, sizeof serverPrefix - 1) == 0)
         {
             // lsp.server.<lang>=<command>
@@ -91,6 +93,7 @@ void saveSettings(const AppSettings &s) noexcept
         return;
     fprintf(f, "autosave=%d\n", s.autoSaveOnFocusLoss ? 1 : 0);
     fprintf(f, "lsp.enabled=%d\n", s.lspEnabled ? 1 : 0);
+    fprintf(f, "showhidden=%d\n", s.showHidden ? 1 : 0);
     for (auto &srv : s.lspServers)
         if (!srv.language.empty() && !srv.command.empty())
             fprintf(f, "lsp.server.%s=%s\n", srv.language.c_str(), srv.command.c_str());

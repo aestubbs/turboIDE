@@ -57,6 +57,7 @@ enum : ushort
     cmGitFetch,
     cmGitPull,
     cmGitPush,
+    cmToggleHidden,
 };
 
 #endif // TURBO_CMDS_H

@@ -24,6 +24,7 @@ public:
 
     inline void setState(bool enable);
     inline void toggle();
+    bool isEnabled() const { return enabled; }
 
     int update(TScintilla &scintilla);
 };
@@ -53,6 +54,7 @@ public:
                    TFuncView<bool(int width)> confirmWrap = defConfirmWrap );
     inline void toggle( TScintilla &scintilla,
                         TFuncView<bool(int width)> confirmWrap = defConfirmWrap );
+    bool isEnabled() const { return enabled; }
 };
 
 inline void WrapState::toggle(TScintilla &scintilla, TFuncView<bool(int width)> confirmWrap)
@@ -68,6 +70,7 @@ public:
 
     inline void setState(bool enable);
     inline void toggle();
+    bool isEnabled() const { return enabled; }
 
     void applyToCurrentLine(TScintilla &scintilla);
 };

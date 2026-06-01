@@ -3,6 +3,8 @@
 
 #define Uses_TApplication
 #define Uses_TFileDialog
+#define Uses_TMenuBar
+#define Uses_TMenu
 #include <tvision/tv.h>
 
 #include <memory>
@@ -19,6 +21,14 @@ struct EditorWindow;
 class TClockView;
 class LspManager;
 class GitManager;
+
+// TMenuView::menu (the root of the menu tree) is protected; expose it so the app
+// can rewrite toggle-item labels to show check marks.
+struct TurboMenuBar : public TMenuBar
+{
+    using TMenuBar::TMenuBar;
+    TMenu *rootMenu() const noexcept { return menu; }
+};
 
 struct TurboApp : public TApplication, EditorWindowParent
 {
@@ -55,6 +65,11 @@ struct TurboApp : public TApplication, EditorWindowParent
     void openFileFromTree(const char *absPath);
     void scanWorkspace();
     void toggleAutoSave();
+    void toggleHiddenFiles();
+    // Rewrite the toggle menu items' labels so enabled ones show a check mark.
+    // Reflects the active editor for per-editor toggles. Call when state that a
+    // check depends on changes (toggles, editor focus, tree show/hide).
+    void refreshMenuChecks() noexcept;
     void onFilesChanged();
     void gitRefresh();
     void gitCommitDialog();

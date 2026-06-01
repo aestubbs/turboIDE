@@ -29,6 +29,7 @@
 #include "lspdialog.h"
 #include "gitmanager.h"
 #include "gitdialog.h"
+#include "menucheck.h"
 #include <turbo/fileeditor.h>
 #include <turbo/tpath.h>
 #include <filesystem>
@@ -127,7 +128,7 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
 TMenuBar *TurboApp::initMenuBar(TRect r)
 {
     r.b.y = r.a.y+1;
-    return new TMenuBar( r,
+    return new TurboMenuBar( r,
         *new TSubMenu( "~F~ile", kbAltF, hcNoContext ) +
             *new TMenuItem( "~N~ew", cmNew, kbCtrlN, hcNoContext, "Ctrl-N" ) +
             *new TMenuItem( "~O~pen", cmOpen, kbCtrlO, hcNoContext, "Ctrl-O" ) +
@@ -187,6 +188,7 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             *new TMenuItem( "Toggle Line ~W~rapping", cmToggleWrap, kbF9, hcNoContext, "F9" ) +
             *new TMenuItem( "Toggle Auto ~I~ndent", cmToggleIndent, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Toggle File ~T~ree View", cmToggleTree, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Show ~H~idden Files", cmToggleHidden, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Toggle ~A~uto-save on Focus Loss", cmToggleAutoSave, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Toggle Chan~g~e History", cmToggleChangeHistory, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Toggle Long Line G~u~ide", cmToggleEdge, kbNoKey, hcNoContext ) +
@@ -264,6 +266,9 @@ void TurboApp::idle()
         onFilesChanged();
     if (git)
         git->pump(docTree);
+    // Keep menu check marks in sync with per-editor toggle state and the active
+    // editor. Cheap: only rewrites a label when its checked state changes.
+    refreshMenuChecks();
 }
 
 void TurboApp::getEvent(TEvent &event)
@@ -291,6 +296,7 @@ void TurboApp::handleEvent(TEvent &event)
                 break;
             case cmCloseAll: closeAll(); break;
             case cmToggleTree: toggleTreeView(); break;
+            case cmToggleHidden: toggleHiddenFiles(); break;
             case cmToggleAutoSave: toggleAutoSave(); break;
             case cmLspSettings: editLspSettings(); break;
             case cmGitRefresh: gitRefresh(); break;
@@ -392,6 +398,7 @@ void TurboApp::scanWorkspace()
     char *cwd = ::getcwd(nullptr, 0);
     if (cwd)
     {
+        docTree->tree->setShowHidden(settings.showHidden); // before the first scan
         docTree->tree->scanDirectory(cwd);
         if (lsp)
             lsp->setRootPath(cwd);
@@ -407,6 +414,52 @@ void TurboApp::toggleAutoSave()
 {
     settings.autoSaveOnFocusLoss ^= true;
     saveSettings(settings);
+    refreshMenuChecks();
+}
+
+void TurboApp::toggleHiddenFiles()
+{
+    settings.showHidden ^= true;
+    saveSettings(settings);
+    if (docTree)
+        docTree->tree->setShowHidden(settings.showHidden);
+    // The rescan rebuilt every node, dropping git badges; re-fetch so they
+    // reappear on the new nodes.
+    if (git)
+        git->requestStatus();
+    refreshMenuChecks();
+}
+
+void TurboApp::refreshMenuChecks() noexcept
+{
+    auto *bar = (TurboMenuBar *) menuBar;
+    if (!bar)
+        return;
+    TMenu *m = bar->rootMenu();
+
+    // Global toggles.
+    setMenuItemCheck(m, cmToggleTree, docTree && (docTree->state & sfVisible));
+    setMenuItemCheck(m, cmToggleHidden, settings.showHidden);
+    setMenuItemCheck(m, cmToggleAutoSave, settings.autoSaveOnFocusLoss);
+
+    // Per-editor toggles reflect the active (most-recently-focused) editor.
+    // With no editor open they all show unchecked.
+    EditorWindow *w = MRUlist.empty() ? nullptr : MRUlist.next->self;
+    bool lineNums = false, wrap = false, indent = false, chHist = false, edge = false;
+    if (w)
+    {
+        auto &ed = w->getEditor();
+        lineNums = ed.lineNumbers.isEnabled();
+        wrap     = ed.wrapping.isEnabled();
+        indent   = ed.autoIndent.isEnabled();
+        chHist   = ed.changeHistoryEnabled;
+        edge     = ed.edgeEnabled;
+    }
+    setMenuItemCheck(m, cmToggleLineNums,      lineNums);
+    setMenuItemCheck(m, cmToggleWrap,          wrap);
+    setMenuItemCheck(m, cmToggleIndent,        indent);
+    setMenuItemCheck(m, cmToggleChangeHistory, chHist);
+    setMenuItemCheck(m, cmToggleEdge,          edge);
 }
 
 void TurboApp::configureLsp()

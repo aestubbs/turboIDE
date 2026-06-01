@@ -33,7 +33,8 @@ struct DocumentTreeView : public TOutline {
 
     };
 
-    using TOutline::TOutline;
+    DocumentTreeView(const TRect &bounds, TScrollBar *hsb, TScrollBar *vsb,
+                     TNode *root) noexcept;
 
     // Opening a file happens here (Enter / double-click), not on mere
     // highlight movement, so the arrow keys only move the selection.
@@ -43,6 +44,12 @@ struct DocumentTreeView : public TOutline {
 
     // Build the tree by recursively scanning 'rootPath'.
     void scanDirectory(std::string_view rootPath) noexcept;
+
+    // Whether to include hidden entries (dotfiles/dot-dirs) when scanning.
+    // Changing it rebuilds the tree from the current root, preserving the links
+    // to any open editors. No-op if unchanged or before scanDirectory().
+    void setShowHidden(bool show) noexcept;
+    bool showsHidden() const noexcept { return showHidden; }
 
     // Associate/dissociate an open editor window with its file node (by path).
     void linkEditor(EditorWindow *w) noexcept;
@@ -66,6 +73,7 @@ struct DocumentTreeView : public TOutline {
     Node *findDir(std::string_view path) noexcept;
 
     std::string rootPath;   // absolute path scanned by scanDirectory()
+    bool showHidden {false}; // include dotfiles/dot-dirs when scanning
 
     Node *findByEditor(const EditorWindow *w, int *pos=nullptr) noexcept;
     Node *findByPath(std::string_view path) noexcept;
