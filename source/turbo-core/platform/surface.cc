@@ -162,6 +162,16 @@ void TScintillaSurface::DrawTextClipped( PRectangle rc, Font &font_,
                                          XYPOSITION ybase, std::string_view text,
                                          ColourDesired fore, ColourDesired back )
 {
+    // Scintilla's LineMarker::Draw insets SC_MARK_CHARACTER markers (fold +/-,
+    // change-history |) by one pixel top and bottom. With a one-row line height
+    // that collapses the rect to zero/negative height, so the marker would not
+    // be drawn at all. Restore it to the single cell row it was meant to cover.
+    if (rc.bottom <= rc.top)
+    {
+        if (rc.bottom < rc.top)
+            rc.top = rc.bottom;
+        rc.bottom = rc.top + 1;
+    }
     auto r = clipRect(rc);
     if ( surface && 0 <= r.a.x && r.a.x < r.b.x
                  && 0 <= r.a.y && r.a.y < r.b.y )
