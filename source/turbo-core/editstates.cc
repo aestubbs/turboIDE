@@ -558,8 +558,11 @@ void applyTheming(const LexerSettings *lexer, const ColorScheme *aScheme, TScint
             call(scintilla, SCI_SETPROPERTY, (sptr_t) p.name, (sptr_t) p.value);
         // Enable fold-point computation for every lexer, so the fold margin
         // works when the user turns folding on. Overrides any per-lexer
-        // "fold"="0" default.
+        // "fold"="0" default. The HTML lexer (also used for PHP) additionally
+        // gates folding behind "fold.html", so enable that too -- without it
+        // PHP brace folding never computes (LexHTML: fold = foldHTML && fold).
         call(scintilla, SCI_SETPROPERTY, (sptr_t) "fold", (sptr_t) "1");
+        call(scintilla, SCI_SETPROPERTY, (sptr_t) "fold.html", (sptr_t) "1");
     }
     else
         call(scintilla, SCI_SETLEXER, SCLEX_CONTAINER, 0U);

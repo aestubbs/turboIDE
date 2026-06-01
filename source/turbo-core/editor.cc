@@ -192,6 +192,8 @@ bool Editor::redraw(const TRect &area) noexcept
         else
             paintArea = area; // Read 'area' here since it may have mutated.
         paint(scintilla, surface, paintArea); // Emits SCN_PAINTED.
+        if (changeHistoryEnabled)
+            tintChangedLines();
         forEachNotNull([&] (TView &p) {
             p.drawView();
         }, vScrollBar, hScrollBar);
@@ -210,7 +212,9 @@ void Editor::updateMarginWidth() noexcept
     // The single LeftMarginView shows columns [0, total) of the Scintilla
     // surface and the EditorView shows [total, ...). 'total' must therefore be
     // the combined width of every Scintilla margin: line numbers (margin 0)
-    // plus the symbol margins (bookmarks, change history, fold).
+    // plus the visible symbol margins (bookmarks, fold). Change history is
+    // tracked via a width-0 margin and rendered as a line-number background
+    // tint instead of a glyph, so it adds no width.
     int total = lnWidth;
     int extraWidth = 0;
     int marginCount = (int) call(scintilla, SCI_GETMARGINS, 0U, 0U);
@@ -224,12 +228,11 @@ void Editor::updateMarginWidth() noexcept
         leftMargin->setBounds(mr);
         if (view)
         {
-            // The symbol margins live in the blank separator column between the
-            // line numbers and the text rather than adding new width: each
-            // enabled symbol margin consumes one column of the separator first,
-            // so e.g. turning folding on does not push the text to the right.
+            // Keep a full separator column between the margin and the text: the
+            // framed LeftMarginView draws its border there. Symbol margins (e.g.
+            // fold) add their own real columns to the left of that border rather
+            // than overwriting it, so the border and the markers never collide.
             int sep = leftMargin->distanceFromView * (lnWidth != 0);
-            sep = max(0, sep - extraWidth);
             TRect vr = view->getBounds();
             vr.a.x = mr.b.x + sep;
             view->setBounds(vr);
@@ -421,7 +424,9 @@ void Editor::prevBookmark() noexcept
 void Editor::toggleChangeHistory() noexcept
 {
     changeHistoryEnabled = !changeHistoryEnabled;
-    call(scintilla, SCI_SETMARGINWIDTHN, 2, changeHistoryEnabled ? 1 : 0);
+    // Margin 2 stays width 0: changed lines are tracked with the markChanged
+    // marker but rendered as a green tint on the line-number area (see
+    // tintChangedLines), not as a glyph that would collide with the border.
     if (!changeHistoryEnabled)
         call(scintilla, SCI_MARKERDELETEALL, markChanged, 0U);
 }
@@ -441,6 +446,45 @@ void Editor::clearChangeHistory() noexcept
     // Called on save: the file on disk now matches, so nothing is "modified".
     if (changeHistoryEnabled)
         call(scintilla, SCI_MARKERDELETEALL, markChanged, 0U);
+}
+
+void Editor::tintChangedLines() noexcept
+{
+    // Paint a green background across the line-number area (and the separator
+    // column, i.e. the whole left margin width) of every visible line that has
+    // an unsaved change. This replaces the old change-history glyph, which
+    // collided with the framed margin border. Done directly on the painted
+    // surface so it needs no extra margin column and no Scintilla changes.
+    if (surface.size.y <= 0)
+        return;
+    // Tint the whole left-margin width (line numbers + any symbol columns such
+    // as fold). This is the part of the surface shown by the LeftMarginView;
+    // the framed border sits just past it and is drawn separately. We stop at
+    // the margin edge so the first code character is never tinted.
+    int marginWidth = 0;
+    int marginCount = (int) call(scintilla, SCI_GETMARGINS, 0U, 0U);
+    for (int i = 0; i < marginCount; ++i)
+        marginWidth += (int) call(scintilla, SCI_GETMARGINWIDTHN, i, 0U);
+    if (marginWidth <= 0)
+        return;
+    int tintWidth = min(marginWidth, surface.size.x);
+    long firstVisible = call(scintilla, SCI_GETFIRSTVISIBLELINE, 0U, 0U);
+    TColorDesired green = TColorRGB(0x107010); // dark green
+    for (int y = 0; y < surface.size.y; ++y)
+    {
+        long visibleLine = firstVisible + y;
+        long docLine = call(scintilla, SCI_DOCLINEFROMVISIBLE, visibleLine, 0U);
+        if (!(call(scintilla, SCI_MARKERGET, docLine, 0U) & (1 << markChanged)))
+            continue;
+        // Only tint the first visual row of the line (the one with the line
+        // number), not wrap/annotation continuation rows of the same doc line.
+        long prevDoc = visibleLine > 0
+            ? call(scintilla, SCI_DOCLINEFROMVISIBLE, visibleLine - 1, 0U) : -1;
+        if (prevDoc == docLine)
+            continue;
+        for (int x = 0; x < tintWidth; ++x)
+            ::setBack(surface.at(y, x).attr, green);
+    }
 }
 
 void Editor::toggleEdge() noexcept

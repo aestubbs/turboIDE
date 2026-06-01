@@ -127,6 +127,9 @@ public:
     void toggleChangeHistory() noexcept;
     void markLineChanged(long pos, long linesAdded) noexcept; // from SCN_MODIFIED
     void clearChangeHistory() noexcept;                       // on save
+    // Paint a green background over the line-number area of changed lines.
+    // Called after the surface is painted, before the margin view is drawn.
+    void tintChangedLines() noexcept;
     // Long-line guide (background tint past a column).
     void toggleEdge() noexcept;
 
