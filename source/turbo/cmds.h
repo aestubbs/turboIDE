@@ -58,6 +58,7 @@ enum : ushort
     cmGitPull,
     cmGitPush,
     cmToggleHidden,
+    cmNewTerminal,
     // File-tree right-click context menu actions.
     cmTreeOpen,
     cmTreeRename,

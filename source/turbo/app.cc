@@ -32,6 +32,7 @@
 #include "gitmanager.h"
 #include "gitdialog.h"
 #include "menucheck.h"
+#include "terminal.h"
 #include <turbo/fileeditor.h>
 #include <turbo/tpath.h>
 #include <filesystem>
@@ -217,6 +218,8 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             *new TMenuItem( "~C~lose", cmCloseEditor, kbCtrlW, hcNoContext, "Ctrl-W" ) +
             *new TMenuItem( "Close All", cmCloseAll, kbNoKey, hcNoContext ) +
             newLine() +
+            *new TMenuItem( "New ~T~erminal", cmNewTerminal, kbNoKey, hcNoContext ) +
+            newLine() +
             *new TMenuItem( "S~u~spend", cmDosShell, kbNoKey, hcNoContext ) +
             *new TMenuItem( "E~x~it", cmQuit, kbCtrlQ, hcNoContext, "Ctrl-Q" ) +
         *new TSubMenu( "~E~dit", kbAltE ) +
@@ -346,6 +349,10 @@ void TurboApp::idle()
         onFilesChanged();
     if (git)
         git->pump(docTree);
+    // Drain any output the terminal child processes produced since the last tick
+    // and repaint the affected views (the reader threads wake the loop for us).
+    for (auto *t : terminals)
+        t->pump();
     // Keep menu check marks in sync with per-editor toggle state and the active
     // editor. Cheap: only rewrites a label when its checked state changes.
     refreshMenuChecks();
@@ -378,6 +385,7 @@ void TurboApp::handleEvent(TEvent &event)
                 break;
             case cmCloseAll: closeAll(); break;
             case cmToggleTree: toggleTreeView(); break;
+            case cmNewTerminal: newTerminal(); break;
             case cmToggleHidden: toggleHiddenFiles(); break;
             case cmToggleAutoSave: toggleAutoSave(); break;
             case cmLspSettings: editLspSettings(); break;
@@ -1101,6 +1109,38 @@ void TurboApp::toggleTreeView()
         win->setState(sfExposed, True);
     });
     deskTop->redraw();
+}
+
+void TurboApp::newTerminal()
+{
+    // Open over the editor area (to the right of the file tree if it is shown),
+    // like a new editor window; the user can then zoom/move/resize it as usual.
+    TRect r = deskTop->getExtent();
+    if (docTree && (docTree->state & sfVisible))
+    {
+        TRect t = docTree->getBounds();
+        if (t.a.x > r.b.x - t.b.x)
+            r.b.x = max(t.a.x, 20);
+        else
+            r.a.x = min(t.b.x, r.b.x - 20);
+    }
+    auto *win = new TerminalWindow(r);
+    deskTop->insert(win);
+}
+
+void TurboApp::registerTerminal(TerminalView *t) noexcept
+{
+    terminals.push_back(t);
+}
+
+void TurboApp::unregisterTerminal(TerminalView *t) noexcept
+{
+    for (auto it = terminals.begin(); it != terminals.end(); ++it)
+        if (*it == t)
+        {
+            terminals.erase(it);
+            break;
+        }
 }
 
 void TurboApp::handleFocus(EditorWindow &w) noexcept

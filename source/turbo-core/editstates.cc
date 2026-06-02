@@ -578,6 +578,16 @@ void applyTheming(const LexerSettings *lexer, const ColorScheme *aScheme, TScint
     setWhitespaceColor(scintilla, scheme[sWhitespace]);
     setStyleColor(scintilla, STYLE_CONTROLCHAR, normalize(scheme, sCtrlChar));
     setStyleColor(scintilla, STYLE_LINENUMBER, normalize(scheme, sLineNums));
+    // Fold markers live in the same gutter as the line numbers; paint their
+    // +/- glyphs in the same colours so they don't sit in Scintilla's default
+    // grey marker box (which ignores the scheme).
+    {
+        TColorAttr foldAttr = normalize(scheme, sLineNums);
+        for (int m : {SC_MARKNUM_FOLDER, SC_MARKNUM_FOLDEROPEN, SC_MARKNUM_FOLDEROPENMID,
+                      SC_MARKNUM_FOLDEREND, SC_MARKNUM_FOLDERSUB, SC_MARKNUM_FOLDERTAIL,
+                      SC_MARKNUM_FOLDERMIDTAIL})
+            setMarkerColor(scintilla, m, foldAttr);
+    }
     setIndicatorColor(scintilla, idtrReplaceHighlight, scheme[sReplaceHighlight]);
     if (lexer)
     {

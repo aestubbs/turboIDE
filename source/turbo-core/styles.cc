@@ -174,7 +174,7 @@ const Language *detectFileLanguage(const char *filePath)
 
 extern constexpr ColorScheme schemeDefault =
 {
-    /* sNormal           */ {{}      , {}                       },
+    /* sNormal           */ {'\x7'   , '\x1'                    },
     /* sSelection        */ {'\x1'   , '\x7'                    },
     /* sWhitespace       */ {'\x5'   , {}                       },
     /* sCtrlChar         */ {'\xD'   , {}                       },

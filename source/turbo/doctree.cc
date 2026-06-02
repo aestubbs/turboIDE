@@ -320,6 +320,62 @@ void DocumentTreeView::handleEvent(TEvent &ev)
             return;
         }
     }
+    // Arrow-key tree navigation. The base TOutline aliases Left->Up and
+    // Right->Down (plain focus movement, no horizontal scroll), so we override
+    // Left/Right entirely to give them the conventional expand/collapse/navigate
+    // semantics. Only act while focused; Up/Down/Enter still go to the base.
+    if (ev.what == evKeyDown && (state & sfFocused))
+    {
+        ushort key = ev.keyDown.keyCode;
+        if (key == kbRight || key == kbLeft)
+        {
+            auto *node = (Node *) getNode(foc);
+            if (!node)
+            {
+                TOutline::handleEvent(ev);
+                return;
+            }
+            if (key == kbRight)
+            {
+                // Right on a collapsed directory expands it. On an already
+                // expanded directory (or a file) move down one row, which lands
+                // on the first child of an expanded dir.
+                if (node->isDir && !isExpanded(node))
+                    openOrToggle(node);
+                else
+                {
+                    foc++;
+                    update();   // update() -> adjustFocus(foc): clamps + scrolls
+                    drawView();
+                }
+            }
+            else // kbLeft
+            {
+                // Left on an expanded directory collapses it. Otherwise (file or
+                // collapsed dir) jump focus to the parent directory's row, if any.
+                if (node->isDir && isExpanded(node))
+                    openOrToggle(node);
+                else if (node->parent)
+                {
+                    Node *parent = node->parent;
+                    int parentPos = -1;
+                    firstThat([parent, &parentPos] (Node *n, int pos) {
+                        if (n == parent) { parentPos = pos; return true; }
+                        return false;
+                    });
+                    if (parentPos >= 0)
+                    {
+                        foc = parentPos;
+                        update();   // scroll the parent row into view
+                        drawView();
+                    }
+                }
+                // Top-level file/collapsed dir: no parent, so do nothing.
+            }
+            clearEvent(ev);
+            return;
+        }
+    }
     TOutline::handleEvent(ev);
 }
 

@@ -170,7 +170,11 @@ void TScintillaSurface::FillRectangleAligned(PRectangle rc, Fill fill)
 
 void TScintillaSurface::FillRectangle(PRectangle rc, Surface &)
 {
-    FillRectangle(rc, Fill(ColourRGBA()));
+    // Scintilla only asks for a pattern fill for the fold-margin checkerboard,
+    // which a character-cell grid can't reproduce. Fill it with the editor's
+    // default background so the fold gutter matches the surrounding margin and
+    // text, rather than the hardcoded black (token 0) this used to paint.
+    FillRectangle(rc, Fill(convertColor(::getBack(defaultTextAttr))));
 }
 
 void TScintillaSurface::RoundedRectangle(PRectangle, FillStroke)

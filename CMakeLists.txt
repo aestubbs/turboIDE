@@ -80,6 +80,24 @@ target_include_directories(lexilla PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/deps/lexilla/lexlib"
 )
 
+# Target 'vterm' (libvterm: VT/ANSI terminal-emulation core, MIT-licensed)
+#
+# Pulled in as a git submodule under deps/ exactly like Scintilla/Lexilla, and
+# compiled the same way: glob its C sources into an object library. libvterm is
+# UI-less (it parses terminal output into a cell grid and encodes key input);
+# the TVision terminal view in source/turbo feeds it PTY output and renders the
+# grid. The generated encoding tables (src/encoding/*.inc, src/fullwidth.inc)
+# are committed upstream, so there is no code-generation step to run.
+file(GLOB VTERM_SRC "${CMAKE_CURRENT_LIST_DIR}/deps/libvterm/src/*.c")
+add_library(vterm OBJECT ${VTERM_SRC})
+set_target_properties(vterm PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON)
+target_include_directories(vterm PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/deps/libvterm/include>"
+)
+target_include_directories(vterm PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/deps/libvterm/src"
+)
+
 # Dependencies
 
 include(deps/CMakeLists.txt)
@@ -122,12 +140,26 @@ if (APPLE)
     target_link_libraries(${TURBO}-core PUBLIC "-framework CoreServices")
 endif()
 
+# The terminal's PTY backend uses forkpty(). On Linux/BSD it lives in libutil;
+# on macOS it is part of libSystem (no extra link needed); on Windows it is a stub.
+if (UNIX AND NOT APPLE)
+    target_link_libraries(${TURBO}-core PUBLIC util)
+endif()
+
 # CoreServices/Cocoa headers clash with tvision's `Boolean` typedef (bool vs
 # unsigned char) when they share a translation unit. The watcher would see
 # tvision via both the unity batch and the precompiled header, so opt it out of
 # BOTH and compile it on its own with only its own includes + CoreServices.
 set_source_files_properties(
     "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}-core/filewatcher.cc"
+    PROPERTIES
+        SKIP_UNITY_BUILD_INCLUSION ON
+        SKIP_PRECOMPILE_HEADERS ON)
+
+# pty.cc is pure POSIX system code (forkpty/termios) and includes no tvision; it
+# has no business in the tvision-laden unity batch / PCH, so build it on its own.
+set_source_files_properties(
+    "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}-core/pty.cc"
     PROPERTIES
         SKIP_UNITY_BUILD_INCLUSION ON
         SKIP_PRECOMPILE_HEADERS ON)
@@ -173,11 +205,17 @@ endif()
 
 if (TURBO_BUILD_APP)
     file(GLOB_RECURSE TURBO_SRC "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}/*.cc")
-    add_executable(${TURBO} ${TURBO_SRC})
+    # The terminal window (source/turbo/terminal.cc) drives libvterm; fold its
+    # object files into the app and expose its public header.
+    add_executable(${TURBO} ${TURBO_SRC} $<TARGET_OBJECTS:vterm>)
     target_compile_features(${TURBO} PRIVATE cxx_std_17)
     turbo_set_warnings(${TURBO})
     target_link_libraries(${TURBO} PRIVATE
         ${TURBO}-core
+    )
+    # terminal.cc includes <vterm.h>; objects are folded in above.
+    target_include_directories(${TURBO} PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/deps/libvterm/include"
     )
     install(TARGETS ${TURBO} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 

@@ -99,9 +99,9 @@ void BasicEditorWindow::handleNotification(const SCNotification &scn, Editor &ed
 
 extern constexpr WindowColorScheme windowSchemeDefault =
 {
-    /* wndFramePassive             */ '\x07',
-    /* wndFrameActive              */ '\x0F',
-    /* wndFrameIcon                */ '\x0A',
+    /* wndFramePassive             */ '\x17',
+    /* wndFrameActive              */ '\x1F',
+    /* wndFrameIcon                */ '\x1A',
     /* wndScrollBarPageArea        */ '\x30',
     /* wndScrollBarControls        */ '\x30',
     /* wndStaticText               */ '\x0F',

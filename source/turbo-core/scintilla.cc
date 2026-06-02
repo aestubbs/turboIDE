@@ -236,6 +236,17 @@ void setWhitespaceColor(TScintilla &self, TColorAttr attr)
     call(self, SCI_SETWHITESPACEBACK, !bg.isDefault(), convertColor(bg).OpaqueRGB());
 }
 
+void setMarkerColor(TScintilla &self, int markerNum, TColorAttr attr)
+{
+    using namespace Scintilla::Internal;
+    // Marker colours must go through the colour-token registry like every other
+    // colour (a raw RGB resolves to the default). Scintilla's default marker
+    // background is a grey that ignores the scheme, so symbol markers (e.g. the
+    // fold +/- glyphs) otherwise sit in a grey box; set both ends explicitly.
+    call(self, SCI_MARKERSETFORE, markerNum, convertColor(::getFore(attr)).OpaqueRGB());
+    call(self, SCI_MARKERSETBACK, markerNum, convertColor(::getBack(attr)).OpaqueRGB());
+}
+
 TStringView getRangePointer(TScintilla &self, Sci_Position start, Sci_Position end)
 {
     auto length = end - start;

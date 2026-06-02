@@ -8,6 +8,7 @@
 #include <tvision/tv.h>
 
 #include <memory>
+#include <vector>
 
 #include <turbo/editstates.h>
 #include <turbo/filewatcher.h>
@@ -22,6 +23,7 @@ class TClockView;
 class LspManager;
 class GitManager;
 struct BranchView;
+struct TerminalView;
 
 // TMenuView::menu (the root of the menu tree) is protected; expose it so the app
 // can rewrite toggle-item labels to show check marks.
@@ -54,6 +56,9 @@ struct TurboApp : public TApplication, EditorWindowParent
     // the idle refresh only repaints/resizes on change.
     BranchView *branchView {nullptr};
     std::string branchTextShown;
+
+    // Open terminal views, pumped each idle tick (see newTerminal()).
+    std::vector<TerminalView *> terminals;
 
     TurboApp(int argc, const char **argv) noexcept;
     ~TurboApp();
@@ -114,6 +119,12 @@ struct TurboApp : public TApplication, EditorWindowParent
     void addEditor(turbo::TScintilla &, const char *path);
     void showEditorList(TEvent *ev);
     void toggleTreeView();
+
+    // Terminal windows. newTerminal() opens one running the configured shell.
+    // Each TerminalView registers itself so idle() can pump its PTY output.
+    void newTerminal();
+    void registerTerminal(TerminalView *t) noexcept;
+    void unregisterTerminal(TerminalView *t) noexcept;
 
     void handleFocus(EditorWindow &w) noexcept override;
     void handleTitleChange(EditorWindow &w) noexcept override;

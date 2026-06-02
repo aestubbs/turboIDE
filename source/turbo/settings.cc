@@ -65,6 +65,12 @@ void loadSettings(AppSettings &s) noexcept
             s.lspEnabled = (v != 0);
         else if (sscanf(line, "showhidden=%d", &v) == 1)
             s.showHidden = (v != 0);
+        else if (strncmp(line, "terminal.shell=", 15) == 0)
+        {
+            char *cmd = line + 15;
+            chomp(cmd);
+            s.terminalShell = cmd;
+        }
         else if (strncmp(line, serverPrefix, sizeof serverPrefix - 1) == 0)
         {
             // lsp.server.<lang>=<command>

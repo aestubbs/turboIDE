@@ -19,6 +19,9 @@ struct AppSettings
     bool autoSaveOnFocusLoss {true};
     bool lspEnabled {true};
     bool showHidden {false}; // include dotfiles/dot-dirs in the file tree
+    // Command line for the terminal window's shell (e.g. "bash", "zsh -l").
+    // Empty = use $SHELL, falling back to /bin/sh.
+    std::string terminalShell;
     // Language-server command overrides. Empty by default; the LSP manager
     // falls back to built-in defaults for languages not listed here.
     std::vector<LspServerConfig> lspServers;

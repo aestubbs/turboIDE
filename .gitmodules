@@ -13,3 +13,6 @@
 [submodule "deps/lexilla"]
 	path = deps/lexilla
 	url = https://github.com/ScintillaOrg/lexilla
+[submodule "deps/libvterm"]
+	path = deps/libvterm
+	url = https://github.com/neovim/libvterm
