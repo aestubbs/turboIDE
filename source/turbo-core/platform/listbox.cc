@@ -1,14 +1,16 @@
 #include <turbo/scintilla/internals.h>
 
-namespace Scintilla {
+namespace Scintilla::Internal {
 
+// turbo does not use Scintilla's autocompletion/calltip list box (it provides
+// its own UI), so this is an inert implementation of the 5.x ListBox ABI.
 class ListBoxTV : public ListBox
 {
-    void SetFont(Font &) override
+    void SetFont(const Font *) override
     {
     }
 
-    void Create(Window &, int, Point, int, bool, int) override
+    void Create(Window &, int, Point, int, bool, Scintilla::Technology) override
     {
     }
 
@@ -35,7 +37,7 @@ class ListBoxTV : public ListBox
         return 0;
     }
 
-    void Clear() override
+    void Clear() noexcept override
     {
     }
 
@@ -48,7 +50,7 @@ class ListBoxTV : public ListBox
         return 0;
     }
 
-    void Select(int n) override
+    void Select(int) override
     {
     }
 
@@ -62,15 +64,16 @@ class ListBoxTV : public ListBox
         return 0;
     }
 
-    void GetValue(int, char *, int ) override
+    std::string GetValue(int) override
     {
+        return std::string();
     }
 
     void RegisterImage(int, const char *) override
     {
     }
 
-    void RegisterRGBAImage(int , int , int , const unsigned char *) override
+    void RegisterRGBAImage(int, int, int, const unsigned char *) override
     {
     }
 
@@ -82,7 +85,11 @@ class ListBoxTV : public ListBox
     {
     }
 
-    void SetList(const char*, char, char) override
+    void SetList(const char *, char, char) override
+    {
+    }
+
+    void SetOptions(ListOptions) override
     {
     }
 };
@@ -91,13 +98,13 @@ ListBox::ListBox() noexcept
 {
 }
 
-ListBox::~ListBox()
+ListBox::~ListBox() noexcept
 {
 }
 
-ListBox* ListBox::Allocate()
+std::unique_ptr<ListBox> ListBox::Allocate()
 {
-    return new ListBoxTV;
+    return std::make_unique<ListBoxTV>();
 }
 
-} // namespace Scintilla
+} // namespace Scintilla::Internal

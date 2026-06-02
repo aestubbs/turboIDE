@@ -335,7 +335,8 @@ void Editor::setUpExtraMargins() noexcept
     call(scintilla, SCI_SETMARGINTYPEN, 3, SC_MARGIN_SYMBOL);
     call(scintilla, SCI_SETMARGINMASKN, 3, SC_MASK_FOLDERS);
     call(scintilla, SCI_SETMARGINSENSITIVEN, 3, 1);
-    call(scintilla, SCI_SETMARGINWIDTHN, 3, 0);
+    // Fold margin starts at the default folding state (on); toggleFolding() flips it.
+    call(scintilla, SCI_SETMARGINWIDTHN, 3, foldingEnabled ? 1 : 0);
     call(scintilla, SCI_MARKERDEFINE, SC_MARKNUM_FOLDER, SC_MARK_CHARACTER + '+');
     call(scintilla, SCI_MARKERDEFINE, SC_MARKNUM_FOLDEROPEN, SC_MARK_CHARACTER + '-');
     call(scintilla, SCI_MARKERDEFINE, SC_MARKNUM_FOLDEREND, SC_MARK_CHARACTER + '+');

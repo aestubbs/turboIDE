@@ -1,48 +1,54 @@
 #include <turbo/scintilla.h>
 #include <turbo/scintilla/internals.h>
 
-namespace Scintilla {
+namespace Scintilla::Internal {
 
-ColourDesired Platform::Chrome()
+namespace Platform {
+
+ColourRGBA Chrome()
 {
-    return {0x0, 0x0, 0x0};
+    return black;
 }
 
-ColourDesired Platform::ChromeHighlight()
+ColourRGBA ChromeHighlight()
 {
-    return {0x0, 0x0, 0x0};
+    return black;
 }
 
-const char* Platform::DefaultFont()
+const char *DefaultFont()
 {
     return "";
 }
 
-int Platform::DefaultFontSize()
+int DefaultFontSize()
 {
     return 1;
 }
 
-unsigned int Platform::DoubleClickTime()
+unsigned int DoubleClickTime()
 {
     return 500;
 }
 
-void Platform::DebugDisplay(const char *s)
+// Debugging hooks (declared in Debugging.h, only used by PLATFORM_ASSERT in
+// non-NDEBUG builds). turbo has no console to print to, so these are inert.
+void DebugDisplay(const char *) noexcept
 {
 }
 
-void Platform::DebugPrintf(const char *format, ...)
+void DebugPrintf(const char *, ...) noexcept
 {
 }
 
-bool Platform::ShowAssertionPopUps(bool assertionPopUps_)
+bool ShowAssertionPopUps(bool) noexcept
 {
     return false;
 }
 
-void Platform::Assert(const char *c, const char *file, int line)
+void Assert(const char *, const char *, int) noexcept
 {
 }
 
-} // namespace Scintilla
+} // namespace Platform
+
+} // namespace Scintilla::Internal

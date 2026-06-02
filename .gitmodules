@@ -7,3 +7,9 @@
 [submodule "deps/json"]
 	path = deps/json
 	url = https://github.com/nlohmann/json
+[submodule "deps/scintilla"]
+	path = deps/scintilla
+	url = https://github.com/mirror/scintilla
+[submodule "deps/lexilla"]
+	path = deps/lexilla
+	url = https://github.com/ScintillaOrg/lexilla

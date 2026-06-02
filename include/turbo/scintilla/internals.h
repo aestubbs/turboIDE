@@ -1,15 +1,23 @@
 #ifndef TURBO_SCINTILLA_INTERNALS_H
 #define TURBO_SCINTILLA_INTERNALS_H
 
-// Define the standard order in which to include header files
-// All platform headers should be included before Scintilla headers
-// and each of these groups are then divided into directory groups.
+// Aggregates the Scintilla 5.x internal headers needed by turbo's platform
+// layer (the Surface/Window/Font/ListBox/Menu implementation in
+// source/turbo-core/platform/*.cc) and by the TScintilla subclass.
+//
+// The headers are resolved through the include paths added in CMakeLists.txt
+// (deps/scintilla/include and deps/scintilla/src), so they are pulled straight
+// from the pinned submodule rather than from a vendored copy. The include order
+// mirrors Scintilla's own translation units (see src/ScintillaBase.cxx).
 
 // C standard library
-#include <string.h>
-#include <assert.h>
-
-// C++ wrappers of C standard library
+#include <cstddef>
+#include <cstdlib>
+#include <cstdint>
+#include <cassert>
+#include <cstring>
+#include <cstdio>
+#include <cmath>
 
 // C++ standard library
 #include <stdexcept>
@@ -17,80 +25,56 @@
 #include <string_view>
 #include <vector>
 #include <map>
+#include <set>
+#include <optional>
 #include <forward_list>
 #include <algorithm>
 #include <memory>
 #include <chrono>
 
-// Scintilla headers
+// Scintilla public interface (enums, messages, structures, lexer interface)
+#include <ScintillaTypes.h>
+#include <ScintillaMessages.h>
+#include <ScintillaStructures.h>
+#include <ILoader.h>
+#include <ILexer.h>
 
-// Non-platform-specific headers
+// Scintilla internal headers
+#include <Debugging.h>
+#include <Geometry.h>
+#include <Platform.h>
 
-// include
-#include "include/Platform.h"
-#include "include/Sci_Position.h"
-#include "include/ILoader.h"
-#include "include/ILexer.h"
-#include "include/Scintilla.h"
-#include "include/ScintillaWidget.h"
-#include "include/SciLexer.h"
-
-// lexlib
-#include "lexlib/StringCopy.h"
-#include "lexlib/PropSetSimple.h"
-#include "lexlib/WordList.h"
-#include "lexlib/LexAccessor.h"
-#include "lexlib/Accessor.h"
-#include "lexlib/StyleContext.h"
-#include "lexlib/CharacterSet.h"
-#include "lexlib/CharacterCategory.h"
-#include "lexlib/LexerModule.h"
-#include "lexlib/CatalogueModules.h"
-#include "lexlib/OptionSet.h"
-#include "lexlib/SparseState.h"
-#include "lexlib/SubStyles.h"
-#include "lexlib/DefaultLexer.h"
-#include "lexlib/LexerBase.h"
-#include "lexlib/LexerSimple.h"
-#include "lexlib/LexerNoExceptions.h"
-
-// src
-#include "src/Catalogue.h"
-#include "src/Position.h"
-#include "src/IntegerRectangle.h"
-#include "src/UniqueString.h"
-#include "src/SplitVector.h"
-#include "src/Partitioning.h"
-#include "src/RunStyles.h"
-#include "src/SparseVector.h"
-#include "src/ContractionState.h"
-#include "src/CellBuffer.h"
-#include "src/PerLine.h"
-#include "src/CallTip.h"
-#include "src/KeyMap.h"
-#include "src/Indicator.h"
-#include "src/XPM.h"
-#include "src/LineMarker.h"
-#include "src/Style.h"
-#include "src/ViewStyle.h"
-#include "src/CharClassify.h"
-#include "src/Decoration.h"
-#include "src/CaseFolder.h"
-#include "src/Document.h"
-#include "src/RESearch.h"
-#include "src/CaseConvert.h"
-#include "src/UniConversion.h"
-#include "src/DBCS.h"
-#include "src/Selection.h"
-#include "src/PositionCache.h"
-#include "src/FontQuality.h"
-#include "src/EditModel.h"
-#include "src/MarginView.h"
-#include "src/EditView.h"
-#include "src/Editor.h"
-#include "src/ElapsedPeriod.h"
-#include "src/AutoComplete.h"
-#include "src/ScintillaBase.h"
-#include "src/ExternalLexer.h"
+#include <CharacterType.h>
+#include <CharacterCategoryMap.h>
+#include <Position.h>
+#include <UniqueString.h>
+#include <SplitVector.h>
+#include <Partitioning.h>
+#include <RunStyles.h>
+#include <ContractionState.h>
+#include <CellBuffer.h>
+#include <PerLine.h>
+#include <CallTip.h>
+#include <KeyMap.h>
+#include <Indicator.h>
+#include <LineMarker.h>
+#include <Style.h>
+#include <ViewStyle.h>
+#include <CharClassify.h>
+#include <Decoration.h>
+#include <CaseFolder.h>
+#include <CaseConvert.h>
+#include <Document.h>
+#include <UniConversion.h>
+#include <DBCS.h>
+#include <Selection.h>
+#include <PositionCache.h>
+#include <EditModel.h>
+#include <MarginView.h>
+#include <EditView.h>
+#include <Editor.h>
+#include <ElapsedPeriod.h>
+#include <AutoComplete.h>
+#include <ScintillaBase.h>
 
 #endif // TURBO_SCINTILLA_INTERNALS_H

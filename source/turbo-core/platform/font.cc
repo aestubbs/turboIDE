@@ -1,26 +1,14 @@
-#include <turbo/scintilla/internals.h>
+#include "surface.h"
 
-namespace Scintilla {
+namespace Scintilla::Internal {
 
-Font::Font() noexcept :
-    fid(nullptr)
+std::shared_ptr<Font> Font::Allocate(const FontParameters &fp)
 {
+    // The terminal has no real fonts; we only carry the TVision cell style
+    // (bold/italic/...) that turbo stuffs into Scintilla's FontWeight field.
+    auto f = std::make_shared<FontTV>();
+    f->style = (ushort) (int) fp.weight;
+    return f;
 }
 
-Font::~Font()
-{
-}
-
-void Font::Create(const FontParameters &fp)
-{
-    Release();
-    // Store attributes in 'fid' field.
-    fid = (void *)(size_t)(unsigned) fp.weight;
-}
-
-void Font::Release()
-{
-    fid = nullptr;
-}
-
-} // namespace Scintilla
+} // namespace Scintilla::Internal

@@ -21,36 +21,27 @@ set(TURBO_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
 include(GNUInstallDirs)
 
-# Target 'scintilla'
+# Targets 'scintilla' (5.x core) and 'lexilla' (language lexers)
+#
+# Both are pulled from upstream as git submodules under deps/ (matching the
+# tvision/json convention) so they can be bumped with `git submodule update`
+# instead of re-vendoring. The TVision platform layer that backs Scintilla lives
+# in source/turbo-core/platform/*.cc (it provides Surface/Window/Font/etc.), so
+# only the platform-independent core (deps/scintilla/src) is compiled here.
+#
+# Scintilla core can use a Unity Build; the lexers cannot (each LexXxx.cxx relies
+# on file-local names that collide when batched), so lexilla uses a PCH instead.
 
-# These two could be built in one single target, but we want to enable Unity Build
-# for 'scintilla' and precompiled headers for 'scilexers'.
+file(GLOB SCINTILLA_SRC "${CMAKE_CURRENT_LIST_DIR}/deps/scintilla/src/*.cxx")
 
-file(GLOB_RECURSE SCINTILLA_SRC
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/src/*.cxx"
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexlib/*.cxx"
+file(GLOB LEXILLA_SRC
+    "${CMAKE_CURRENT_LIST_DIR}/deps/lexilla/lexlib/*.cxx"
+    "${CMAKE_CURRENT_LIST_DIR}/deps/lexilla/lexers/*.cxx"
 )
-
-list(APPEND SCILEXERS_SRC
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexers/LexAsm.cxx"
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexers/LexBash.cxx"
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexers/LexCPP.cxx"
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexers/LexJSON.cxx"
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexers/LexMake.cxx"
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexers/LexPython.cxx"
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexers/LexRuby.cxx"
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexers/LexRust.cxx"
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexers/LexYAML.cxx"
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexers/LexHTML.cxx"
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexers/LexProps.cxx"
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexers/LexVB.cxx"
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexers/LexPascal.cxx"
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexers/LexLaTeX.cxx"
-    "${CMAKE_CURRENT_LIST_DIR}/source/scintilla/lexers/LexSQL.cxx"
-)
+list(APPEND LEXILLA_SRC "${CMAKE_CURRENT_LIST_DIR}/deps/lexilla/src/Lexilla.cxx")
 
 add_library(scintilla OBJECT ${SCINTILLA_SRC})
-add_library(scilexers OBJECT ${SCILEXERS_SRC})
+add_library(lexilla OBJECT ${LEXILLA_SRC})
 
 function(turbo_set_warnings t)
     if (NOT ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC"))
@@ -64,25 +55,30 @@ function(turbo_set_warnings t)
     endif()
 endfunction()
 
-foreach(t scintilla scilexers)
+foreach(t scintilla lexilla)
     target_compile_features(${t} PUBLIC cxx_std_17)
     turbo_set_warnings(${t})
-    target_include_directories(${t} PRIVATE
-        "${CMAKE_CURRENT_LIST_DIR}/include/turbo/scintilla/include"
-        "${CMAKE_CURRENT_LIST_DIR}/include/turbo/scintilla/lexlib"
-        "${CMAKE_CURRENT_LIST_DIR}/include/turbo/scintilla/src"
-    )
     if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         target_compile_options(${t} PRIVATE
             /wd4514 /wd4166 /wd4068 /wd4996 /wd4250 /wd4267
             /permissive- /Zc:__cplusplus
         )
     endif()
-    target_compile_definitions(${t} PRIVATE
-        CURSES
-        SCI_LEXER
-    )
+    # CURSES selects PLAT_CURSES in Scintilla's Platform.h (the closest match to a
+    # terminal); the concrete platform implementation is turbo-core's own.
+    target_compile_definitions(${t} PRIVATE CURSES)
 endforeach()
+
+target_include_directories(scintilla PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/deps/scintilla/include"
+    "${CMAKE_CURRENT_LIST_DIR}/deps/scintilla/src"
+)
+
+target_include_directories(lexilla PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/deps/scintilla/include"
+    "${CMAKE_CURRENT_LIST_DIR}/deps/lexilla/include"
+    "${CMAKE_CURRENT_LIST_DIR}/deps/lexilla/lexlib"
+)
 
 # Dependencies
 
@@ -96,7 +92,7 @@ file(GLOB_RECURSE TURBO_CORE_SRC "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}-core
 add_library(${TURBO}-core
     ${TURBO_CORE_SRC}
     $<TARGET_OBJECTS:scintilla>
-    $<TARGET_OBJECTS:scilexers>
+    $<TARGET_OBJECTS:lexilla>
 )
 
 target_compile_features(${TURBO}-core PRIVATE cxx_std_17)
@@ -104,10 +100,18 @@ turbo_set_warnings(${TURBO}-core)
 target_include_directories(${TURBO}-core PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>"
     "$<INSTALL_INTERFACE:include>"
+    # turbo's public header <turbo/scintilla.h> includes Scintilla's and Lexilla's
+    # public C API headers (Scintilla.h, SciLexer.h), so consumers of turbo-core
+    # (the app, examples, tests) must see these include dirs too.
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/deps/scintilla/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/deps/lexilla/include>"
 )
 target_include_directories(${TURBO}-core PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}-core"
     "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}-core/platform"
+    # Scintilla's internal headers (src/) — needed only by turbo-core's platform
+    # layer, which subclasses Scintilla internals.
+    "${CMAKE_CURRENT_LIST_DIR}/deps/scintilla/src"
 )
 target_link_libraries(${TURBO}-core PUBLIC
     tvision
@@ -252,7 +256,7 @@ if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.16.0" AND TURBO_OPTIMIZE_BUILD)
         "${CMAKE_CURRENT_LIST_DIR}/include/TurboPCH.h"
     )
     set_target_properties(scintilla PROPERTIES UNITY_BUILD ON)
-    target_precompile_headers(scilexers PRIVATE
+    target_precompile_headers(lexilla PRIVATE
         "${CMAKE_CURRENT_LIST_DIR}/include/ScilexersPCH.h"
     )
     if (TURBO_BUILD_APP)

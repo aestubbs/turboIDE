@@ -22,7 +22,7 @@ void destroyScintilla(TScintilla &self) noexcept
 
 sptr_t call(TScintilla &self, uint iMessage, uptr_t wParam, sptr_t lParam)
 {
-    return self.WndProc(iMessage, wParam, lParam);
+    return self.WndProc((Scintilla::Message) iMessage, wParam, lParam);
 }
 
 void setParent(TScintilla &self, TScintillaParent *aParent)
@@ -42,12 +42,12 @@ void clearBeforeTentativeStart(TScintilla &self)
 
 void insertPasteStream(TScintilla &self, TStringView text)
 {
-    self.InsertPasteShape(text.data(), text.size(), TScintilla::pasteStream);
+    self.InsertPasteShape(text.data(), text.size(), TScintilla::PasteShape::stream);
 }
 
 void insertCharacter(TScintilla &self, TStringView text)
 {
-    self.InsertCharacter(text, TScintilla::CharacterSource::directInput);
+    self.InsertCharacter(text, Scintilla::CharacterSource::DirectInput);
 }
 
 void idleWork(TScintilla &self)
@@ -143,25 +143,25 @@ bool handleKeyDown(TScintilla &self, const KeyDownEvent &keyDown)
     if (specialKey)
     {
         bool consumed = false;
-        self.KeyDownWithModifiers(key, modifiers, &consumed);
+        self.KeyDownWithModifiers((Scintilla::Keys) key, (Scintilla::KeyMod) modifiers, &consumed);
         return consumed;
     }
     else
     {
-        self.InsertCharacter({keyDown.text, keyDown.textLength}, TScintilla::CharacterSource::directInput);
+        self.InsertCharacter({keyDown.text, keyDown.textLength}, Scintilla::CharacterSource::DirectInput);
         return true;
     }
 }
 
 bool handleMouse(TScintilla &self, ushort what, const MouseEventType &mouse)
 {
-    using namespace Scintilla;
+    using namespace Scintilla::Internal;
     using std::chrono::duration_cast;
     using std::chrono::milliseconds;
     using std::chrono::steady_clock;
     auto pt = Point::FromInts(mouse.where.x, mouse.where.y);
     uint time = duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
-    int modifiers = convertModifiers(mouse.controlKeyState); // Very few environments do support this.
+    auto modifiers = (Scintilla::KeyMod) convertModifiers(mouse.controlKeyState); // Very few environments do support this.
     if (mouse.buttons & mbLeftButton)
     {
         // Scintilla actually assumes these functions are invoked only for the
@@ -186,9 +186,9 @@ bool handleMouse(TScintilla &self, ushort what, const MouseEventType &mouse)
 
 TColorAttr getStyleColor(TScintilla &self, int style)
 {
-    using namespace Scintilla;
-    ColourDesired fore {(int) call(self, SCI_STYLEGETFORE, style, 0U)};
-    ColourDesired back {(int) call(self, SCI_STYLEGETBACK, style, 0U)};
+    using namespace Scintilla::Internal;
+    ColourRGBA fore {(int) call(self, SCI_STYLEGETFORE, style, 0U)};
+    ColourRGBA back {(int) call(self, SCI_STYLEGETBACK, style, 0U)};
     auto styleWeight = call(self, SCI_STYLEGETWEIGHT, style, 0U);
     return {
         convertColor(fore),
@@ -199,10 +199,11 @@ TColorAttr getStyleColor(TScintilla &self, int style)
 
 void paint(TScintilla &self, TDrawSurface &d, TRect area)
 {
-    using namespace Scintilla;
+    using namespace Scintilla::Internal;
     TScintillaSurface s;
     s.surface = &d;
     s.defaultTextAttr = getStyleColor(self, STYLE_DEFAULT);
+    s.indicatorColors = &self.indicatorColors;
     self.Paint(
         &s,
         PRectangle::FromInts(area.a.x, area.a.y, area.b.x, area.b.y)
@@ -211,28 +212,28 @@ void paint(TScintilla &self, TDrawSurface &d, TRect area)
 
 void setStyleColor(TScintilla &self, int style, TColorAttr attr)
 {
-    using namespace Scintilla;
-    call(self, SCI_STYLESETFORE, style, convertColor(::getFore(attr)).AsInteger());
-    call(self, SCI_STYLESETBACK, style, convertColor(::getBack(attr)).AsInteger());
+    using namespace Scintilla::Internal;
+    call(self, SCI_STYLESETFORE, style, convertColor(::getFore(attr)).OpaqueRGB());
+    call(self, SCI_STYLESETBACK, style, convertColor(::getBack(attr)).OpaqueRGB());
     call(self, SCI_STYLESETWEIGHT, style, ::getStyle(attr));
 }
 
 void setSelectionColor(TScintilla &self, TColorAttr attr)
 {
-    using namespace Scintilla;
+    using namespace Scintilla::Internal;
     auto fg = ::getFore(attr),
          bg = ::getBack(attr);
-    call(self, SCI_SETSELFORE, !fg.isDefault(), convertColor(fg).AsInteger());
-    call(self, SCI_SETSELBACK, !bg.isDefault(), convertColor(bg).AsInteger());
+    call(self, SCI_SETSELFORE, !fg.isDefault(), convertColor(fg).OpaqueRGB());
+    call(self, SCI_SETSELBACK, !bg.isDefault(), convertColor(bg).OpaqueRGB());
 }
 
 void setWhitespaceColor(TScintilla &self, TColorAttr attr)
 {
-    using namespace Scintilla;
+    using namespace Scintilla::Internal;
     auto fg = ::getFore(attr),
          bg = ::getBack(attr);
-    call(self, SCI_SETWHITESPACEFORE, !fg.isDefault(), convertColor(fg).AsInteger());
-    call(self, SCI_SETWHITESPACEBACK, !bg.isDefault(), convertColor(bg).AsInteger());
+    call(self, SCI_SETWHITESPACEFORE, !fg.isDefault(), convertColor(fg).OpaqueRGB());
+    call(self, SCI_SETWHITESPACEBACK, !bg.isDefault(), convertColor(bg).OpaqueRGB());
 }
 
 TStringView getRangePointer(TScintilla &self, Sci_Position start, Sci_Position end)
@@ -241,24 +242,28 @@ TStringView getRangePointer(TScintilla &self, Sci_Position start, Sci_Position e
     if (length <= 0)
         return TStringView();
     return TStringView {
-        (const char *) self.WndProc(SCI_GETRANGEPOINTER, (uptr_t) start, (sptr_t) length),
+        (const char *) self.WndProc((Scintilla::Message) SCI_GETRANGEPOINTER, (uptr_t) start, (sptr_t) length),
         size_t(length),
     };
 }
 
 void changeCaseOfSelection(TScintilla &self, CaseConversion cnv)
 {
-    self.ChangeCaseOfSelection(cnv);
+    self.ChangeCaseOfSelection((TScintilla::CaseMapping) (int) cnv);
 }
 
 void setIndicatorColor(TScintilla &self, Indicator indicator, TColorAttr attr)
 {
-    using namespace Scintilla;
-    auto fg = ::getFore(attr),
-         bg = ::getBack(attr);
+    // The terminal Surface cannot draw real translucent indicators; instead it
+    // recolours the underlying cells. AlphaRectangle only receives the indicator
+    // 'fore' colour, so smuggle the indicator number through it and keep the real
+    // fore/back colours in a side table that the Surface resolves at paint time
+    // (see platform/surface.cc AlphaRectangle()).
+    self.indicatorColors[(int) indicator] = attr;
     call(self, SCI_INDICSETSTYLE, indicator, INDIC_FULLBOX);
-    call(self, SCI_INDICSETFORE, indicator, convertColor(bg).AsInteger());
-    call(self, SCI_INDICSETOUTLINEALPHA, indicator, convertColor(fg).AsInteger());
+    call(self, SCI_INDICSETFORE, indicator, (int) indicator);
+    call(self, SCI_INDICSETALPHA, indicator, 255);
+    call(self, SCI_INDICSETOUTLINEALPHA, indicator, 255);
 }
 
 } // namespace turbo

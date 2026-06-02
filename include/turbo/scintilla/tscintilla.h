@@ -10,13 +10,13 @@ namespace turbo {
 class TScintillaParent;
 } // namespace turbo
 
-namespace Scintilla {
+namespace Scintilla::Internal {
 
 class TScintilla : public ScintillaBase
 {
     using super = ScintillaBase;
 
-    static void drawWrapMarker(Surface *, PRectangle, bool, ColourDesired);
+    static void drawWrapMarker(Surface *, PRectangle, bool, ColourRGBA);
 
 protected:
 
@@ -27,20 +27,22 @@ protected:
     void Paste() override;
     void ClaimSelection() override;
     void NotifyChange() override;
-    void NotifyParent(SCNotification scn) override;
+    void NotifyParent(Scintilla::NotificationData scn) override;
     void CopyToClipboard(const SelectionText &selectedText) override;
     bool FineTickerRunning(TickReason reason) override;
     void FineTickerStart(TickReason reason, int millis, int tolerance) override;
     void FineTickerCancel(TickReason reason) override;
     void SetMouseCapture(bool on) override;
     bool HaveMouseCapture() override;
-    sptr_t DefWndProc(unsigned int iMessage, uptr_t wParam, sptr_t lParam) override;
-    void CreateCallTipWindow(Scintilla::PRectangle rc) override;
+    Scintilla::sptr_t DefWndProc(Scintilla::Message iMessage, Scintilla::uptr_t wParam, Scintilla::sptr_t lParam) override;
+    void CreateCallTipWindow(PRectangle rc) override;
     void AddToPopUp(const char *label, int cmd=0, bool enabled=true) override;
 
-    CaseFolder *CaseFolderForEncoding() override;
-    std::string CaseMapString(const std::string &, int) override;
-    int KeyDefault(int key, int modifiers) override;
+    std::unique_ptr<CaseFolder> CaseFolderForEncoding() override;
+    std::string CaseMapString(const std::string &s, CaseMapping caseMapping) override;
+    int KeyDefault(Scintilla::Keys key, Scintilla::KeyMod modifiers) override;
+    std::string UTF8FromEncoded(std::string_view encoded) const override;
+    std::string EncodedFromUTF8(std::string_view utf8) const override;
 
 public:
 
@@ -51,6 +53,7 @@ public:
     using super::ChangeSize;
     using super::ClearBeforeTentativeStart;
     using super::InsertPasteShape;
+    using super::PasteShape;
     using super::InsertCharacter;
     using super::IdleWork;
     using super::PointMainCaret;
@@ -59,9 +62,13 @@ public:
     using super::ButtonUpWithModifiers;
     using super::ButtonMoveWithModifiers;
     using super::Paint;
-    using super::pasteStream;
-    using super::CharacterSource;
     using super::ChangeCaseOfSelection;
+    using super::CaseMapping;
+
+    // Maps an indicator number to its fore/back colours, used by the terminal
+    // Surface to colour FULLBOX indicators (see source/turbo-core/scintilla.cc
+    // setIndicatorColor() and platform/surface.cc AlphaRectangle()).
+    std::map<int, TColorAttr> indicatorColors;
 
 };
 
@@ -75,6 +82,6 @@ inline turbo::TScintillaParent *TScintilla::getParent() const
     return (turbo::TScintillaParent *) wMain.GetID();
 }
 
-} // namespace Scintilla
+} // namespace Scintilla::Internal
 
 #endif

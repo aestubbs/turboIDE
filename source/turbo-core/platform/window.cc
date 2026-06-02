@@ -6,13 +6,13 @@
 #include <turbo/scintilla/internals.h>
 #include "surface.h"
 
-namespace Scintilla {
+namespace Scintilla::Internal {
 
-Window::~Window()
+Window::~Window() noexcept
 {
 }
 
-void Window::Destroy()
+void Window::Destroy() noexcept
 {
 }
 
@@ -21,11 +21,11 @@ PRectangle Window::GetPosition() const
     return PRectangle();
 }
 
-void Window::SetPosition(PRectangle rc)
+void Window::SetPosition(PRectangle)
 {
 }
 
-void Window::SetPositionRelative(PRectangle rc, const Window *relativeTo)
+void Window::SetPositionRelative(PRectangle, const Window *)
 {
 }
 
@@ -40,7 +40,7 @@ PRectangle Window::GetClientPosition() const
     return PRectangle();
 }
 
-void Window::Show(bool show)
+void Window::Show(bool)
 {
 }
 
@@ -58,15 +58,11 @@ void Window::InvalidateRectangle(PRectangle rc)
         p->invalidate(TPRect(rc));
 }
 
-void Window::SetFont(Font &font)
+void Window::SetCursor(Cursor)
 {
 }
 
-void Window::SetCursor(Cursor curs)
-{
-}
-
-PRectangle Window::GetMonitorRect(Point pt)
+PRectangle Window::GetMonitorRect(Point)
 {
     if (TProgram::application)
     {
@@ -76,4 +72,4 @@ PRectangle Window::GetMonitorRect(Point pt)
     return PRectangle();
 }
 
-} // namespace scintilla
+} // namespace Scintilla::Internal

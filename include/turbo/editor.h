@@ -67,8 +67,8 @@ public:
     LineNumbersWidth lineNumbers {minLineNumbersWidth};
     WrapState wrapping;
     AutoIndent autoIndent;
-    // IDE feature state. Off by default so the default appearance is unchanged.
-    bool foldingEnabled {false};
+    // IDE feature state.
+    bool foldingEnabled {true};         // code folding on by default
     bool changeHistoryEnabled {false};
     bool bookmarksUsed {false}; // becomes true once the bookmark margin is shown
     bool edgeEnabled {false};

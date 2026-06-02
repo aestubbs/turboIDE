@@ -1,8 +1,11 @@
 #ifndef TURBO_SCINTILLA_H
 #define TURBO_SCINTILLA_H
 
-#include "scintilla/include/Scintilla.h"
-#include "scintilla/include/SciLexer.h"
+// Scintilla 5.x (from deps/scintilla submodule) and Lexilla's SciLexer.h
+// (lexer style constants). Resolved through the include paths set in
+// CMakeLists.txt for the turbo-core target.
+#include <Scintilla.h>
+#include <SciLexer.h>
 
 class TPoint;
 class TRect;
@@ -12,13 +15,13 @@ struct TColorAttr;
 struct KeyDownEvent;
 struct MouseEventType;
 
-namespace Scintilla {
+namespace Scintilla::Internal {
 class TScintilla;
-} // namespace Scintilla
+} // namespace Scintilla::Internal
 
 namespace turbo {
 
-using TScintilla = Scintilla::TScintilla;
+using TScintilla = Scintilla::Internal::TScintilla;
 class TScintillaParent;
 
 // The definition of 'TScintilla' is hidden from the public headers just

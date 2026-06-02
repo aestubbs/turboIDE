@@ -4,6 +4,7 @@
 #include <turbo/editstates.h>
 #include <turbo/scintilla.h>
 #include <turbo/scintilla/internals.h>
+#include <Lexilla.h> // Lexilla::CreateLexer (lexers are external in Scintilla 5.x)
 
 namespace turbo {
 
@@ -340,7 +341,7 @@ static void getLineStartAndEnd(TScintilla &scintilla, Sci::Position &posStart, S
 static size_t findCommentAtStart(TStringView text, TStringView comment)
 {
     size_t i = 0;
-    while (i < text.size() && Scintilla::IsSpaceOrTab(text[i]))
+    while (i < text.size() && Scintilla::Internal::IsSpaceOrTab(text[i]))
         ++i;
     size_t j = 0;
     while (j < comment.size())
@@ -352,7 +353,7 @@ static size_t findCommentAtStart(TStringView text, TStringView comment)
 static size_t findCommentAtEnd(TStringView text, TStringView comment)
 {
     size_t i = text.size();
-    while (i > 0 && Scintilla::IsSpaceOrTab(text[i - 1]))
+    while (i > 0 && Scintilla::Internal::IsSpaceOrTab(text[i - 1]))
         --i;
     size_t j = comment.size();
     while (j > 0)
@@ -435,13 +436,13 @@ bool thereIsTextBeforeOrAfterSelection(TScintilla &scintilla)
         Sci::Position firstLineStart = call(scintilla, SCI_POSITIONFROMLINE, firstLine, 0U);
         TStringView textBefore = getRangePointer(scintilla, firstLineStart, selStart);
         for (char c : textBefore)
-            if (!Scintilla::IsSpaceOrTab(c))
+            if (!Scintilla::Internal::IsSpaceOrTab(c))
                 return true;
         Sci::Line lastLine = call(scintilla, SCI_LINEFROMPOSITION, selEnd, 0U);
         Sci::Position lastLineEnd = call(scintilla, SCI_GETLINEENDPOSITION, lastLine, 0U);
         TStringView textAfter = getRangePointer(scintilla, selEnd, lastLineEnd);
         for (char c : textAfter)
-            if (!Scintilla::IsSpaceOrTab(c))
+            if (!Scintilla::Internal::IsSpaceOrTab(c))
                 return true;
     }
     return false;
@@ -513,7 +514,7 @@ static size_t minIndentationInLines(TScintilla &scintilla, Sci::Line firstLine, 
         if (!text.empty())
         {
             size_t i = 0;
-            while (i < text.size() && Scintilla::IsSpaceOrTab(text[i]))
+            while (i < text.size() && Scintilla::Internal::IsSpaceOrTab(text[i]))
                 ++i;
             if (i != text.size())
                 result = min(i, result);
@@ -542,6 +543,32 @@ static size_t insertLineCommentIntoLine(TScintilla &scintilla, const Language &l
 
 /////////////////////////////////////////////////////////////////////////
 
+// Maps the legacy SCLEX_* lexer id (still used by the builtInLexers table) to
+// the Lexilla lexer name needed by Lexilla::CreateLexer. Scintilla 5.x no longer
+// bundles lexers, so they are created by name instead of selected by id.
+static const char *lexerNameForId(int id)
+{
+    switch (id)
+    {
+        case SCLEX_CPP:        return "cpp";
+        case SCLEX_MAKEFILE:   return "makefile";
+        case SCLEX_ASM:        return "asm";
+        case SCLEX_RUST:       return "rust";
+        case SCLEX_PYTHON:     return "python";
+        case SCLEX_BASH:       return "bash";
+        case SCLEX_RUBY:       return "ruby";
+        case SCLEX_JSON:       return "json";
+        case SCLEX_YAML:       return "yaml";
+        case SCLEX_HTML:       return "hypertext";
+        case SCLEX_PROPERTIES: return "props";
+        case SCLEX_VB:         return "vb";
+        case SCLEX_PASCAL:     return "pascal";
+        case SCLEX_LATEX:      return "latex";
+        case SCLEX_SQL:        return "sql";
+        default:               return nullptr;
+    }
+}
+
 void applyTheming(const LexerSettings *lexer, const ColorScheme *aScheme, TScintilla &scintilla)
 {
     auto &scheme = aScheme ? *aScheme : schemeDefault;
@@ -554,7 +581,12 @@ void applyTheming(const LexerSettings *lexer, const ColorScheme *aScheme, TScint
     setIndicatorColor(scintilla, idtrReplaceHighlight, scheme[sReplaceHighlight]);
     if (lexer)
     {
-        call(scintilla, SCI_SETLEXER, lexer->id, 0U);
+        // Create the lexer through Lexilla (lexers are no longer part of
+        // Scintilla core) and install it with SCI_SETILEXER.
+        Scintilla::ILexer5 *ilexer = nullptr;
+        if (const char *name = lexerNameForId(lexer->id))
+            ilexer = CreateLexer(name);
+        call(scintilla, SCI_SETILEXER, 0, (sptr_t) ilexer);
         for (const auto &s : lexer->styles)
             setStyleColor(scintilla, s.id, normalize(scheme, s.style));
         for (const auto &k : lexer->keywords)
@@ -570,7 +602,8 @@ void applyTheming(const LexerSettings *lexer, const ColorScheme *aScheme, TScint
         call(scintilla, SCI_SETPROPERTY, (sptr_t) "fold.html", (sptr_t) "1");
     }
     else
-        call(scintilla, SCI_SETLEXER, SCLEX_CONTAINER, 0U);
+        // No lexer: clear any installed ILexer (the old SCLEX_CONTAINER state).
+        call(scintilla, SCI_SETILEXER, 0, (sptr_t) nullptr);
     call(scintilla, SCI_COLOURISE, 0, -1);
 }
 

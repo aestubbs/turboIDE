@@ -5,33 +5,101 @@
 #include "surface.h"
 #include <turbo/scintilla.h>
 
-namespace Scintilla {
+namespace Scintilla::Internal {
 
-Surface *Surface::Allocate(int technology)
+// Colour token registry. See the comment in surface.h. Theme setup (intern) and
+// painting (resolve) both run on the main UI thread, so no locking is needed.
+// Token 0 is reserved for the terminal-default colour, so a style Scintilla
+// returns as 0 (unset) resolves to "default" rather than the first interned
+// colour.
+
+static TColorDesired defaultTColor() noexcept
 {
-    return new TScintillaSurface;
+    TColorDesired c;
+    c.bitCast(0); // type ctDefault: terminal default colour
+    return c;
 }
 
-void TScintillaSurface::Init(WindowID wid)
+static std::vector<TColorDesired> &colorPalette()
+{
+    static std::vector<TColorDesired> palette = { defaultTColor() };
+    return palette;
+}
+
+static std::map<uint32_t, int> &colorIndex()
+{
+    static std::map<uint32_t, int> index = { { 0u, 0 } };
+    return index;
+}
+
+int internTColor(TColorDesired c)
+{
+    auto &palette = colorPalette();
+    auto &index = colorIndex();
+    uint32_t key = c.bitCast();
+    auto it = index.find(key);
+    if (it != index.end())
+        return it->second;
+    int token = (int) palette.size();
+    palette.push_back(c);
+    index[key] = token;
+    return token;
+}
+
+TColorDesired resolveTColor(int token)
+{
+    auto &palette = colorPalette();
+    if (token < 0 || (size_t) token >= palette.size())
+        return defaultTColor(); // unknown token (e.g. a raw colour) -> default
+    return palette[token];
+}
+
+std::unique_ptr<Surface> Surface::Allocate(Scintilla::Technology)
+{
+    return std::make_unique<TScintillaSurface>();
+}
+
+void TScintillaSurface::Init(WindowID)
 {
 }
 
-void TScintillaSurface::Init(SurfaceID sid, WindowID wid)
+void TScintillaSurface::Init(SurfaceID, WindowID)
 {
 }
 
-void TScintillaSurface::InitPixMap(int width, int height, Surface *surface_, WindowID wid)
+std::unique_ptr<Surface> TScintillaSurface::AllocatePixMap(int, int)
 {
-    // We get the actual TDrawSurface object we need to draw on from the 'surface_' parameter,
-    // which points to the TScintillaSurface object created in ScintillaEditor::paint().
-    surface = ((TScintillaSurface *) surface_)->surface;
-    defaultTextAttr = ((TScintillaSurface *) surface_)->defaultTextAttr;
+    // The terminal has no real pixmaps. Scintilla draws lines/markers into a
+    // pixmap and then Copy()s them onto the destination; we make the "pixmap"
+    // share the same TDrawSurface so that drawing lands directly on screen and
+    // Copy() becomes a no-op. (turbo also disables buffered draw, so this path
+    // is rarely exercised.)
+    auto s = std::make_unique<TScintillaSurface>();
+    s->surface = surface;
+    s->defaultTextAttr = defaultTextAttr;
+    s->mode = mode;
+    s->clip = clip;
+    s->indicatorColors = indicatorColors;
+    return s;
 }
 
-void TScintillaSurface::Release()
+void TScintillaSurface::SetMode(SurfaceMode mode_)
+{
+    mode = mode_;
+}
+
+void TScintillaSurface::Release() noexcept
 {
     surface = nullptr;
     defaultTextAttr = {};
+    clipStack.clear();
+}
+
+int TScintillaSurface::SupportsFeature(Scintilla::Supports) noexcept
+{
+    // The terminal Surface only fills cells and draws text; it supports none of
+    // the optional rendering features (pixel divisions, fractional strokes...).
+    return 0;
 }
 
 bool TScintillaSurface::Initialised()
@@ -39,37 +107,42 @@ bool TScintillaSurface::Initialised()
     return surface;
 }
 
-void TScintillaSurface::PenColour(ColourDesired fore)
-{
-}
-
 int TScintillaSurface::LogPixelsY()
 {
     return 1;
 }
 
-int TScintillaSurface::DeviceHeightFont(int points)
+int TScintillaSurface::PixelDivisions()
 {
     return 1;
 }
 
-void TScintillaSurface::MoveTo(int x_, int y_)
+int TScintillaSurface::DeviceHeightFont(int)
+{
+    return 1;
+}
+
+void TScintillaSurface::LineDraw(Point, Point, Stroke)
 {
 }
 
-void TScintillaSurface::LineTo(int x_, int y_)
+void TScintillaSurface::PolyLine(const Point *, size_t, Stroke)
 {
 }
 
-void TScintillaSurface::Polygon(Point *pts, size_t npts, ColourDesired fore, ColourDesired back)
+void TScintillaSurface::Polygon(const Point *, size_t, FillStroke)
 {
 }
 
-void TScintillaSurface::RectangleDraw(PRectangle rc, ColourDesired fore, ColourDesired back)
+void TScintillaSurface::RectangleDraw(PRectangle, FillStroke)
 {
 }
 
-void TScintillaSurface::FillRectangle(PRectangle rc, ColourDesired back)
+void TScintillaSurface::RectangleFrame(PRectangle, Stroke)
+{
+}
+
+void TScintillaSurface::FillRectangle(PRectangle rc, Fill fill)
 {
     auto r = clipRect(rc);
     if ( surface && 0 <= r.a.x && r.a.x < r.b.x
@@ -79,7 +152,7 @@ void TScintillaSurface::FillRectangle(PRectangle rc, ColourDesired back)
         // also needs to be set or else the cursor will have the wrong color when
         // placed on this area.
         auto attr = defaultTextAttr;
-        ::setBack(attr, convertColor(back));
+        ::setBack(attr, convertColor(fill.colour));
         auto *cells = &surface->at(r.a.y, r.a.x);
         size_t count = r.b.x - r.a.x;
         for (int y = r.a.y; y < r.b.y; ++y)
@@ -90,33 +163,53 @@ void TScintillaSurface::FillRectangle(PRectangle rc, ColourDesired back)
     }
 }
 
-void TScintillaSurface::FillRectangle(PRectangle rc, Surface &surfacePattern)
+void TScintillaSurface::FillRectangleAligned(PRectangle rc, Fill fill)
 {
-    FillRectangle(rc, ColourDesired());
+    FillRectangle(rc, fill);
 }
 
-void TScintillaSurface::RoundedRectangle(PRectangle rc, ColourDesired fore, ColourDesired back)
+void TScintillaSurface::FillRectangle(PRectangle rc, Surface &)
+{
+    FillRectangle(rc, Fill(ColourRGBA()));
+}
+
+void TScintillaSurface::RoundedRectangle(PRectangle, FillStroke)
 {
 }
 
-void TScintillaSurface::AlphaRectangle( PRectangle rc, int cornerSize, ColourDesired fill, int alphaFill,
-                                        ColourDesired outline, int alphaOutline, int flags )
+void TScintillaSurface::AlphaRectangle(PRectangle rc, XYPOSITION, FillStroke fillStroke)
 {
     auto r = clipRect(rc);
     if ( surface && 0 <= r.a.x && r.a.x < r.b.x
                  && 0 <= r.a.y && r.a.y < r.b.y )
     {
-        auto fg = convertColor(ColourDesired(alphaOutline)),
-             bg = convertColor(fill);
+        // AlphaRectangle is used to draw FULLBOX indicators. Both fill and stroke
+        // colours carry the same RGB, which turbo sets to the indicator number
+        // (see turbo::setIndicatorColor); resolve the real fore/back through the
+        // indicator table.
+        TColorDesired fg, bg;
+        bool haveFg = false, haveBg = false;
+        if (indicatorColors)
+        {
+            int ind = fillStroke.fill.colour.OpaqueRGB();
+            auto it = indicatorColors->find(ind);
+            if (it != indicatorColors->end())
+            {
+                auto fore = ::getFore(it->second),
+                     back = ::getBack(it->second);
+                if (!fore.isDefault()) { fg = fore; haveFg = true; }
+                if (!back.isDefault()) { bg = back; haveBg = true; }
+            }
+        }
         auto *cells = &surface->at(r.a.y, r.a.x);
         size_t count = r.b.x - r.a.x;
         for (int y = r.a.y; y < r.b.y; ++y)
         {
             for (size_t x = 0; x < count; ++x)
             {
-                if (!fg.isDefault())
+                if (haveFg)
                     ::setFore(cells[x].attr, fg);
-                if (!bg.isDefault())
+                if (haveBg)
                     ::setBack(cells[x].attr, bg);
             }
             cells += surface->size.x;
@@ -124,30 +217,36 @@ void TScintillaSurface::AlphaRectangle( PRectangle rc, int cornerSize, ColourDes
     }
 }
 
-void TScintillaSurface::GradientRectangle(PRectangle rc, const std::vector<ColourStop> &stops, GradientOptions options)
+void TScintillaSurface::GradientRectangle(PRectangle, const std::vector<ColourStop> &, GradientOptions)
 {
 }
 
-void TScintillaSurface::DrawRGBAImage(PRectangle rc, int width, int height, const unsigned char *pixelsImage)
+void TScintillaSurface::DrawRGBAImage(PRectangle, int, int, const unsigned char *)
 {
 }
 
-void TScintillaSurface::Ellipse(PRectangle rc, ColourDesired fore, ColourDesired back)
+void TScintillaSurface::Ellipse(PRectangle, FillStroke)
 {
 }
 
-void TScintillaSurface::Copy(PRectangle rc, Point from, Surface &surfaceSource)
+void TScintillaSurface::Stadium(PRectangle, FillStroke, Ends)
 {
 }
 
-std::unique_ptr<IScreenLineLayout> TScintillaSurface::Layout(const IScreenLine *screenLine)
+void TScintillaSurface::Copy(PRectangle, Point, Surface &)
+{
+    // No-op: AllocatePixMap shares the underlying TDrawSurface, so the source
+    // content has already been drawn at its final position.
+}
+
+std::unique_ptr<IScreenLineLayout> TScintillaSurface::Layout(const IScreenLine *)
 {
     return nullptr;
 }
 
-void TScintillaSurface::DrawTextNoClip( PRectangle rc, Font &font_,
+void TScintillaSurface::DrawTextNoClip( PRectangle rc, const Font *font_,
                                         XYPOSITION ybase, std::string_view text,
-                                        ColourDesired fore, ColourDesired back )
+                                        ColourRGBA fore, ColourRGBA back )
 {
     if (surface)
     {
@@ -158,9 +257,9 @@ void TScintillaSurface::DrawTextNoClip( PRectangle rc, Font &font_,
     }
 }
 
-void TScintillaSurface::DrawTextClipped( PRectangle rc, Font &font_,
-                                         XYPOSITION ybase, std::string_view text,
-                                         ColourDesired fore, ColourDesired back )
+void TScintillaSurface::DrawTextClipped( PRectangle rc, const Font *font_,
+                                         XYPOSITION, std::string_view text,
+                                         ColourRGBA fore, ColourRGBA back )
 {
     // Scintilla's LineMarker::Draw insets SC_MARK_CHARACTER markers (fold +/-,
     // change-history |) by one pixel top and bottom. With a one-row line height
@@ -189,7 +288,7 @@ void TScintillaSurface::DrawTextClipped( PRectangle rc, Font &font_,
     }
 }
 
-void TScintillaSurface::DrawTextTransparent(PRectangle rc, Font &font_, XYPOSITION ybase, std::string_view text, ColourDesired fore)
+void TScintillaSurface::DrawTextTransparent(PRectangle rc, const Font *font_, XYPOSITION, std::string_view text, ColourRGBA fore)
 {
     auto r = clipRect(rc);
     if ( surface && 0 <= r.a.x && r.a.x < r.b.x
@@ -211,7 +310,7 @@ void TScintillaSurface::DrawTextTransparent(PRectangle rc, Font &font_, XYPOSITI
     }
 }
 
-void TScintillaSurface::MeasureWidths(Font &font_, std::string_view text, XYPOSITION *positions)
+void TScintillaSurface::MeasureWidths(const Font *, std::string_view text, XYPOSITION *positions)
 {
     size_t i = 0, j = 1;
     while (i < text.size()) {
@@ -225,57 +324,84 @@ void TScintillaSurface::MeasureWidths(Font &font_, std::string_view text, XYPOSI
     }
 }
 
-XYPOSITION TScintillaSurface::WidthText(Font &font_, std::string_view text)
+XYPOSITION TScintillaSurface::WidthText(const Font *, std::string_view text)
 {
     return strwidth(text);
 }
 
-XYPOSITION TScintillaSurface::Ascent(Font &font_)
+void TScintillaSurface::DrawTextNoClipUTF8(PRectangle rc, const Font *font_, XYPOSITION ybase, std::string_view text, ColourRGBA fore, ColourRGBA back)
+{
+    DrawTextNoClip(rc, font_, ybase, text, fore, back);
+}
+
+void TScintillaSurface::DrawTextClippedUTF8(PRectangle rc, const Font *font_, XYPOSITION ybase, std::string_view text, ColourRGBA fore, ColourRGBA back)
+{
+    DrawTextClipped(rc, font_, ybase, text, fore, back);
+}
+
+void TScintillaSurface::DrawTextTransparentUTF8(PRectangle rc, const Font *font_, XYPOSITION ybase, std::string_view text, ColourRGBA fore)
+{
+    DrawTextTransparent(rc, font_, ybase, text, fore);
+}
+
+void TScintillaSurface::MeasureWidthsUTF8(const Font *font_, std::string_view text, XYPOSITION *positions)
+{
+    MeasureWidths(font_, text, positions);
+}
+
+XYPOSITION TScintillaSurface::WidthTextUTF8(const Font *font_, std::string_view text)
+{
+    return WidthText(font_, text);
+}
+
+XYPOSITION TScintillaSurface::Ascent(const Font *)
 {
     return 0;
 }
 
-XYPOSITION TScintillaSurface::Descent(Font &font_)
+XYPOSITION TScintillaSurface::Descent(const Font *)
 {
     return 0;
 }
 
-XYPOSITION TScintillaSurface::InternalLeading(Font &font_)
+XYPOSITION TScintillaSurface::InternalLeading(const Font *)
 {
     return 0;
 }
 
-XYPOSITION TScintillaSurface::Height(Font &font_)
+XYPOSITION TScintillaSurface::Height(const Font *)
 {
     return 1;
 }
 
-XYPOSITION TScintillaSurface::AverageCharWidth(Font &font_)
+XYPOSITION TScintillaSurface::AverageCharWidth(const Font *)
 {
     return 1;
 }
 
 void TScintillaSurface::SetClip(PRectangle rc)
 {
+    clipStack.push_back(clip);
     clip = rc;
     if (surface)
         clip.intersect({0, 0, surface->size.x, surface->size.y});
+}
+
+void TScintillaSurface::PopClip()
+{
+    if (!clipStack.empty())
+    {
+        clip = clipStack.back();
+        clipStack.pop_back();
+    }
 }
 
 void TScintillaSurface::FlushCachedState()
 {
 }
 
-void TScintillaSurface::SetUnicodeMode(bool unicodeMode_)
+void TScintillaSurface::FlushDrawing()
 {
 }
 
-void TScintillaSurface::SetDBCSMode(int codePage)
-{
-}
-
-void TScintillaSurface::SetBidiR2L(bool bidiR2L_)
-{
-}
-
-} // namespace Scintilla
+} // namespace Scintilla::Internal

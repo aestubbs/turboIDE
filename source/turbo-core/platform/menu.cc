@@ -1,9 +1,9 @@
 #include <turbo/scintilla/internals.h>
 
-namespace Scintilla {
+namespace Scintilla::Internal {
 
 Menu::Menu() noexcept :
-    mid(0)
+    mid(nullptr)
 {
 }
 
@@ -11,12 +11,12 @@ void Menu::CreatePopUp()
 {
 }
 
-void Menu::Destroy()
+void Menu::Destroy() noexcept
 {
 }
 
-void Menu::Show(Point pt, Window &w)
+void Menu::Show(Point, const Window &)
 {
 }
 
-} // namespace Scintilla
+} // namespace Scintilla::Internal
