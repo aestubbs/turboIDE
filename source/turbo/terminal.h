@@ -3,20 +3,25 @@
 
 #define Uses_TView
 #define Uses_TWindow
+#define Uses_TColorAttr
 #include <tvision/tv.h>
 
 #include <turbo/pty.h>
 
 #include <atomic>
+#include <cstdint>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 // libvterm types (opaque here; the full C API is used only in terminal.cc).
 struct VTerm;
 struct VTermScreen;
 
+class TScrollBar;
 struct TerminalWindow;
 
 // A terminal emulator view: it runs a child shell on a pseudo-terminal (PTY),
@@ -27,6 +32,11 @@ struct TerminalWindow;
 // thread (libvterm and Turbo Vision are only ever touched from the main thread).
 struct TerminalView : public TView
 {
+    // One stored scrollback cell: a rendered code point + colour. 'ch' is the
+    // libvterm code point (0 = blank; (uint32_t)-1 marks the trailing half of a
+    // double-width glyph, skipped when drawing).
+    struct SbCell { uint32_t ch; TColorAttr attr; };
+
     TerminalView(const TRect &bounds) noexcept;
     ~TerminalView();
 
@@ -41,13 +51,24 @@ struct TerminalView : public TView
 
     bool processExited() const noexcept { return childDone.load(); }
 
+    // The owning window wires up the vertical scrollbar after construction.
+    void setScrollBar(TScrollBar *sb) noexcept;
+
     // Callback sinks (invoked from C trampolines in terminal.cc, main thread).
     void onPtyOutput(const char *s, size_t len) noexcept;   // bytes for the PTY
     void onMoveCursor(int row, int col, bool visible) noexcept;
     void onTitleFragment(std::string_view frag, bool initial, bool final) noexcept;
     void onCursorVisible(bool visible) noexcept;
+    void pushScrollbackLine(std::vector<SbCell> &&line) noexcept; // line scrolled off
+    void onScrollbackClear() noexcept;                            // app cleared history
 
 private:
+    // Scroll the view by 'delta' lines into history (+) or toward the live
+    // bottom (-); snapToBottom() returns to the live view (offset 0).
+    void scrollLines(int delta) noexcept;
+    void scrollToBottom() noexcept;
+    void updateScrollbar() noexcept;
+
     void startShell() noexcept;
     void stopShell() noexcept;
     void recomputeSize() noexcept;
@@ -74,6 +95,14 @@ private:
     bool registered {false};
 
     std::string titlePending;       // OSC title fragments, until 'final'
+
+    // Scrollback: lines that have scrolled off the top, oldest at the front.
+    // 'scrollOffset' is how many lines back the view is scrolled (0 = following
+    // the live screen). Capped at scrollbackMax lines.
+    static constexpr int scrollbackMax = 10000;
+    std::deque<std::vector<SbCell>> scrollback;
+    int scrollOffset {0};
+    TScrollBar *vScrollBar {nullptr};
 };
 
 struct TerminalWindow : public TWindow

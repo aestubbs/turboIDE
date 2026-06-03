@@ -5,6 +5,7 @@
 #define Uses_TFrame
 #define Uses_TDrawBuffer
 #define Uses_TScreen
+#define Uses_TScrollBar
 #define Uses_TEventQueue
 #define Uses_TClipboard
 #include <tvision/tv.h>
@@ -193,6 +194,32 @@ int cbSetTermProp(VTermProp prop, VTermValue *val, void *user) noexcept
 
 int cbBell(void *) noexcept { return 1; } // no audible bell
 
+int cbPushLine(int cols, const VTermScreenCell *cells, void *user) noexcept
+{
+    // A line scrolled off the top of the live screen; capture it (already mapped
+    // to render colours) for the scrollback buffer. Trailing never-written cells
+    // are trimmed to save memory; the renderer default-fills the rest of the row.
+    auto *v = (TerminalView *) user;
+    std::vector<TerminalView::SbCell> line;
+    line.reserve(cols);
+    for (int i = 0; i < cols; ++i)
+    {
+        uint32_t ch = cells[i].chars[0];
+        TColorAttr attr = (ch == (uint32_t) -1) ? TColorAttr() : mapCellAttr(cells[i]);
+        line.push_back({ch, attr});
+    }
+    while (!line.empty() && line.back().ch == 0)
+        line.pop_back();
+    v->pushScrollbackLine(std::move(line));
+    return 1;
+}
+
+int cbSbClear(void *user) noexcept
+{
+    ((TerminalView *) user)->onScrollbackClear();
+    return 1;
+}
+
 const VTermScreenCallbacks screenCbs = {
     /* damage      */ nullptr,
     /* moverect    */ nullptr,
@@ -200,11 +227,55 @@ const VTermScreenCallbacks screenCbs = {
     /* settermprop */ cbSetTermProp,
     /* bell        */ cbBell,
     /* resize      */ nullptr,
-    /* sb_pushline */ nullptr, // no scrollback retention in this version
-    /* sb_popline  */ nullptr,
-    /* sb_clear    */ nullptr,
+    /* sb_pushline */ cbPushLine,
+    /* sb_popline  */ nullptr, // on window-grow the new top rows are left blank
+    /* sb_clear    */ cbSbClear,
     /* sb_pushline4*/ nullptr,
 };
+
+// Emit one screen row into 'b' using a per-column fetcher. fetch(x, ch, attr)
+// returns 1 for a real cell, 0 for the trailing half of a wide glyph (skip the
+// column -- the wide glyph already covers it), or -1 for no cell (leave the
+// default fill). Equal-attribute runs are coalesced into one moveStr.
+template <class Fetch>
+void emitRow(TDrawBuffer &b, int w, const TColorAttr &defAttr, Fetch fetch) noexcept
+{
+    std::string run;
+    int runStart = 0;
+    TColorAttr runAttr = defAttr;
+    bool inRun = false;
+    auto flush = [&] {
+        if (inRun)
+        {
+            b.moveStr((ushort) runStart, TStringView(run), runAttr);
+            run.clear();
+            inRun = false;
+        }
+    };
+    for (int x = 0; x < w; ++x)
+    {
+        uint32_t ch = 0;
+        TColorAttr attr = defAttr;
+        int r = fetch(x, ch, attr);
+        if (r == 0)
+            continue;               // wide-glyph trailing half: already covered
+        if (r < 0)
+        {
+            flush();                // gap / past end: keep the default fill
+            continue;
+        }
+        if (inRun && !sameAttr(attr, runAttr))
+            flush();
+        if (!inRun)
+        {
+            runStart = x;
+            runAttr = attr;
+            inRun = true;
+        }
+        appendUtf8(run, ch ? ch : uint32_t(' '));
+    }
+    flush();
+}
 
 } // namespace
 
@@ -217,7 +288,7 @@ TerminalView::TerminalView(const TRect &bounds) noexcept :
 {
     growMode = gfGrowHiX | gfGrowHiY;
     options |= ofSelectable | ofFirstClick;
-    eventMask |= evKeyboard | evCommand | evBroadcast;
+    eventMask |= evKeyboard | evCommand | evBroadcast | evMouseWheel;
     cols = max(1, (int) size.x);
     rows = max(1, (int) size.y);
     startShell();
@@ -367,6 +438,7 @@ void TerminalView::pump() noexcept
     }
     if (changed)
     {
+        updateScrollbar(); // scrollback may have grown
         drawView();
         updateCursor();
     }
@@ -376,57 +448,105 @@ void TerminalView::draw()
 {
     const TColorAttr defAttr = TColorAttr(kTermDefaultFg, kTermDefaultBg);
     int w = size.x, h = size.y;
+    int S = (int) scrollback.size();
     for (int y = 0; y < h; ++y)
     {
         TDrawBuffer b;
         b.moveChar(0, ' ', defAttr, (ushort) w); // default-fill, then overlay
-        if (screen && y < rows)
+        // Map view row y to a virtual line: [0, S) are scrollback (oldest first),
+        // [S, S+rows) are the live screen. scrollOffset shifts the window up.
+        int vi = (S - scrollOffset) + y;
+        if (vi >= 0 && vi < S)
         {
-            std::string run;
-            int runStart = 0;
-            TColorAttr runAttr = defAttr;
-            bool inRun = false;
-            auto flush = [&] {
-                if (inRun)
-                {
-                    b.moveStr((ushort) runStart, TStringView(run), runAttr);
-                    run.clear();
-                    inRun = false;
-                }
-            };
-            int x = 0;
-            while (x < w && x < cols)
-            {
-                VTermScreenCell cell;
-                VTermPos pos { y, x };
-                if (!vterm_screen_get_cell(screen, pos, &cell))
-                {
-                    ++x;
-                    continue;
-                }
-                // Right half of a double-width glyph: already covered by the
-                // wide character emitted in the cell to its left, so skip it.
-                if (cell.chars[0] == (uint32_t) -1)
-                {
-                    ++x;
-                    continue;
-                }
-                TColorAttr a = mapCellAttr(cell);
-                if (inRun && !sameAttr(a, runAttr))
-                    flush();
-                if (!inRun)
-                {
-                    runStart = x;
-                    runAttr = a;
-                    inRun = true;
-                }
-                appendUtf8(run, cell.chars[0] ? cell.chars[0] : uint32_t(' '));
-                ++x;
-            }
-            flush();
+            const std::vector<SbCell> &line = scrollback[vi];
+            emitRow(b, w, defAttr, [&] (int x, uint32_t &ch, TColorAttr &attr) -> int {
+                if (x >= (int) line.size())
+                    return -1;
+                const SbCell &c = line[x];
+                if (c.ch == (uint32_t) -1)
+                    return 0;
+                ch = c.ch;
+                attr = c.attr;
+                return 1;
+            });
+        }
+        else if (screen)
+        {
+            int liveRow = vi - S;
+            if (liveRow >= 0 && liveRow < rows)
+                emitRow(b, w, defAttr, [&] (int x, uint32_t &ch, TColorAttr &attr) -> int {
+                    if (x >= cols)
+                        return -1;
+                    VTermScreenCell cell;
+                    VTermPos pos { liveRow, x };
+                    if (!vterm_screen_get_cell(screen, pos, &cell))
+                        return -1;
+                    if (cell.chars[0] == (uint32_t) -1)
+                        return 0; // wide-glyph trailing half
+                    ch = cell.chars[0];
+                    attr = mapCellAttr(cell);
+                    return 1;
+                });
         }
         writeLine(0, y, (ushort) w, 1, b);
     }
+}
+
+void TerminalView::pushScrollbackLine(std::vector<SbCell> &&line) noexcept
+{
+    scrollback.push_back(std::move(line));
+    if ((int) scrollback.size() > scrollbackMax)
+        scrollback.pop_front();
+    // Keep a scrolled-up view looking at the same content as new lines arrive
+    // below it (it only follows the live screen when at the bottom).
+    if (scrollOffset > 0)
+        scrollOffset = min(scrollOffset + 1, (int) scrollback.size());
+}
+
+void TerminalView::onScrollbackClear() noexcept
+{
+    scrollback.clear();
+    scrollOffset = 0;
+    updateScrollbar();
+}
+
+void TerminalView::scrollLines(int delta) noexcept
+{
+    int maxOff = (int) scrollback.size();
+    int n = min(max(scrollOffset + delta, 0), maxOff);
+    if (n == scrollOffset)
+        return;
+    scrollOffset = n;
+    updateScrollbar();
+    drawView();
+    updateCursor();
+}
+
+void TerminalView::scrollToBottom() noexcept
+{
+    if (scrollOffset == 0)
+        return;
+    scrollOffset = 0;
+    updateScrollbar();
+    drawView();
+    updateCursor();
+}
+
+void TerminalView::updateScrollbar() noexcept
+{
+    if (!vScrollBar)
+        return;
+    int S = (int) scrollback.size();
+    // Thumb value runs 0 (oldest) .. S (live bottom); it sits at the bottom when
+    // following. Setting the same value is a no-op, so this can't loop with the
+    // cmScrollBarChanged handler.
+    vScrollBar->setParams(S - scrollOffset, 0, S, max(rows - 1, 1), 1);
+}
+
+void TerminalView::setScrollBar(TScrollBar *sb) noexcept
+{
+    vScrollBar = sb;
+    updateScrollbar();
 }
 
 void TerminalView::changeBounds(const TRect &bounds)
@@ -446,6 +566,8 @@ void TerminalView::recomputeSize() noexcept
     if (vt)
         vterm_set_size(vt, rows, cols); // libvterm reflows its grid
     pty.resize(cols, rows);             // also delivers SIGWINCH to the child
+    scrollOffset = min(scrollOffset, (int) scrollback.size());
+    updateScrollbar();                  // page step depends on the row count
     drawView();
 }
 
@@ -573,7 +695,25 @@ void TerminalView::handleEvent(TEvent &ev)
     switch (ev.what)
     {
         case evKeyDown:
-            // Once the child has exited the view is inert; any key dismisses it.
+        {
+            // Scrollback navigation (Shift+PgUp/PgDn). Works even after the child
+            // exits, so the final output can be reviewed before dismissing.
+            int page = max(rows - 1, 1);
+            if (ev.keyDown.keyCode == kbPgUp &&
+                (ev.keyDown.controlKeyState & kbShift))
+            {
+                scrollLines(page);
+                clearEvent(ev);
+                break;
+            }
+            if (ev.keyDown.keyCode == kbPgDn &&
+                (ev.keyDown.controlKeyState & kbShift))
+            {
+                scrollLines(-page);
+                clearEvent(ev);
+                break;
+            }
+            // Once the child has exited the view is inert; any other key dismisses it.
             if (childDone.load())
             {
                 clearEvent(ev);
@@ -584,16 +724,41 @@ void TerminalView::handleEvent(TEvent &ev)
                 putEvent(close); // deferred: closes the active (this) window
                 return;
             }
+            scrollToBottom(); // typing returns to the live view
             if (ev.keyDown.controlKeyState & kbPaste)
                 handlePaste(ev);
             else if (!sendKey(ev.keyDown))
                 return; // not consumed: let it fall through (shouldn't happen)
             clearEvent(ev);
             break;
+        }
+        case evMouseWheel:
+            if (ev.mouse.wheel & mwUp)
+                scrollLines(3);
+            else if (ev.mouse.wheel & mwDown)
+                scrollLines(-3);
+            clearEvent(ev);
+            break;
         case evCommand:
             if ((state & sfFocused) && !childDone.load() &&
                 sendCommandKey(ev.message.command))
                 clearEvent(ev);
+            break;
+        case evBroadcast:
+            // Dragging the scrollbar sets the scroll position.
+            if (ev.message.command == cmScrollBarChanged && vScrollBar &&
+                ev.message.infoPtr == vScrollBar)
+            {
+                int S = (int) scrollback.size();
+                int n = min(max(S - vScrollBar->value, 0), S);
+                if (n != scrollOffset)
+                {
+                    scrollOffset = n;
+                    drawView();
+                    updateCursor();
+                }
+                clearEvent(ev);
+            }
             break;
         case evMouseDown:
             // Clicking focuses the terminal (in-view text selection is not yet
@@ -617,8 +782,15 @@ TerminalWindow::TerminalWindow(const TRect &bounds) noexcept :
     // file tree, and the shadow would darken the tree's left edge (it renders
     // two columns past the window). The tree and help windows do the same.
     state &= ~sfShadow;
+    // Vertical scrollbar for the scrollback, on the right border column (the
+    // editor windows place theirs the same way). Insert it before the view so
+    // the view keeps the initial focus.
+    auto *vsb = new TScrollBar(TRect(size.x - 1, 1, size.x, size.y - 1));
+    vsb->growMode = gfGrowLoX | gfGrowHiX | gfGrowHiY;
+    insert(vsb);
     view = new TerminalView(getExtent().grow(-1, -1));
     insert(view);
+    view->setScrollBar(vsb);
 }
 
 const char *TerminalWindow::getTitle(short)
