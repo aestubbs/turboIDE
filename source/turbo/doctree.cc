@@ -12,11 +12,66 @@
 #define Uses_TKeys
 #define Uses_TEvent
 #define Uses_TMenuItem
+#define Uses_TInputLine
 #include <tvision/tv.h>
 
 #include <turbo/basicwindow.h> // shared editor-window chrome scheme
 
+#include <cctype>
+
 using Node = DocumentTreeView::Node;
+
+namespace {
+
+// Minimum query length before filtering kicks in: filtering starts once the
+// query is *longer than* three characters (i.e. 4+).
+constexpr size_t kFilterMinLen = 3;
+
+// Case-insensitive substring test: does 'haystack' contain 'needleLower'
+// (which is assumed already lowercased)?
+bool containsCI(const char *haystack, const std::string &needleLower) noexcept
+{
+    if (needleLower.empty())
+        return true;
+    if (!haystack)
+        return false;
+    std::string h;
+    for (const char *p = haystack; *p; ++p)
+        h += (char) std::tolower((unsigned char) *p);
+    return h.find(needleLower) != std::string::npos;
+}
+
+// Single-line search box on the file-tree window. Live-filters as you type and
+// clears (returning focus to the tree) on Esc.
+struct TreeFilterInputLine : public TInputLine
+{
+    DocumentTreeWindow *win {nullptr};
+
+    TreeFilterInputLine(const TRect &bounds, DocumentTreeWindow *aWin) noexcept :
+        TInputLine(bounds, 256),
+        win(aWin)
+    {
+    }
+
+    void handleEvent(TEvent &ev) override
+    {
+        if (ev.what == evKeyDown && ev.keyDown.keyCode == kbEsc)
+        {
+            if (win)
+                win->clearFilterAndFocusTree();
+            clearEvent(ev);
+            return;
+        }
+        bool key = (ev.what == evKeyDown);
+        TInputLine::handleEvent(ev);
+        // After the base class has applied the keystroke, push the (possibly
+        // changed) text into the tree filter. setFilter() no-ops if unchanged.
+        if (key && win)
+            win->applyFilterFromBox();
+    }
+};
+
+} // namespace
 
 namespace {
 
@@ -227,6 +282,8 @@ void DocumentTreeView::removeNode(std::string_view path) noexcept
     if (n)
     {
         n->dispose();
+        if (filtering())
+            recomputeVisibility(); // keep the filtered view in sync
         update();
         drawView();
     }
@@ -261,6 +318,8 @@ void DocumentTreeView::addNode(std::string_view path, bool isDir) noexcept
     putNode(list, node);
     if (isDir)
         scanInto(node, &node->childList, std::string(path), 1, showHidden);
+    if (filtering())
+        recomputeVisibility(); // a new node defaults to visible; reclassify it
     update();
     drawView();
 }
@@ -329,6 +388,22 @@ void DocumentTreeView::handleEvent(TEvent &ev)
     if (ev.what == evKeyDown && (state & sfFocused))
     {
         ushort key = ev.keyDown.keyCode;
+        // Ctrl-F jumps the cursor into the search box; Esc clears any filter.
+        // (Intercepted here so Ctrl-F doesn't also trigger the editor's Find.)
+        if (key == kbCtrlF)
+        {
+            if (win)
+                win->focusFilter();
+            clearEvent(ev);
+            return;
+        }
+        if (key == kbEsc && filtering())
+        {
+            if (win)
+                win->clearFilter();
+            clearEvent(ev);
+            return;
+        }
         if (key == kbRight || key == kbLeft)
         {
             auto *node = (Node *) getNode(foc);
@@ -379,6 +454,129 @@ void DocumentTreeView::handleEvent(TEvent &ev)
         }
     }
     TOutline::handleEvent(ev);
+}
+
+// --- Name filter -----------------------------------------------------------
+
+namespace {
+// Set 'visible' on a node and its entire subtree.
+void markSubtree(Node *n, bool v) noexcept
+{
+    n->visible = v;
+    for (Node *c = (Node *) n->childList; c; c = (Node *) c->next)
+        markSubtree(c, v);
+}
+// Compute visibility for a node and its descendants; returns whether the node
+// is visible. A file is visible iff its name matches; a folder is visible iff
+// its own name matches (revealing its whole subtree) or any descendant matches.
+bool computeVisible(Node *n, const std::string &q) noexcept
+{
+    bool selfMatch = containsCI(n->text, q);
+    if (!n->isDir)
+    {
+        n->visible = selfMatch;
+        return selfMatch;
+    }
+    if (selfMatch)
+    {
+        markSubtree(n, true); // folder name matches -> reveal its contents
+        return true;
+    }
+    bool any = false;
+    for (Node *c = (Node *) n->childList; c; c = (Node *) c->next)
+        any |= computeVisible(c, q);
+    n->visible = any;
+    return any;
+}
+} // namespace
+
+void DocumentTreeView::recomputeVisibility() noexcept
+{
+    if (!filtering())
+        return; // the overrides ignore 'visible' when no filter is active
+    for (Node *n = (Node *) root; n; n = (Node *) n->next)
+        computeVisible(n, filter);
+}
+
+void DocumentTreeView::setFilter(std::string_view query) noexcept
+{
+    std::string q;
+    for (char c : query)
+        q += (char) std::tolower((unsigned char) c);
+    if (q.size() <= kFilterMinLen)
+        q.clear(); // 3 chars or fewer: no filtering
+    if (q == filter)
+        return;    // nothing changed
+    // Keep the same node highlighted across the change (so clearing the filter
+    // leaves the active node where it was).
+    Node *focusedNode = (Node *) getNode(foc);
+    filter = std::move(q);
+    recomputeVisibility();
+    int pos = -1;
+    if (focusedNode)
+        firstThat([focusedNode, &pos] (Node *n, int p) {
+            if (n == focusedNode) { pos = p; return true; }
+            return false;
+        });
+    foc = (pos >= 0) ? pos : 0; // first visible row if the old node is now hidden
+    update();    // recompute range, clamp foc, scroll it into view
+    drawView();
+}
+
+// Outline iteration overrides -- skip non-visible nodes while filtering so the
+// base viewer lays out, scrolls and draws only the matching subset.
+
+TNode *DocumentTreeView::getRoot()
+{
+    TNode *r = root;
+    if (filtering())
+        while (r && !((Node *) r)->visible)
+            r = r->next;
+    return r;
+}
+
+TNode *DocumentTreeView::getNext(TNode *node)
+{
+    TNode *n = node->next;
+    if (filtering())
+        while (n && !((Node *) n)->visible)
+            n = n->next;
+    return n;
+}
+
+TNode *DocumentTreeView::getChild(TNode *node, int i)
+{
+    TNode *c = node->childList;
+    if (filtering())
+        while (c && !((Node *) c)->visible)
+            c = c->next;
+    while (i-- > 0 && c)
+        c = getNext(c);
+    return c;
+}
+
+int DocumentTreeView::getNumChildren(TNode *node)
+{
+    if (!filtering())
+        return TOutline::getNumChildren(node);
+    int n = 0;
+    for (TNode *c = getChild(node, 0); c; c = getNext(c))
+        ++n;
+    return n;
+}
+
+Boolean DocumentTreeView::hasChildren(TNode *node)
+{
+    if (!filtering())
+        return TOutline::hasChildren(node);
+    return Boolean(getChild(node, 0) != 0);
+}
+
+Boolean DocumentTreeView::isExpanded(TNode *node)
+{
+    if (filtering())
+        return hasChildren(node); // show every kept folder expanded
+    return TOutline::isExpanded(node);
 }
 
 void DocumentTreeView::showContextMenu(int row, TPoint where) noexcept
@@ -677,6 +875,9 @@ void DocumentTreeView::revealEditor(EditorWindow *w) noexcept
     Node *node = findEditorNode((Node *) root, w);
     if (!node)
         return;
+    // A reveal must win over any active filter that might be hiding the node.
+    if (filtering() && win)
+        win->clearFilter();
     for (Node *p = node->parent; p; p = p->parent)
         p->expanded = True;
     update();
@@ -765,9 +966,52 @@ DocumentTreeWindow::DocumentTreeWindow(const TRect &bounds, DocumentTreeWindow *
     options |= ofFirstClick;
     auto *hsb = standardScrollBar(sbHorizontal),
          *vsb = standardScrollBar(sbVertical);
-    tree = new DocumentTreeView(getExtent().grow(-1, -1), hsb, vsb, nullptr);
+    // Reserve the top interior row for the single-line name filter; the tree
+    // fills the rest.
+    TRect inner = getExtent();
+    inner.grow(-1, -1);
+    TRect boxR = inner;  boxR.b.y = boxR.a.y + 1;
+    TRect treeR = inner; treeR.a.y += 1;
+    auto *box = new TreeFilterInputLine(boxR, this);
+    box->growMode = gfGrowHiX; // full width, pinned to the top
+    insert(box);
+    filterBox = box;
+    tree = new DocumentTreeView(treeR, hsb, vsb, nullptr);
     tree->growMode = gfGrowHiX | gfGrowHiY;
+    tree->win = this;
     insert(tree);
+    setCurrent(tree, normalSelect); // the tree is the default focus, not the box
+}
+
+void DocumentTreeWindow::focusFilter() noexcept
+{
+    if (filterBox)
+        filterBox->select(); // make it the current view; cursor lands in it
+}
+
+void DocumentTreeWindow::applyFilterFromBox() noexcept
+{
+    if (filterBox && tree)
+        tree->setFilter(filterBox->data);
+}
+
+void DocumentTreeWindow::clearFilter() noexcept
+{
+    if (filterBox)
+    {
+        char empty[256] = {};
+        filterBox->setData(empty); // clears the text and resets the cursor
+        filterBox->drawView();
+    }
+    if (tree)
+        tree->setFilter("");
+}
+
+void DocumentTreeWindow::clearFilterAndFocusTree() noexcept
+{
+    clearFilter();
+    if (tree)
+        tree->select();
 }
 
 DocumentTreeWindow::~DocumentTreeWindow()

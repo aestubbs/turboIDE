@@ -3,6 +3,7 @@
 
 #define Uses_TWindow
 #define Uses_TOutline
+#define Uses_TInputLine
 #include <tvision/tv.h>
 
 #include <string>
@@ -11,6 +12,7 @@
 
 struct EditorWindow;
 struct GitFileStatus;
+struct DocumentTreeWindow;
 
 struct DocumentTreeView : public TOutline {
 
@@ -24,6 +26,9 @@ struct DocumentTreeView : public TOutline {
         // Git status badge char: 0 = clean, else 'M' 'A' 'D' 'R' '?' 'U' for a
         // file, or '.' for a directory that contains changes.
         char gitStatus {0};
+        // Whether this node is shown under the current filter (see setFilter).
+        // Only consulted while a filter is active; ignored otherwise.
+        bool visible {true};
 
         Node(Node *parent, std::string_view path, bool isDir) noexcept;
         void setEditor(EditorWindow *w) noexcept;
@@ -48,6 +53,16 @@ struct DocumentTreeView : public TOutline {
     // connector graph: the tree lines convey no hierarchy at the top level and
     // only waste columns in the narrow pane. Deeper levels keep the full graph.
     char *getGraph(int level, long lines, ushort flags) override;
+
+    // Outline iteration overrides. While a filter is active these present only
+    // the matching subset of nodes to the base viewer (which drives all layout,
+    // scrolling and drawing); with no filter they defer to the base behaviour.
+    TNode *getRoot() override;
+    TNode *getChild(TNode *node, int i) override;
+    TNode *getNext(TNode *node) override;
+    int getNumChildren(TNode *node) override;
+    Boolean hasChildren(TNode *node) override;
+    Boolean isExpanded(TNode *node) override;
 
     // Open a file in the editor (or focus it if already open), or toggle a
     // directory's expanded state. Shared by Enter, double-click and the menu.
@@ -74,6 +89,20 @@ struct DocumentTreeView : public TOutline {
     // Expand ancestors of the editor's node and scroll it into view.
     void revealEditor(EditorWindow *w) noexcept;
 
+    // --- Name filter ------------------------------------------------------
+    // Filter the displayed tree to nodes whose name matches 'query' (a
+    // case-insensitive partial/substring match). A query of three characters or
+    // fewer clears the filter and shows the whole tree. While filtering, folders
+    // are kept if they contain a match (so the path stays visible) and are shown
+    // expanded; a folder whose own name matches reveals its entire contents. The
+    // underlying node tree is never modified -- only what the outline iterates.
+    void setFilter(std::string_view query) noexcept;
+    bool filtering() const noexcept { return !filter.empty(); }
+
+    // The owning window wires this up so the tree can drive the search box
+    // (Ctrl-F to focus it, Esc to clear it).
+    DocumentTreeWindow *win {nullptr};
+
     // Apply git per-file status: clear all badges, set the given files, roll
     // changed state up to ancestor directories, then redraw.
     void applyGitStatus(const std::unordered_map<std::string, GitFileStatus> &files) noexcept;
@@ -88,6 +117,11 @@ struct DocumentTreeView : public TOutline {
 
     std::string rootPath;   // absolute path scanned by scanDirectory()
     bool showHidden {false}; // include dotfiles/dot-dirs when scanning
+    std::string filter;     // active filter query (lowercased; "" = no filter)
+    // Recompute Node::visible for the whole tree from 'filter'. A file is
+    // visible iff its name matches; a folder is visible iff its name matches
+    // (in which case its whole subtree is revealed) or any descendant matches.
+    void recomputeVisibility() noexcept;
 
     Node *findByEditor(const EditorWindow *w, int *pos=nullptr) noexcept;
     Node *findByPath(std::string_view path) noexcept;
@@ -112,12 +146,19 @@ inline DocumentTreeView::Node *DocumentTreeView::firstThat(Func &&func) noexcept
 struct DocumentTreeWindow : public TWindow {
 
     DocumentTreeView *tree;
+    TInputLine *filterBox {nullptr}; // single-line name filter at the top
     DocumentTreeWindow **ptr;
     std::string baseTitle {"Files"};
     std::string titleBuf;   // backing store for getTitle()
 
     DocumentTreeWindow(const TRect &bounds, DocumentTreeWindow **ptr) noexcept;
     ~DocumentTreeWindow();
+
+    // Search-box coordination (called from the box and the tree).
+    void focusFilter() noexcept;          // put the cursor in the search box
+    void applyFilterFromBox() noexcept;   // push the box text into the tree filter
+    void clearFilter() noexcept;          // empty the box and the filter
+    void clearFilterAndFocusTree() noexcept;
 
     // Set the branch/ahead-behind shown in the window title (empty = none).
     void setBranchInfo(std::string_view info) noexcept;
