@@ -571,7 +571,7 @@ static const char *lexerNameForId(int id)
 
 void applyTheming(const LexerSettings *lexer, const ColorScheme *aScheme, TScintilla &scintilla)
 {
-    auto &scheme = aScheme ? *aScheme : schemeDefault;
+    auto &scheme = aScheme ? *aScheme : schemeActive;
     setStyleColor(scintilla, STYLE_DEFAULT, scheme[sNormal]);
     call(scintilla, SCI_STYLECLEARALL, 0U, 0U); // Must be done before setting other colors.
     setSelectionColor(scintilla, scheme[sSelection]);
@@ -634,7 +634,7 @@ void updateBraces(const ColorScheme *aScheme, TScintilla &scintilla)
         auto matchPos = call(scintilla, SCI_BRACEMATCH, pos, 0U);
         if (matchPos != -1)
         {
-            auto &scheme = aScheme ? *aScheme : schemeDefault;
+            auto &scheme = aScheme ? *aScheme : schemeActive;
             auto style = call(scintilla, SCI_GETSTYLEAT, pos, 0U);
             auto curAttr = getStyleColor(scintilla, style);
             auto braceAttr = coalesce(scheme[sBraceMatch], curAttr);

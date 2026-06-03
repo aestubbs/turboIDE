@@ -55,12 +55,14 @@ void setupAnnotations(turbo::Editor &ed) noexcept
 {
     ed.callScintilla(SCI_ANNOTATIONSETVISIBLE, ANNOTATION_STANDARD, 0U);
     ed.callScintilla(SCI_ANNOTATIONSETSTYLEOFFSET, kAnnoStyleOffset, 0U);
-    // Keep the editor's normal background; only recolour the foreground so the
-    // annotation reads like dimmed inline text in red/yellow.
-    TColorAttr base = turbo::getStyleColor(ed.scintilla, STYLE_DEFAULT);
-    TColorAttr err = base, warn = base;
-    ::setFore(err, TColorDesired(TColorBIOS(0xC)));  // light red
-    ::setFore(warn, TColorDesired(TColorBIOS(0xE))); // yellow
+    // Colour the diagnostic annotations from the active scheme so they honour the
+    // user's theme. Errors reuse the scheme's 'sError' (white-on-red by default);
+    // warnings have no dedicated scheme entry, so they keep the editor background
+    // with a gold foreground borrowed from the escape-sequence accent.
+    const turbo::ColorScheme &scheme = ed.scheme ? *ed.scheme : turbo::schemeActive;
+    TColorAttr err = turbo::normalize(scheme, turbo::sError);
+    TColorAttr warn = turbo::getStyleColor(ed.scintilla, STYLE_DEFAULT);
+    ::setFore(warn, ::getFore(turbo::normalize(scheme, turbo::sEscapeSequence)));
     turbo::setStyleColor(ed.scintilla, kAnnoStyleOffset + kAnnoError, err);
     turbo::setStyleColor(ed.scintilla, kAnnoStyleOffset + kAnnoWarning, warn);
 }

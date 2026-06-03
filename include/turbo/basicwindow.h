@@ -47,7 +47,14 @@ enum WindowPaletteItems : uchar
 
 using WindowColorScheme = TColorAttr[WindowPaletteItemCount];
 
+// Built-in 24-bit window-chrome scheme (factory default; immutable) and the
+// runtime-editable copy editors actually use. 'getScheme' falls back to
+// 'windowSchemeActive' when a window has no scheme of its own (the usual case).
 extern const WindowColorScheme windowSchemeDefault;
+extern WindowColorScheme windowSchemeActive;
+
+// Copy 'windowSchemeDefault' over 'windowSchemeActive' (the dialog's "Reset").
+void resetWindowSchemeToDefault() noexcept;
 
 class BasicEditorWindow : public TWindow, public EditorParent
 {
@@ -91,7 +98,7 @@ inline void BasicEditorWindow::setScheme(const WindowColorScheme *aScheme)
 
 inline const WindowColorScheme &BasicEditorWindow::getScheme() const
 {
-    return scheme ? *scheme : windowSchemeDefault;
+    return scheme ? *scheme : windowSchemeActive;
 }
 
 } // namespace turbo

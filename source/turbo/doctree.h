@@ -123,6 +123,11 @@ struct DocumentTreeWindow : public TWindow {
     void setBranchInfo(std::string_view info) noexcept;
     const char *getTitle(short) override;
 
+    // Resolve all colours (frame, scrollbars) through the shared editor-window
+    // chrome scheme, so the file tree matches the editor windows instead of
+    // using Turbo Vision's default bright-blue window palette.
+    TColorAttr mapColor(uchar index) noexcept override;
+
     void close() override;
 
 };

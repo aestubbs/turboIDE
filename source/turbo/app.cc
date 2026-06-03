@@ -1,5 +1,6 @@
 #define Uses_TApplication
 #define Uses_MsgBox
+#define Uses_TBackground
 #define Uses_TDeskTop
 #define Uses_TKeys
 #define Uses_TMenuBar
@@ -33,6 +34,8 @@
 #include "gitdialog.h"
 #include "menucheck.h"
 #include "terminal.h"
+#include "themedialog.h"
+#include "theme.h"
 #include <turbo/fileeditor.h>
 #include <turbo/tpath.h>
 #include <filesystem>
@@ -87,15 +90,61 @@ struct BranchView : public TView
     }
 };
 
+// Desktop background colour shown behind all windows (a solid fill, replacing
+// Turbo Vision's \xB0 shaded pattern).
+static constexpr TColorDesired deskBackground = 0x0A0F1E;
+
+// A plain solid-colour desktop background.
+struct TurboBackground : public TBackground
+{
+    TurboBackground(const TRect &bounds) noexcept : TBackground(bounds, ' ') {}
+
+    void draw() override
+    {
+        TDrawBuffer b;
+        TColorAttr c {deskBackground, deskBackground};
+        b.moveChar(0, ' ', c, size.x);
+        writeLine(0, 0, size.x, size.y, b);
+    }
+};
+
+// A desktop whose background is our solid-colour view.
+struct TurboDeskTop : public TDeskTop
+{
+    TurboDeskTop(const TRect &bounds) noexcept :
+        TDeskInit(&TurboDeskTop::initBackground),
+        TDeskTop(bounds)
+    {
+    }
+
+    static TBackground *initBackground(TRect bounds)
+    {
+        return new TurboBackground(bounds);
+    }
+};
+
+TDeskTop *TurboApp::initDeskTop(TRect r)
+{
+    // Leave room for the menu bar (top row) and status line (bottom row), just
+    // as TProgram::initDeskTop does -- otherwise the desktop covers the full
+    // screen and hides them (and the windows' title/bottom bars).
+    r.a.y++;
+    r.b.y--;
+    return new TurboDeskTop(r);
+}
+
 TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     TProgInit( &TurboApp::initStatusLine,
                &TurboApp::initMenuBar,
-               &TApplication::initDeskTop
+               &TurboApp::initDeskTop
              ),
     argc(argc),
     argv(argv)
 {
     loadSettings(settings);
+    // Fold any saved colour overrides onto the built-in 24-bit defaults before
+    // the first editor is created, so new editors theme from the right scheme.
+    applyThemeFromSettings(settings);
     lsp = std::make_unique<LspManager>();
     configureLsp();
     git = std::make_unique<GitManager>();
@@ -265,6 +314,7 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             *new TMenuItem( "Toggle Chan~g~e History", cmToggleChangeHistory, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Toggle Long Line G~u~ide", cmToggleEdge, kbNoKey, hcNoContext ) +
             newLine() +
+            *new TMenuItem( "~C~olour Scheme...", cmThemeSettings, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~L~anguage Servers...", cmLspSettings, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~G~it", kbAltG ) +
             *new TMenuItem( "~C~ommit...", cmGitCommit, kbNoKey, hcNoContext ) +
@@ -389,6 +439,8 @@ void TurboApp::handleEvent(TEvent &event)
             case cmToggleHidden: toggleHiddenFiles(); break;
             case cmToggleAutoSave: toggleAutoSave(); break;
             case cmLspSettings: editLspSettings(); break;
+            case cmThemeSettings: editThemeSettings(); break;
+            case cmApplyTheme: applyActiveTheme(); break;
             case cmGitRefresh: gitRefresh(); break;
             case cmGitCommit: gitCommitDialog(); break;
             case cmGitFetch: gitRemote(0); break;
@@ -616,6 +668,33 @@ void TurboApp::editLspSettings()
         saveSettings(settings);
         configureLsp();
     }
+}
+
+void TurboApp::editThemeSettings()
+{
+    // The dialog mutates the active schemes and posts cmApplyTheme itself on
+    // Apply/OK (handled synchronously by applyActiveTheme), so there's nothing
+    // to do here on return. Cancel leaves the active schemes untouched.
+    executeThemeDialog();
+}
+
+void TurboApp::applyActiveTheme() noexcept
+{
+    // Persist only the diffs from the built-in defaults.
+    storeThemeToSettings(settings);
+    saveSettings(settings);
+    // Re-theme every open editor from the (now updated) active scheme. Editors
+    // carry no per-editor scheme, so applyTheming falls back to schemeActive.
+    MRUlist.forEach([] (EditorWindow *w) {
+        if (!w)
+            return;
+        auto &ed = w->getEditor();
+        turbo::applyTheming(ed.lexer, ed.scheme, ed.scintilla);
+        ed.redraw();
+    });
+    // Repaint the window chrome (frames/scrollbars read windowSchemeActive).
+    if (deskTop)
+        deskTop->redraw();
 }
 
 void TurboApp::gitRefresh()

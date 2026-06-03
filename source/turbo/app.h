@@ -64,6 +64,9 @@ struct TurboApp : public TApplication, EditorWindowParent
     ~TurboApp();
     static TMenuBar* initMenuBar(TRect r);
     static TStatusLine* initStatusLine(TRect r);
+    // Custom desktop: a solid colour fill instead of Turbo Vision's shaded
+    // (\xB0) pattern background.
+    static TDeskTop* initDeskTop(TRect r);
 
     void shutDown() override;
     void idle() override;
@@ -113,6 +116,11 @@ struct TurboApp : public TApplication, EditorWindowParent
     void gitRemote(int which); // 0=fetch 1=pull 2=push
     void configureLsp();
     void editLspSettings();
+    // Colour-scheme dialog. 'editThemeSettings' runs the dialog (which posts
+    // cmApplyTheme on Apply/OK); 'applyActiveTheme' re-themes every open editor
+    // from the now-current active schemes, repaints the chrome, and persists.
+    void editThemeSettings();
+    void applyActiveTheme() noexcept;
     void closeAll();
     TRect newEditorBounds() const;
     turbo::TScintilla &createScintilla() noexcept;

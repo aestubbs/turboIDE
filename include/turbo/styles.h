@@ -97,7 +97,25 @@ inline TColorAttr normalize(const ColorScheme &scheme, TextStyle index)
     return coalesce(scheme[index], scheme[sNormal]);
 }
 
+// The built-in 24-bit colour scheme (factory default). Immutable; used as the
+// baseline for "Reset to defaults".
 extern const ColorScheme schemeDefault;
+
+// The scheme actually used by editors at runtime. Initialized to 'schemeDefault'
+// and editable via the theme dialog / settings. 'applyTheming' falls back to
+// this when an editor has no per-editor scheme of its own (the usual case).
+extern ColorScheme schemeActive;
+
+// Copy 'schemeDefault' over 'schemeActive' (the dialog's "Reset" action).
+void resetSchemeToDefault() noexcept;
+
+// Stable identifier used to persist a style (e.g. "sKeyword1"), and a
+// human-readable label for the theme dialog (e.g. "Keyword"). 'styleName'
+// values are part of the on-disk settings format, so don't rename them.
+const char *styleName(TextStyle style) noexcept;
+const char *styleDisplayName(TextStyle style) noexcept;
+// Resolve a stable identifier back to its TextStyle. Returns false if unknown.
+bool styleByName(TStringView name, TextStyle &out) noexcept;
 
 struct LexerSettings
 {

@@ -172,27 +172,121 @@ const Language *detectFileLanguage(const char *filePath)
     return lang;
 }
 
+// 24-bit colour palette for the built-in scheme. A cohesive dark theme that
+// sits alongside the Turbo-blue window chrome: a deep navy editor background
+// with VS-Code-Dark-style syntax accents. {} (zero-init) means "terminal
+// default / inherit"; for non-sNormal styles 'normalize' coalesces that onto
+// sNormal's colours when drawing.
+// Note: these are TColorDesired (not TColorRGB) because TColorDesired's int
+// constructor is constexpr, whereas TColorRGB's uint32_t one is not -- and the
+// scheme below is a constexpr aggregate.
+namespace {
+constexpr TColorDesired
+    cBg          = 0x1E4D8C, // editor background -- matches the active window frame
+    cFg          = 0xE4E8F4, // default foreground (near-white)
+    cSelBg       = 0x3F6BB5, // selection background (lighter than bg, so it reads)
+    cWhitespace  = 0x5C76AE, // dim dots/arrows for whitespace
+    cLineNums    = 0x9098C8, // gutter line numbers (light blue-grey on blue)
+    cKeyword1    = 0x6FB7FF, // primary keywords (bright blue, legible on blue bg)
+    cKeyword2    = 0x66E0C4, // secondary keywords / types (teal)
+    cMisc        = 0xEDE8B0, // misc / global classes (soft yellow)
+    cPreproc     = 0xD79CD2, // preprocessor / directives (purple)
+    cOperator    = 0xD2D6E6, // operators
+    cComment     = 0x9AA6CE, // comments (light muted, italic)
+    cString      = 0xF0A98C, // string literals (warm tan)
+    cNumber      = 0xC4DCB4, // number literals (green)
+    cEscape      = 0xE6C98C, // escape sequences (gold)
+    cCtrlChar    = 0xD79CD2, // control characters
+    cErrorFg     = 0xFFFFFF, // error text
+    cErrorBg     = 0xC02437, // error background (red)
+    cBraceMatch  = 0xFFD75F, // matching brace (gold)
+    cReplaceFg   = 0x10182E, // replace-highlight text (on green)
+    cReplaceBg   = 0x5FA84E; // replace-highlight background (green)
+} // namespace
+
 extern constexpr ColorScheme schemeDefault =
 {
-    /* sNormal           */ {'\x7'   , '\x1'                    },
-    /* sSelection        */ {'\x1'   , '\x7'                    },
-    /* sWhitespace       */ {'\x5'   , {}                       },
-    /* sCtrlChar         */ {'\xD'   , {}                       },
-    /* sLineNums         */ {'\x6'   , {}                       },
-    /* sKeyword1         */ {'\xE'   , {}                       },
-    /* sKeyword2         */ {'\xA'   , {}                       },
-    /* sMisc             */ {'\x9'   , {}      , slBold         },
-    /* sPreprocessor     */ {'\x2'   , {}                       },
-    /* sOperator         */ {'\xD'   , {}                       },
-    /* sComment          */ {'\x6'   , {}                       },
-    /* sStringLiteral    */ {'\xC'   , {}                       },
-    /* sCharLiteral      */ {'\xC'   , {}                       },
-    /* sNumberLiteral    */ {'\x3'   , {}                       },
-    /* sEscapeSequence   */ {'\xB'   , {}                       },
-    /* sError            */ {'\xF'   , '\xC'                    },
-    /* sBraceMatch       */ {'\xE'   , {}      , slBold         },
-    /* sReplaceHighlight */ {'\x0'   , '\xA'                    },
+    /* sNormal           */ {cFg        , cBg                    },
+    /* sSelection        */ {{}         , cSelBg                 },
+    /* sWhitespace       */ {cWhitespace, {}                     },
+    /* sCtrlChar         */ {cCtrlChar  , {}                     },
+    /* sLineNums         */ {cLineNums  , {}                     },
+    /* sKeyword1         */ {cKeyword1  , {}                     },
+    /* sKeyword2         */ {cKeyword2  , {}                     },
+    /* sMisc             */ {cMisc      , {}      , slBold        },
+    /* sPreprocessor     */ {cPreproc   , {}                     },
+    /* sOperator         */ {cOperator  , {}                     },
+    /* sComment          */ {cComment   , {}      , slItalic      },
+    /* sStringLiteral    */ {cString    , {}                     },
+    /* sCharLiteral      */ {cString    , {}                     },
+    /* sNumberLiteral    */ {cNumber    , {}                     },
+    /* sEscapeSequence   */ {cEscape    , {}                     },
+    /* sError            */ {cErrorFg   , cErrorBg               },
+    /* sBraceMatch       */ {cBraceMatch, {}      , slBold        },
+    /* sReplaceHighlight */ {cReplaceFg , cReplaceBg             },
 };
+
+// Runtime-editable scheme. Filled from the factory default at static-init (see
+// below) and again whenever the user resets; the theme dialog/settings loader
+// mutate it, after which editors re-theme from it. Editors only ever read it at
+// runtime, long after static initialization, so the init order is safe.
+ColorScheme schemeActive;
+
+void resetSchemeToDefault() noexcept
+{
+    for (int i = 0; i < TextStyleCount; ++i)
+        schemeActive[i] = schemeDefault[i];
+}
+
+namespace { const bool schemeActiveInitialized = (resetSchemeToDefault(), true); }
+
+namespace {
+// Parallel tables, indexed by TextStyle. 'id' is persisted to ~/.turborc and is
+// part of the on-disk format -- do not rename. 'label' is shown in the dialog.
+struct StyleInfo { const char *id; const char *label; };
+constexpr StyleInfo styleInfo[TextStyleCount] =
+{
+    /* sNormal           */ {"sNormal",           "Normal text"},
+    /* sSelection        */ {"sSelection",        "Selection"},
+    /* sWhitespace       */ {"sWhitespace",       "Whitespace"},
+    /* sCtrlChar         */ {"sCtrlChar",         "Control char"},
+    /* sLineNums         */ {"sLineNums",         "Line numbers"},
+    /* sKeyword1         */ {"sKeyword1",         "Keyword"},
+    /* sKeyword2         */ {"sKeyword2",         "Keyword (type)"},
+    /* sMisc             */ {"sMisc",             "Misc / class"},
+    /* sPreprocessor     */ {"sPreprocessor",     "Preprocessor"},
+    /* sOperator         */ {"sOperator",         "Operator"},
+    /* sComment          */ {"sComment",          "Comment"},
+    /* sStringLiteral    */ {"sStringLiteral",    "String"},
+    /* sCharLiteral      */ {"sCharLiteral",      "Character"},
+    /* sNumberLiteral    */ {"sNumberLiteral",    "Number"},
+    /* sEscapeSequence   */ {"sEscapeSequence",   "Escape sequence"},
+    /* sError            */ {"sError",            "Error"},
+    /* sBraceMatch       */ {"sBraceMatch",       "Matching brace"},
+    /* sReplaceHighlight */ {"sReplaceHighlight", "Replace highlight"},
+};
+} // namespace
+
+const char *styleName(TextStyle style) noexcept
+{
+    return (style < TextStyleCount) ? styleInfo[style].id : "";
+}
+
+const char *styleDisplayName(TextStyle style) noexcept
+{
+    return (style < TextStyleCount) ? styleInfo[style].label : "";
+}
+
+bool styleByName(TStringView name, TextStyle &out) noexcept
+{
+    for (int i = 0; i < TextStyleCount; ++i)
+        if (name == styleInfo[i].id)
+        {
+            out = (TextStyle) i;
+            return true;
+        }
+    return false;
+}
 
 constexpr LexerSettings::StyleMapping stylesC[] =
 {

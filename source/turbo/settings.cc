@@ -56,6 +56,7 @@ void loadSettings(AppSettings &s) noexcept
         return;
     char line[1024];
     const char serverPrefix[] = "lsp.server.";
+    const char themePrefix[] = "theme.";
     while (fgets(line, sizeof line, f))
     {
         int v;
@@ -70,6 +71,20 @@ void loadSettings(AppSettings &s) noexcept
             char *cmd = line + 15;
             chomp(cmd);
             s.terminalShell = cmd;
+        }
+        else if (strncmp(line, themePrefix, sizeof themePrefix - 1) == 0)
+        {
+            // theme.<item>.<fg|bg|style>=<value>
+            char *rest = line + sizeof themePrefix - 1;
+            char *eq = strchr(rest, '=');
+            if (eq)
+            {
+                *eq = '\0';
+                char *val = eq + 1;
+                chomp(val);
+                if (rest[0])
+                    s.theme[rest] = val;
+            }
         }
         else if (strncmp(line, serverPrefix, sizeof serverPrefix - 1) == 0)
         {
@@ -103,5 +118,8 @@ void saveSettings(const AppSettings &s) noexcept
     for (auto &srv : s.lspServers)
         if (!srv.language.empty() && !srv.command.empty())
             fprintf(f, "lsp.server.%s=%s\n", srv.language.c_str(), srv.command.c_str());
+    for (auto &kv : s.theme)
+        if (!kv.first.empty())
+            fprintf(f, "theme.%s=%s\n", kv.first.c_str(), kv.second.c_str());
     fclose(f);
 }

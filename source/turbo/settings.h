@@ -1,6 +1,7 @@
 #ifndef TURBO_SETTINGS_H
 #define TURBO_SETTINGS_H
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,11 @@ struct AppSettings
     // Language-server command overrides. Empty by default; the LSP manager
     // falls back to built-in defaults for languages not listed here.
     std::vector<LspServerConfig> lspServers;
+    // Colour-theme overrides, stored as "<item>.<fg|bg|style>" -> value (e.g.
+    // "sKeyword1.fg" -> "569CD6", "sComment.style" -> "italic"). Persisted under
+    // the "theme." prefix in ~/.turborc. The mapping to/from the active colour
+    // schemes lives in theme.cc; empty means "use the built-in defaults".
+    std::map<std::string, std::string> theme;
 
     // Returns the configured command for 'language', or "" if none.
     std::string lspCommandFor(const std::string &language) const noexcept;

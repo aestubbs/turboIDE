@@ -14,6 +14,8 @@
 #define Uses_TMenuItem
 #include <tvision/tv.h>
 
+#include <turbo/basicwindow.h> // shared editor-window chrome scheme
+
 using Node = DocumentTreeView::Node;
 
 namespace {
@@ -462,6 +464,27 @@ namespace {
 
 struct DrawCtx { TDrawBuffer *b; int last; };
 
+enum class TreeRole { Normal, Focused, Selected };
+
+// Row colours for the file tree, derived from the shared window-chrome scheme so
+// the tree matches the editor windows (and follows any theme edits). Returned as
+// a TAttrPair: the low attr paints folder/expanded rows and the row fill, while
+// the high attr (color >> 8) paints file/leaf text.
+TAttrPair treeColors(TreeRole role) noexcept
+{
+    using namespace turbo;
+    TColorDesired bg = ::getBack(windowSchemeActive[wndFrameActive]); // unified window blue
+    switch (role)
+    {
+        case TreeRole::Focused:
+            return TAttrPair(TColorAttr(0xFFFFFF, 0x3A7FD0), TColorAttr(0xFFFFFF, 0x3A7FD0));
+        case TreeRole::Selected:
+            return TAttrPair(TColorAttr(0xFFFFFF, 0x2F6FB0), TColorAttr(0xFFFFFF, 0x2F6FB0));
+        default: // Normal: folders bright, files slightly dimmer, on the window blue.
+            return TAttrPair(TColorAttr(0xEAEFFF, bg), TColorAttr(0xCBD6F2, bg));
+    }
+}
+
 // Mirrors TOutlineViewer's internal drawTree(), with one addition: files that
 // are open in an editor (node->editor != null) are drawn in bold.
 Boolean drawNode( TOutlineViewer *v, TNode *cur, int level, int position,
@@ -475,11 +498,11 @@ Boolean drawNode( TOutlineViewer *v, TNode *cur, int level, int position,
             return True;
         TAttrPair color;
         if (position == v->foc && (v->state & sfFocused))
-            color = v->getColor(0x0202);
+            color = treeColors(TreeRole::Focused);
         else if (v->isSelected(position))
-            color = v->getColor(0x0303);
+            color = treeColors(TreeRole::Selected);
         else
-            color = v->getColor(0x0401);
+            color = treeColors(TreeRole::Normal);
         dBuf.moveChar(0, ' ', color, v->size.x);
         int x;
         {
@@ -500,17 +523,17 @@ Boolean drawNode( TOutlineViewer *v, TNode *cur, int level, int position,
             if (gs && !(position == v->foc && (v->state & sfFocused))
                    && !v->isSelected(position))
             {
-                char fg;
+                TColorDesired fg {};
                 switch (gs)
                 {
-                    case 'M': case 'R': fg = '\x0E'; break; // yellow
-                    case 'A': case '?': fg = '\x0A'; break; // green
-                    case 'D':           fg = '\x0C'; break; // red
-                    case 'U':           fg = '\x0D'; break; // magenta
-                    case '.':           fg = '\x06'; break; // dim (dir)
-                    default:            fg = '\x07'; break;
+                    case 'M': case 'R': fg = 0xE6C98C; break; // gold (modified)
+                    case 'A': case '?': fg = 0x9CDC8C; break; // green (added/new)
+                    case 'D':           fg = 0xE06C75; break; // red (deleted)
+                    case 'U':           fg = 0xD79CD2; break; // magenta (conflict)
+                    case '.':           fg = 0x9AA6CE; break; // dim (dir w/ changes)
+                    default:            fg = 0xCBD6F2; break;
                 }
-                setFore(c, TColorDesired(fg));
+                setFore(c, fg);
             }
             dBuf.moveStr(max(0, x), text, c, (ushort) -1U, max(0, -x));
         }
@@ -563,7 +586,7 @@ void DocumentTreeView::draw()
     TDrawBuffer dBuf;
     DrawCtx ctx {&dBuf, -1};
     TOutlineViewer::firstThat(drawNode, &ctx);
-    TAttrPair nrmColor = getColor(0x0401);
+    TAttrPair nrmColor = treeColors(TreeRole::Normal);
     dBuf.moveChar(0, ' ', nrmColor, size.x);
     writeLine(0, ctx.last + 1, size.x, size.y - (ctx.last - delta.y), dBuf);
 }
@@ -751,6 +774,15 @@ DocumentTreeWindow::~DocumentTreeWindow()
 {
     if (ptr)
         *ptr = nullptr;
+}
+
+TColorAttr DocumentTreeWindow::mapColor(uchar index) noexcept
+{
+    // Same resolution as BasicEditorWindow: map the window palette indices onto
+    // the shared chrome scheme so the frame and scrollbars match the editors.
+    if (index > 0 && index - 1 < turbo::WindowPaletteItemCount)
+        return turbo::windowSchemeActive[index - 1];
+    return errorAttr;
 }
 
 void DocumentTreeWindow::setBranchInfo(std::string_view info) noexcept

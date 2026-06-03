@@ -97,41 +97,84 @@ void BasicEditorWindow::handleNotification(const SCNotification &scn, Editor &ed
 
 #define dialogColor(i) cpAppColor[(uchar) (cpDialog[i] - 1)]
 
-extern constexpr WindowColorScheme windowSchemeDefault =
-{
-    /* wndFramePassive             */ '\x17',
-    /* wndFrameActive              */ '\x1F',
-    /* wndFrameIcon                */ '\x1A',
-    /* wndScrollBarPageArea        */ '\x30',
-    /* wndScrollBarControls        */ '\x30',
-    /* wndStaticText               */ '\x0F',
-    /* wndLabelNormal              */ '\x07',
-    /* wndLabelSelected            */ '\x0F',
-    /* wndLabelShortcut            */ '\x06',
-    /* wndButtonNormal             */ '\x20',
-    /* wndButtonDefault            */ '\x2B',
-    /* wndButtonSelected           */ '\x2F',
-    /* wndButtonDisabled           */ '\x78',
-    /* wndButtonShortcut           */ '\x2E',
-    /* wndButtonShadow             */ '\x08',
-    /* wndClusterNormal            */ '\x07',
-    /* wndClusterSelected          */ '\x0F',
-    /* wndClusterShortcut          */ '\x06',
-    dialogColor(wndInputLineNormal         ),
-    dialogColor(wndInputLineSelected       ),
-    dialogColor(wndInputLineArrows         ),
-    /* wndHistoryArrow             */ '\x20',
-    /* wndHistorySides             */ '\x02',
-    dialogColor(wndHistWinScrollBarPageArea),
-    dialogColor(wndHistWinScrollBarControls),
-    dialogColor(wndListViewerNormal        ),
-    dialogColor(wndListViewerFocused       ),
-    dialogColor(wndListViewerSelected      ),
-    dialogColor(wndListViewerDivider       ),
-    dialogColor(wndInfoPane                ),
-    /* wndClusterDisabled          */ '\x08',
-};
+// 24-bit window-chrome palette, coherent with the navy editor background and the
+// Turbo-blue frames. The frame and scrollbar entries are what's normally visible
+// on an editor window (and what the theme dialog exposes); the remaining
+// button/label/cluster entries only show when dialog-like views are embedded in
+// a window, but are given matching RGB values for consistency. The input-line,
+// history and list-viewer entries are inherited from the application dialog
+// palette via 'dialogColor' (left as-is; they degrade gracefully).
+// TColorDesired (not TColorRGB): its int constructor is constexpr, which the
+// constexpr scheme below requires.
+namespace {
+constexpr TColorDesired
+    wcNavy       = 0x10182E, // window background (matches editor bg)
+    wcFramePsv   = 0x16335E, // passive frame background
+    wcFrameAct   = 0x1E4D8C, // active frame background (Turbo blue)
+    wcFrameFgPsv = 0xC8D4F0, // passive frame text
+    wcFrameFgAct = 0xFFFFFF, // active frame text
+    wcIcon       = 0x7FE0B0, // frame icons (close/zoom) -- green-teal
+    wcBarTrough  = 0x1A2E52, // scrollbar trough background
+    wcBarThumb   = 0x3A5C92, // scrollbar slider
+    wcBarArrows  = 0xD0DEFF, // scrollbar arrow controls
+    wcTextFg     = 0xE0E6F8, // static text
+    wcLabelFg    = 0xB8C2E0, // label text
+    wcShortcut   = 0xE8C07D, // hotkey letters (gold)
+    wcSelBg      = 0x1E4D8C, // selected label/cluster background
+    wcBtnBg      = 0x2A5896, // button background
+    wcBtnDefBg   = 0x2F6FB0, // default button background
+    wcBtnSelBg   = 0x3A7FD0, // focused button background
+    wcDim        = 0x6A7390, // disabled foreground
+    wcDimBg      = 0x1A2540, // disabled button background
+    wcShadow     = 0x0A1020; // button shadow
+} // namespace
 
+#define WINDOW_SCHEME_BODY \
+    /* wndFramePassive             */ {wcFrameFgPsv, wcFramePsv},   \
+    /* wndFrameActive              */ {wcFrameFgAct, wcFrameAct},   \
+    /* wndFrameIcon                */ {wcIcon,       wcFrameAct},   \
+    /* wndScrollBarPageArea        */ {wcBarThumb,   wcBarTrough},  \
+    /* wndScrollBarControls        */ {wcBarArrows,  wcBarTrough},  \
+    /* wndStaticText               */ {wcTextFg,     wcNavy},       \
+    /* wndLabelNormal              */ {wcLabelFg,    wcNavy},       \
+    /* wndLabelSelected            */ {wcFrameFgAct, wcSelBg},      \
+    /* wndLabelShortcut            */ {wcShortcut,   wcNavy},       \
+    /* wndButtonNormal             */ {wcFrameFgAct, wcBtnBg},      \
+    /* wndButtonDefault            */ {0xF0F4FF,     wcBtnDefBg},   \
+    /* wndButtonSelected           */ {wcFrameFgAct, wcBtnSelBg},   \
+    /* wndButtonDisabled           */ {wcDim,        wcDimBg},      \
+    /* wndButtonShortcut           */ {wcShortcut,   wcBtnBg},      \
+    /* wndButtonShadow             */ {wcShadow,     {}},           \
+    /* wndClusterNormal            */ {wcLabelFg,    wcNavy},       \
+    /* wndClusterSelected          */ {wcFrameFgAct, wcSelBg},      \
+    /* wndClusterShortcut          */ {wcShortcut,   wcNavy},       \
+    dialogColor(wndInputLineNormal         ),                      \
+    dialogColor(wndInputLineSelected       ),                      \
+    dialogColor(wndInputLineArrows         ),                      \
+    /* wndHistoryArrow             */ {wcFrameFgAct, wcBtnBg},      \
+    /* wndHistorySides             */ {wcIcon,       wcNavy},       \
+    dialogColor(wndHistWinScrollBarPageArea),                      \
+    dialogColor(wndHistWinScrollBarControls),                      \
+    dialogColor(wndListViewerNormal        ),                      \
+    dialogColor(wndListViewerFocused       ),                      \
+    dialogColor(wndListViewerSelected      ),                      \
+    dialogColor(wndListViewerDivider       ),                      \
+    dialogColor(wndInfoPane                ),                      \
+    /* wndClusterDisabled          */ {wcDim,        wcNavy},
+
+extern constexpr WindowColorScheme windowSchemeDefault = { WINDOW_SCHEME_BODY };
+
+// Runtime-editable copy; filled from the factory default at static-init and on
+// reset. (Editors read it only at runtime, so the init order is safe.)
+WindowColorScheme windowSchemeActive = { WINDOW_SCHEME_BODY };
+
+#undef WINDOW_SCHEME_BODY
 #undef dialogColor
+
+void resetWindowSchemeToDefault() noexcept
+{
+    for (int i = 0; i < WindowPaletteItemCount; ++i)
+        windowSchemeActive[i] = windowSchemeDefault[i];
+}
 
 } // namespace turbo

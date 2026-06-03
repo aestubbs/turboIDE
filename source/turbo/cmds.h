@@ -59,6 +59,10 @@ enum : ushort
     cmGitPush,
     cmToggleHidden,
     cmNewTerminal,
+    // Colour-scheme dialog (Settings menu) and the "apply the active scheme"
+    // notification the dialog posts to the application on Apply/OK.
+    cmThemeSettings,
+    cmApplyTheme,
     // File-tree right-click context menu actions.
     cmTreeOpen,
     cmTreeRename,

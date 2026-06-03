@@ -223,8 +223,27 @@ void setSelectionColor(TScintilla &self, TColorAttr attr)
     using namespace Scintilla::Internal;
     auto fg = ::getFore(attr),
          bg = ::getBack(attr);
+    // Active (primary) selection: the legacy messages set the SELECTION_TEXT/BACK
+    // elements opaquely on the Base layer, which the surface resolves correctly.
     call(self, SCI_SETSELFORE, !fg.isDefault(), convertColor(fg).OpaqueRGB());
     call(self, SCI_SETSELBACK, !bg.isDefault(), convertColor(bg).OpaqueRGB());
+    // The inactive (unfocused-editor) and additional (multi-cursor) selection
+    // elements default to *translucent* greys. The terminal surface can't draw
+    // translucency and can't resolve a raw RGB through the colour-token registry,
+    // so those selections otherwise revert to the editor background. Mirror the
+    // active colours onto them as opaque colour tokens, so a selection looks the
+    // same whether or not the editor has focus and for every cursor.
+    auto setElem = [&] (int element, TColorDesired c) {
+        if (c.isDefault())
+            call(self, SCI_RESETELEMENTCOLOUR, element, 0);
+        else
+            call(self, SCI_SETELEMENTCOLOUR, element,
+                 (sptr_t) ((uint32_t) convertColor(c).OpaqueRGB() | 0xFF000000u));
+    };
+    setElem(SC_ELEMENT_SELECTION_INACTIVE_BACK, bg);
+    setElem(SC_ELEMENT_SELECTION_ADDITIONAL_BACK, bg);
+    setElem(SC_ELEMENT_SELECTION_INACTIVE_TEXT, fg);
+    setElem(SC_ELEMENT_SELECTION_ADDITIONAL_TEXT, fg);
 }
 
 void setWhitespaceColor(TScintilla &self, TColorAttr attr)
