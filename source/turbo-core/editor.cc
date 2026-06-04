@@ -47,6 +47,12 @@ Editor::Editor(TScintilla &aScintilla) noexcept :
     call(scintilla, SCI_SETMULTIPLESELECTION, true, 0U);
     call(scintilla, SCI_SETADDITIONALSELECTIONTYPING, true, 0U);
     call(scintilla, SCI_SETADDITIONALCARETSVISIBLE, true, 0U);
+    // Let column (rectangular) selection extend past the ends of short lines.
+    // Restricted to rectangular selections so normal caret movement still stops
+    // at the end of line (no surprising virtual space elsewhere). Alt is the
+    // modifier that turns a mouse drag into a column selection.
+    call(scintilla, SCI_SETVIRTUALSPACEOPTIONS, SCVS_RECTANGULARSELECTION, 0U);
+    call(scintilla, SCI_SETRECTANGULARSELECTIONMODIFIER, SCMOD_ALT, 0U);
 
     // Savepoint and undo buffer.
     call(scintilla, SCI_EMPTYUNDOBUFFER, 0U, 0U);
@@ -361,6 +367,115 @@ void Editor::selectAllOccurrences() noexcept
     if (call(scintilla, SCI_GETSELECTIONEMPTY, 0U, 0U))
         call(scintilla, SCI_MULTIPLESELECTADDNEXT, 0U, 0U); // seed with the word
     call(scintilla, SCI_MULTIPLESELECTADDEACH, 0U, 0U);
+}
+
+void Editor::addCaret(int dir) noexcept
+{
+    int n = (int) call(scintilla, SCI_GETSELECTIONS, 0U, 0U);
+    if (n <= 0)
+        return;
+    // Work from the caret on the extreme line in the travel direction, so that
+    // repeated presses keep growing the stack of carets (Sublime semantics).
+    int src = 0;
+    long srcLine = -1, srcCol = 0;
+    for (int i = 0; i < n; ++i)
+    {
+        long pos = call(scintilla, SCI_GETSELECTIONNCARET, i, 0U);
+        long vs  = call(scintilla, SCI_GETSELECTIONNCARETVIRTUALSPACE, i, 0U);
+        long line = call(scintilla, SCI_LINEFROMPOSITION, pos, 0U);
+        long col  = call(scintilla, SCI_GETCOLUMN, pos, 0U) + vs;
+        bool better;
+        if (srcLine < 0)             better = true;
+        else if (dir > 0)            better = line > srcLine || (line == srcLine && col > srcCol);
+        else                         better = line < srcLine || (line == srcLine && col > srcCol);
+        if (better) { src = i; srcLine = line; srcCol = col; }
+    }
+    (void) src;
+
+    long lineCount = call(scintilla, SCI_GETLINECOUNT, 0U, 0U);
+    long tgtLine = srcLine + dir;
+    if (tgtLine < 0 || tgtLine > lineCount - 1)
+        return;
+
+    // Map the visual column onto the target line. FINDCOLUMN clamps to the line
+    // end; any overflow is kept as virtual space so the column is preserved
+    // wherever the target line is long enough (and parks at EOL otherwise).
+    long col = srcCol;
+    long tgtPos = call(scintilla, SCI_FINDCOLUMN, tgtLine, col);
+    long endCol = call(scintilla, SCI_GETCOLUMN,
+                       call(scintilla, SCI_GETLINEENDPOSITION, tgtLine, 0U), 0U);
+    long vs = col > endCol ? col - endCol : 0;
+
+    // Don't add a caret on top of an existing one.
+    for (int i = 0; i < n; ++i)
+        if (call(scintilla, SCI_GETSELECTIONNCARET, i, 0U) == tgtPos &&
+            call(scintilla, SCI_GETSELECTIONNCARETVIRTUALSPACE, i, 0U) == vs)
+            return;
+
+    call(scintilla, SCI_ADDSELECTION, tgtPos, tgtPos);
+    int newIdx = (int) call(scintilla, SCI_GETSELECTIONS, 0U, 0U) - 1;
+    if (vs > 0)
+    {
+        call(scintilla, SCI_SETSELECTIONNCARETVIRTUALSPACE, newIdx, vs);
+        call(scintilla, SCI_SETSELECTIONNANCHORVIRTUALSPACE, newIdx, vs);
+    }
+    call(scintilla, SCI_SETMAINSELECTION, newIdx, 0U);
+    call(scintilla, SCI_SCROLLCARET, 0U, 0U);
+}
+
+void Editor::addCaretUp() noexcept   { addCaret(-1); }
+void Editor::addCaretDown() noexcept { addCaret(+1); }
+
+void Editor::skipOccurrence() noexcept
+{
+    int n = (int) call(scintilla, SCI_GETSELECTIONS, 0U, 0U);
+    if (n <= 0)
+        return;
+    int main = (int) call(scintilla, SCI_GETMAINSELECTION, 0U, 0U);
+    // Add the next match, then drop the one we were on -- so the active match
+    // advances without keeping the current occurrence.
+    call(scintilla, SCI_MULTIPLESELECTADDNEXT, 0U, 0U);
+    if ((int) call(scintilla, SCI_GETSELECTIONS, 0U, 0U) > n)
+        call(scintilla, SCI_DROPSELECTIONN, main, 0U);
+}
+
+void Editor::undoSelection() noexcept
+{
+    int n = (int) call(scintilla, SCI_GETSELECTIONS, 0U, 0U);
+    if (n > 1)
+    {
+        call(scintilla, SCI_DROPSELECTIONN, n - 1, 0U);
+        call(scintilla, SCI_SETMAINSELECTION,
+             call(scintilla, SCI_GETSELECTIONS, 0U, 0U) - 1, 0U);
+        call(scintilla, SCI_SCROLLCARET, 0U, 0U);
+    }
+}
+
+void Editor::splitSelectionIntoLines() noexcept
+{
+    int main = (int) call(scintilla, SCI_GETMAINSELECTION, 0U, 0U);
+    long start = call(scintilla, SCI_GETSELECTIONNSTART, main, 0U);
+    long end   = call(scintilla, SCI_GETSELECTIONNEND, main, 0U);
+    long l0 = call(scintilla, SCI_LINEFROMPOSITION, start, 0U);
+    long l1 = call(scintilla, SCI_LINEFROMPOSITION, end, 0U);
+    if (l1 <= l0)
+        return; // single line: nothing to split
+    bool first = true;
+    for (long line = l0; line <= l1; ++line)
+    {
+        long a = (line == l0) ? start : call(scintilla, SCI_POSITIONFROMLINE, line, 0U);
+        long b = (line == l1) ? end   : call(scintilla, SCI_GETLINEENDPOSITION, line, 0U);
+        // Place each caret at the end of its line's portion (caret, anchor).
+        if (first) { call(scintilla, SCI_SETSELECTION, b, a); first = false; }
+        else         call(scintilla, SCI_ADDSELECTION, b, a);
+    }
+}
+
+void Editor::collapseSelection() noexcept
+{
+    int main = (int) call(scintilla, SCI_GETMAINSELECTION, 0U, 0U);
+    long pos = call(scintilla, SCI_GETSELECTIONNCARET, main, 0U);
+    call(scintilla, SCI_SETEMPTYSELECTION, pos, 0U);
 }
 
 void Editor::toggleFolding() noexcept

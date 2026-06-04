@@ -36,6 +36,8 @@
 #include "terminal.h"
 #include "themedialog.h"
 #include "theme.h"
+#include "commandpalette.h"
+#include "gotoanything.h"
 #include <turbo/fileeditor.h>
 #include <turbo/tpath.h>
 #include <filesystem>
@@ -142,6 +144,7 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     argv(argv)
 {
     loadSettings(settings);
+    frecency.load();
     // Fold any saved colour overrides onto the built-in 24-bit defaults before
     // the first editor is created, so new editors theme from the right scheme.
     applyThemeFromSettings(settings);
@@ -170,6 +173,12 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     ts += cmCompletion;
     ts += cmSelectNextOccurrence;
     ts += cmSelectAllOccurrences;
+    ts += cmAddCaretUp;
+    ts += cmAddCaretDown;
+    ts += cmSkipOccurrence;
+    ts += cmUndoSelection;
+    ts += cmSplitSelectionLines;
+    ts += cmCollapseSelection;
     ts += cmToggleBookmark;
     ts += cmNextBookmark;
     ts += cmPrevBookmark;
@@ -259,6 +268,8 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
         *new TSubMenu( "~F~ile", kbAltF, hcNoContext ) +
             *new TMenuItem( "~N~ew", cmNew, kbCtrlN, hcNoContext, "Ctrl-N" ) +
             *new TMenuItem( "~O~pen", cmOpen, kbCtrlO, hcNoContext, "Ctrl-O" ) +
+            *new TMenuItem( "Go to ~A~nything...", cmGotoAnything, kbNoKey, hcNoContext, "Ctrl-P" ) +
+            *new TMenuItem( "Command Pa~l~ette...", cmCommandPalette, kbNoKey, hcNoContext, "Ctrl-Shift-P" ) +
             newLine() +
             *new TMenuItem( "~S~ave", cmSave, kbCtrlS, hcNoContext, "Ctrl-S" ) +
             *new TMenuItem( "S~a~ve As...", cmSaveAs, kbNoKey, hcNoContext ) +
@@ -295,6 +306,12 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             newLine() +
             *new TMenuItem( "Select ~N~ext Occurrence", cmSelectNextOccurrence, kbCtrlD, hcNoContext, "Ctrl-D" ) +
             *new TMenuItem( "Select ~A~ll Occurrences", cmSelectAllOccurrences, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "S~k~ip Occurrence", cmSkipOccurrence, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Undo Last Selecti~o~n", cmUndoSelection, kbNoKey, hcNoContext, "Ctrl-U" ) +
+            newLine() +
+            *new TMenuItem( "Add Caret ~U~p", cmAddCaretUp, kbNoKey, hcNoContext, "Ctrl-Alt-Up" ) +
+            *new TMenuItem( "Add Caret ~D~own", cmAddCaretDown, kbNoKey, hcNoContext, "Ctrl-Alt-Down" ) +
+            *new TMenuItem( "Spl~i~t into Lines", cmSplitSelectionLines, kbNoKey, hcNoContext, "Ctrl-Shift-L" ) +
         *new TSubMenu( "~C~ode", kbAltC ) +
             *new TMenuItem( "Code ~F~olding", cmToggleFolding, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~T~oggle Fold at Cursor", cmFoldAtCursor, kbNoKey, hcNoContext ) +
@@ -368,7 +385,18 @@ TStatusLine *TurboApp::initStatusLine( TRect r )
             *new TStatusItem( 0, TKey('/', kbCtrlShift), cmToggleComment ) +
             *new TStatusItem( 0, TKey('_', kbCtrlShift), cmToggleComment ) +
             *new TStatusItem( 0, kbF5, cmZoom ) +
-            *new TStatusItem( 0, kbCtrlF5, cmResize )
+            *new TStatusItem( 0, kbCtrlF5, cmResize ) +
+            // Fuzzy navigation. Bound on the status line so they convert to a
+            // command inside getEvent before the focused editor (Scintilla) sees
+            // the key. Ctrl-P is free; Ctrl-Shift-P falls back to the menu where
+            // the terminal can't distinguish it from Ctrl-P.
+            *new TStatusItem( 0, kbCtrlP, cmGotoAnything ) +
+            *new TStatusItem( 0, TKey('P', kbCtrlShift), cmCommandPalette ) +
+            // Multi-cursor accelerators (only fire when an editor is focused, as
+            // these commands are disabled otherwise). Convert before the editor
+            // sees the key, like the navigation overlays above.
+            *new TStatusItem( 0, kbCtrlU, cmUndoSelection ) +
+            *new TStatusItem( 0, TKey('L', kbCtrlShift), cmSplitSelectionLines )
             );
 }
 
@@ -429,6 +457,8 @@ void TurboApp::handleEvent(TEvent &event)
         switch (event.message.command) {
             case cmNew: fileNew(); break;
             case cmOpen: fileOpen(); break;
+            case cmGotoAnything: gotoAnything(); break;
+            case cmCommandPalette: commandPalette(); break;
             case cmEditorNext:
             case cmEditorPrev:
                 showEditorList(&event);
@@ -535,6 +565,52 @@ void TurboApp::fileOpenOrNew(const char *path)
 void TurboApp::openFileFromTree(const char *absPath)
 {
     fileOpenOrNew(absPath);
+}
+
+void TurboApp::openOrFocus(const std::string &absPath, long line) noexcept
+{
+    if (absPath.empty())
+        return;
+    EditorWindow *found = nullptr;
+    MRUlist.forEach([&] (EditorWindow *w) {
+        if (w && w->filePath() == absPath)
+            found = w;
+    });
+    if (found)
+        found->focus();
+    else
+    {
+        fileOpenOrNew(absPath.c_str());
+        found = MRUlist.empty() ? nullptr : MRUlist.next->self;
+    }
+    if (found && line >= 0)
+    {
+        auto &ed = found->getEditor();
+        ed.callScintilla(SCI_GOTOLINE, line, 0U);
+        ed.callScintilla(SCI_SCROLLCARET, 0U, 0U);
+        ed.redraw();
+    }
+    frecency.record(absPath);
+}
+
+void TurboApp::gotoAnything()
+{
+    runGotoAnything(*this);
+}
+
+void TurboApp::commandPalette()
+{
+    ushort cmd = runCommandPalette(!MRUlist.empty());
+    if (cmd)
+    {
+        // Dispatch through the normal event path so the command reaches the
+        // focused editor/app exactly like a menu pick.
+        TEvent ev;
+        ev.what = evCommand;
+        ev.message.command = cmd;
+        ev.message.infoPtr = nullptr;
+        putEvent(ev);
+    }
 }
 
 void TurboApp::scanWorkspace()

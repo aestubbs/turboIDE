@@ -135,12 +135,14 @@ static constexpr TStringView helpParagraphs[] =
     " │             │ Switch branch          │ Menu bar           │\n"
     " ├─────────────┼────────────────────────┼────────────────────┤\n"
     " │ Tools       │ New terminal           │ File menu          │\n"
-    " └─────────────┴────────────────────────┴────────────────────┘\n"
-    "\n"
-    "The Git menu's commit/fetch/pull/push and the branch shown in the menu "
+    " └─────────────┴────────────────────────┴────────────────────┘\n",
+    // These trailing prose paragraphs are kept separate from the table above so
+    // they start with a non-space character and therefore wrap to the window
+    // width (the table paragraph must not wrap, hence its leading spaces).
+    "\nThe Git menu's commit/fetch/pull/push and the branch shown in the menu "
     "bar (click it to switch branches) operate on the workspace repository. "
     "The file tree shows per-file Git status badges; right-click a file for "
-    "Open, Rename, New File and Git Add / Git Revert.\n\n"
+    "Open, Rename, New File and Git Add / Git Revert.\n\n",
     "File > New Terminal opens a shell in a window. Set 'terminal.shell' in "
     "~/.turborc to choose which shell (the default is $SHELL). While a terminal "
     "is focused, keystrokes go to the shell -- including Ctrl+C, Ctrl+D, Ctrl+R "

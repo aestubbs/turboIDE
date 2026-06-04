@@ -8,6 +8,10 @@
 #define Uses_TScrollBar
 #define Uses_TEventQueue
 #define Uses_TClipboard
+// Pull in <tvision/editors.h> for the cmFind/cmReplace command constants used
+// below. Declared here so this file does not depend on a unity-build batch-mate
+// (e.g. app.cc via Uses_TIndicator) having included editors.h first.
+#define __INC_EDITORS_H
 #include <tvision/tv.h>
 
 #include "terminal.h"

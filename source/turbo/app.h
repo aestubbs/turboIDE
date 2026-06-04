@@ -16,6 +16,7 @@
 #include "apputils.h"
 #include "editwindow.h"
 #include "settings.h"
+#include "frecency.h"
 #include "cmds.h"
 
 struct EditorWindow;
@@ -47,6 +48,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     turbo::SearchSettings searchSettings;
     std::string mostRecentDir;
     AppSettings settings;
+    FrecencyStore frecency;
     std::unique_ptr<LspManager> lsp;
     std::unique_ptr<GitManager> git;
     std::unique_ptr<turbo::FileWatcher> watcher;
@@ -78,6 +80,12 @@ struct TurboApp : public TApplication, EditorWindowParent
     void fileOpen();
     void fileOpenOrNew(const char *path);
     void openFileFromTree(const char *absPath);
+    // Focus the editor already showing 'absPath', or open it; then jump to
+    // 'line' (0-based; <0 = no jump) and record the open for frecency ranking.
+    void openOrFocus(const std::string &absPath, long line = -1) noexcept;
+    // Fuzzy navigation overlays (Ctrl-P / Ctrl-Shift-P).
+    void gotoAnything();
+    void commandPalette();
     void scanWorkspace();
     void toggleAutoSave();
     void toggleHiddenFiles();

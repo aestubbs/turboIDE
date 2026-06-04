@@ -905,6 +905,15 @@ Node* DocumentTreeView::findByPath(std::string_view path) noexcept
     });
 }
 
+void DocumentTreeView::collectFilePaths(std::vector<std::string> &out) noexcept
+{
+    findNodeRec(root, [&out] (Node *node) {
+        if (!node->isDir)
+            out.push_back(node->path);
+        return false; // visit every node
+    });
+}
+
 static char badgeFor(const GitFileStatus &s) noexcept
 {
     switch (s.state)

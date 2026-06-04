@@ -49,6 +49,7 @@ class Editor : protected TScintillaParent
     void drawViews() noexcept;
     void updateMarginWidth() noexcept;
     void setUpExtraMargins() noexcept; // bookmark / change-history / fold margins
+    void addCaret(int dir) noexcept;   // add a caret one line up (-1) / down (+1)
 
 protected:
 
@@ -114,6 +115,12 @@ public:
     // Multiple selections / multi-cursor.
     void selectNextOccurrence() noexcept; // add next match of the selection/word
     void selectAllOccurrences() noexcept; // select every match at once
+    void addCaretUp() noexcept;           // add a caret on the line above
+    void addCaretDown() noexcept;         // add a caret on the line below
+    void skipOccurrence() noexcept;       // advance Ctrl-D past the current match
+    void undoSelection() noexcept;        // drop the most recently added caret
+    void splitSelectionIntoLines() noexcept; // one caret per selected line
+    void collapseSelection() noexcept;    // reduce to a single caret (Esc)
     // Code folding.
     void toggleFolding() noexcept;        // show/hide the fold margin
     void toggleFoldAtCursor() noexcept;   // collapse/expand the current block

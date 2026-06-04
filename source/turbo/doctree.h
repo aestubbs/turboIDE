@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 struct EditorWindow;
 struct GitFileStatus;
@@ -114,6 +115,11 @@ struct DocumentTreeView : public TOutline {
     void removeNode(std::string_view path) noexcept;
     void refreshNode(std::string_view path) noexcept;
     Node *findDir(std::string_view path) noexcept;
+
+    // Append the absolute path of every file (not directory) in the whole tree,
+    // regardless of expand/collapse state. Used by the "Goto Anything" picker as
+    // its file source. Order follows the tree's scan order.
+    void collectFilePaths(std::vector<std::string> &out) noexcept;
 
     std::string rootPath;   // absolute path scanned by scanDirectory()
     bool showHidden {false}; // include dotfiles/dot-dirs when scanning

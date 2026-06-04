@@ -89,6 +89,12 @@ EditorWindow::EditorWindow( const TRect &bounds, TurboEditor &aEditor,
     enabledCmds += cmCompletion;
     enabledCmds += cmSelectNextOccurrence;
     enabledCmds += cmSelectAllOccurrences;
+    enabledCmds += cmAddCaretUp;
+    enabledCmds += cmAddCaretDown;
+    enabledCmds += cmSkipOccurrence;
+    enabledCmds += cmUndoSelection;
+    enabledCmds += cmSplitSelectionLines;
+    enabledCmds += cmCollapseSelection;
     enabledCmds += cmToggleBookmark;
     enabledCmds += cmNextBookmark;
     enabledCmds += cmPrevBookmark;
@@ -129,11 +135,29 @@ void EditorWindow::handleEvent(TEvent &ev)
                 parent.editorRequestCompletion(*this);
                 break;
             }
+            // Add caret above/below: Ctrl+Alt+Up/Down. Alt dominates the keycode
+            // (so it arrives as kbAltUp/kbAltDown) while Ctrl stays in the
+            // modifier state, so match on both rather than a fixed keyCode.
+            if ( (ev.keyDown.controlKeyState & kbCtrlShift) &&
+                 (ev.keyDown.keyCode == kbAltUp || ev.keyDown.keyCode == kbAltDown) )
+            {
+                if (ev.keyDown.keyCode == kbAltUp) editor.addCaretUp();
+                else                               editor.addCaretDown();
+                editor.redraw();
+                break;
+            }
             switch (ev.keyDown.keyCode)
             {
                 case kbEsc:
-                    if ((handled = bottomView))
+                    if (bottomView)
                         closeBottomView();
+                    else if (editor.callScintilla(SCI_GETSELECTIONS, 0U, 0U) > 1)
+                    {
+                        editor.collapseSelection();
+                        editor.redraw();
+                    }
+                    else
+                        handled = false;
                     break;
                 default:
                     handled = false;
@@ -218,6 +242,30 @@ void EditorWindow::handleEvent(TEvent &ev)
                     break;
                 case cmSelectAllOccurrences:
                     editor.selectAllOccurrences();
+                    editor.redraw();
+                    break;
+                case cmAddCaretUp:
+                    editor.addCaretUp();
+                    editor.redraw();
+                    break;
+                case cmAddCaretDown:
+                    editor.addCaretDown();
+                    editor.redraw();
+                    break;
+                case cmSkipOccurrence:
+                    editor.skipOccurrence();
+                    editor.redraw();
+                    break;
+                case cmUndoSelection:
+                    editor.undoSelection();
+                    editor.redraw();
+                    break;
+                case cmSplitSelectionLines:
+                    editor.splitSelectionIntoLines();
+                    editor.redraw();
+                    break;
+                case cmCollapseSelection:
+                    editor.collapseSelection();
                     editor.redraw();
                     break;
                 case cmToggleBookmark:

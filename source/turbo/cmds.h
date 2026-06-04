@@ -37,6 +37,13 @@ enum : ushort
     cmUnfoldAll,
     cmToggleChangeHistory,
     cmToggleEdge,
+    // Multi-cursor / multiple-selection editing (disable-able: editor-only).
+    cmAddCaretUp,
+    cmAddCaretDown,
+    cmSkipOccurrence,
+    cmUndoSelection,
+    cmSplitSelectionLines,
+    cmCollapseSelection,
     // Commands that cannot be disabled.
     cmToggleTree = 1000,
     cmStateChanged,
@@ -59,6 +66,9 @@ enum : ushort
     cmGitPush,
     cmToggleHidden,
     cmNewTerminal,
+    // Fuzzy navigation overlays.
+    cmGotoAnything,
+    cmCommandPalette,
     // Colour-scheme dialog (Settings menu) and the "apply the active scheme"
     // notification the dialog posts to the application on Apply/OK.
     cmThemeSettings,
