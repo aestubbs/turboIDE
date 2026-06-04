@@ -89,7 +89,7 @@ static constexpr TStringView helpParagraphs[] =
     " │             │ 'Go To Line' panel     │ Ctrl+G             │\n"
     " ├─────────────┼────────────────────────┼────────────────────┤\n"
     " │ Navigation  │ Goto Anything          │ Ctrl+P             │\n"
-    " │             │ Command palette        │ File menu          │\n"
+    " │             │ Command palette        │ Ctrl+B             │\n"
     " ├─────────────┼────────────────────────┼────────────────────┤\n"
     " │ Multiple    │ Select next occurrence │ Ctrl+D             │\n"
     " │ cursors     │ Select all occurrences │ Selection menu     │\n"
@@ -154,10 +154,10 @@ static constexpr TStringView helpParagraphs[] =
     "symbol in it (for example '@parse'); a file query may also end with ':N' to "
     "open that file at line N. Recently and frequently opened files rank higher."
     "\n\n",
-    "The Command Palette lists every command by name so you can run it without "
-    "hunting through the menus. Open it from the File menu (or with Ctrl+Shift+P "
-    "on terminals that distinguish it from Ctrl+P) and type to filter; commands "
-    "that need an open editor are shown dimmed when there is none.\n\n",
+    "The Command Palette (Ctrl+B, or the File menu) lists every command by name "
+    "so you can run it without hunting through the menus -- type to filter, then "
+    "press Enter. Commands that need an open editor are shown dimmed when there "
+    "is none.\n\n",
     "Multiple cursors: press Ctrl+D to select the word at the caret, and again "
     "to add the next occurrence -- then type to edit every selection at once. "
     "Ctrl+Alt+Up and Ctrl+Alt+Down add a caret on the line above or below (also "

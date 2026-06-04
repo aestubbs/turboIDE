@@ -269,7 +269,7 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             *new TMenuItem( "~N~ew", cmNew, kbCtrlN, hcNoContext, "Ctrl-N" ) +
             *new TMenuItem( "~O~pen", cmOpen, kbCtrlO, hcNoContext, "Ctrl-O" ) +
             *new TMenuItem( "Go to ~A~nything...", cmGotoAnything, kbNoKey, hcNoContext, "Ctrl-P" ) +
-            *new TMenuItem( "Command Pa~l~ette...", cmCommandPalette, kbNoKey, hcNoContext, "Ctrl-Shift-P" ) +
+            *new TMenuItem( "Command Pa~l~ette...", cmCommandPalette, kbNoKey, hcNoContext, "Ctrl-B" ) +
             newLine() +
             *new TMenuItem( "~S~ave", cmSave, kbCtrlS, hcNoContext, "Ctrl-S" ) +
             *new TMenuItem( "S~a~ve As...", cmSaveAs, kbNoKey, hcNoContext ) +
@@ -388,10 +388,11 @@ TStatusLine *TurboApp::initStatusLine( TRect r )
             *new TStatusItem( 0, kbCtrlF5, cmResize ) +
             // Fuzzy navigation. Bound on the status line so they convert to a
             // command inside getEvent before the focused editor (Scintilla) sees
-            // the key. Ctrl-P is free; Ctrl-Shift-P falls back to the menu where
-            // the terminal can't distinguish it from Ctrl-P.
+            // the key. Ctrl-P (Goto Anything) and Ctrl-B (Command Palette) are
+            // both free single-Ctrl combos every terminal can send -- Ctrl-Shift-P
+            // is avoided because terminals can't distinguish it from Ctrl-P.
             *new TStatusItem( 0, kbCtrlP, cmGotoAnything ) +
-            *new TStatusItem( 0, TKey('P', kbCtrlShift), cmCommandPalette ) +
+            *new TStatusItem( 0, kbCtrlB, cmCommandPalette ) +
             // Undo-selection on Ctrl+U (only fires with an editor focused, as the
             // command is disabled otherwise; converted before the editor sees the
             // key, like the navigation overlays above). Split-into-lines is NOT
