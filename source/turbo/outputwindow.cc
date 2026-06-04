@@ -12,12 +12,18 @@
 
 #include <turbo/basicwindow.h> // shared window-chrome scheme
 
+#include <cctype>
+#include <cstdlib>
+#include <filesystem>
+#include <regex>
+
 // ---------------------------------------------------------------------------
 // OutputView
 
 OutputView::OutputView(const TRect &bounds, TScrollBar *vScrollBar) noexcept :
     TListViewer(bounds, 1, nullptr, vScrollBar)
 {
+    options |= ofFirstClick; // the first click on the pane still selects a line
     setRange(0);
 }
 
@@ -52,6 +58,7 @@ void OutputView::draw()
     TColorAttr cInfo   {TColorRGB(0x6FA8FF), TColorRGB(0x10141E)};
 
     int n = (int) lines.size();
+    bool active = (state & sfSelected) != 0;
     for (int y = 0; y < size.y; ++y)
     {
         int idx = topItem + y;
@@ -68,6 +75,10 @@ void OutputView::draw()
                 case okInfo:    c = cInfo;  break;
                 default:        c = cNormal; break;
             }
+            // Highlight the current line while the pane is focused, so it is
+            // clear which line Enter will open.
+            if (active && idx == focused)
+                ::setBack(c, TColorRGB(0x2A3350));
             b.moveChar(0, ' ', c, size.x);
             std::string t = ln.text;
             if ((int) t.size() > size.x)
@@ -78,8 +89,36 @@ void OutputView::draw()
     }
 }
 
+void OutputView::activate(int idx) noexcept
+{
+    if (idx >= 0 && idx < (int) lines.size() &&
+        !lines[idx].file.empty() && onActivate)
+        onActivate(lines[idx].file, lines[idx].line);
+}
+
 void OutputView::handleEvent(TEvent &ev)
 {
+    if (ev.what == evMouseDown)
+    {
+        TPoint m = makeLocal(ev.mouse.where);
+        int idx = topItem + m.y;
+        if (idx >= 0 && idx < (int) lines.size())
+        {
+            focused = (short) idx;
+            if (ev.mouse.eventFlags & meDoubleClick)
+                activate(idx);
+            drawView();
+        }
+        followTail = (range == 0) || (topItem + size.y >= range);
+        clearEvent(ev);
+        return;
+    }
+    if (ev.what == evKeyDown && ev.keyDown.keyCode == kbEnter)
+    {
+        activate(focused);
+        clearEvent(ev);
+        return;
+    }
     TListViewer::handleEvent(ev);
     // Re-enable tail-follow only while scrolled to the bottom; pause it when the
     // user scrolls up to read.
@@ -125,4 +164,86 @@ void OutputWindow::shutDown()
         *ptr = nullptr;
     view = nullptr;
     TWindow::shutDown();
+}
+
+// ---------------------------------------------------------------------------
+// Build-output line parsing
+
+namespace {
+
+namespace fs = std::filesystem;
+
+// Resolve 'file' against 'root' and confirm it is a real file; return the
+// absolute, normalised path, or "" if it doesn't exist (which keeps incidental
+// "a:b:c" text from becoming bogus clickable links).
+std::string resolveExisting(const std::string &file, const std::string &root) noexcept
+{
+    if (file.empty())
+        return {};
+    std::error_code ec;
+    fs::path p = fs::path(root) / file; // if 'file' is absolute, this yields 'file'
+    p = p.lexically_normal();
+    if (fs::exists(p, ec) && !fs::is_directory(p, ec))
+        return p.string();
+    return {};
+}
+
+std::string lower(std::string s) noexcept
+{
+    for (auto &c : s) c = (char) std::tolower((unsigned char) c);
+    return s;
+}
+
+} // namespace
+
+OutputLine parseBuildLine(const std::string &raw, const std::string &root) noexcept
+{
+    OutputLine out;
+    out.text = raw;
+    out.kind = okNormal;
+
+    // gcc/clang/generic: file:line[:col][: (error|warning|note|fatal error)]
+    static const std::regex reGcc(
+        R"(^\s*(\S[^:]*):(\d+)(?::\d+)?:\s*(error|warning|note|fatal error)?)",
+        std::regex::icase);
+    // MSVC: file(line[,col]) : error|warning
+    static const std::regex reMsvc(
+        R"(^\s*(\S[^(]*)\((\d+)(?:,\d+)?\)\s*:\s*(error|warning))",
+        std::regex::icase);
+    // Python traceback frame: File "path", line N
+    static const std::regex rePy(
+        R"(^\s*File \"([^\"]+)\", line (\d+))");
+
+    std::string file;
+    long line = 0;
+    std::smatch m;
+    if (std::regex_search(raw, m, reGcc))
+    {
+        file = m[1].str();
+        line = std::atol(m[2].str().c_str());
+        std::string sev = m[3].matched ? lower(m[3].str()) : "";
+        if (sev == "error" || sev == "fatal error") out.kind = okError;
+        else if (sev == "warning")                  out.kind = okWarning;
+        else if (sev == "note")                     out.kind = okInfo;
+    }
+    else if (std::regex_search(raw, m, reMsvc))
+    {
+        file = m[1].str();
+        line = std::atol(m[2].str().c_str());
+        out.kind = (lower(m[3].str()) == "error") ? okError : okWarning;
+    }
+    else if (std::regex_search(raw, m, rePy))
+    {
+        file = m[1].str();
+        line = std::atol(m[2].str().c_str());
+        out.kind = okError;
+    }
+
+    std::string abs = resolveExisting(file, root);
+    if (!abs.empty())
+    {
+        out.file = abs;
+        out.line = line > 0 ? line - 1 : 0; // 0-based for SCI_GOTOLINE
+    }
+    return out;
 }

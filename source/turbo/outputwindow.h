@@ -6,6 +6,7 @@
 #define Uses_TPalette
 #include <tvision/tv.h>
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -28,15 +29,27 @@ struct OutputView : public TListViewer
 {
     std::vector<OutputLine> lines;
     bool followTail {true};
+    // Called when a line with a resolved (file, line) is activated (Enter or
+    // double-click). The app wires this to openOrFocus, so error lines jump to
+    // the source. Kept as a callback to avoid coupling this view to TurboApp.
+    std::function<void(const std::string &file, long line)> onActivate;
 
     OutputView(const TRect &bounds, TScrollBar *vScrollBar) noexcept;
 
     void addLine(OutputLine ln) noexcept;
     void clear() noexcept;
+    void activate(int idx) noexcept; // jump to lines[idx]'s file:line if it has one
 
     void draw() override;
     void handleEvent(TEvent &ev) override;
 };
+
+// Classify a raw build-output line: detect compiler/error formats
+// (gcc/clang 'file:line:col: error:', MSVC 'file(line): error', generic
+// 'file:line:', Python 'File "f", line N'), set its colour kind, and -- when the
+// referenced file exists under 'root' -- resolve an absolute file + 0-based line
+// so the line becomes clickable. Falls back to plain text.
+OutputLine parseBuildLine(const std::string &raw, const std::string &root) noexcept;
 
 // A bordered, pre-sized window docked across the bottom of the editor area --
 // laid out and themed exactly like the file-tree window (DocumentTreeWindow):

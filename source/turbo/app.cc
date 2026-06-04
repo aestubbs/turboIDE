@@ -270,6 +270,10 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
         outputWin = new OutputWindow(outputBounds(), &outputWin);
         outputWin->growMode = gfGrowLoY | gfGrowHiY | gfGrowHiX;
         outputWin->setState(sfShadow, False);
+        // Clicking / Entering an error line jumps to the source.
+        outputWin->view->onActivate = [this] (const std::string &file, long line) {
+            openOrFocus(file, line);
+        };
         deskTop->insert(outputWin);
         outputWin->hide();
     }
@@ -1445,7 +1449,7 @@ void TurboApp::runBuild()
     buildRunner = std::make_unique<CommandRunner>();
     buildRunner->onLine = [this] (std::string_view line) {
         if (outputWin)
-            outputWin->view->addLine({std::string(line), okNormal, "", -1});
+            outputWin->view->addLine(parseBuildLine(std::string(line), projectRoot));
     };
     buildRunner->onExit = [this] (int code) {
         if (outputWin)
