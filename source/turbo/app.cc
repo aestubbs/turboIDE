@@ -135,6 +135,27 @@ TDeskTop *TurboApp::initDeskTop(TRect r)
     return new TurboDeskTop(r);
 }
 
+// Dark, high-contrast palette for the menu bar and the status line. Both resolve
+// their colours through application-palette indices 2..7 (TMenuView's cpMenuView
+// and TStatusLine's cpStatusLine), so we copy the default app palette and recolor
+// just those six entries. The default grey-on-grey made disabled items (greyed
+// menu commands, inactive status hints) almost invisible; this gives them a
+// clearly readable mid-tone on a dark slate, matching the editor chrome.
+TPalette &TurboApp::getPalette() const
+{
+    static TPalette pal = [this] {
+        TPalette p = TProgram::getPalette(); // copy of the default app palette
+        p[2] = TColorAttr(TColorRGB(0xD7DCE8), TColorRGB(0x222A3D)); // normal item
+        p[3] = TColorAttr(TColorRGB(0x8A93A8), TColorRGB(0x222A3D)); // disabled item
+        p[4] = TColorAttr(TColorRGB(0xF2A65A), TColorRGB(0x222A3D)); // hotkey letter
+        p[5] = TColorAttr(TColorRGB(0xFFFFFF), TColorRGB(0x2E6FD6)); // selected item
+        p[6] = TColorAttr(TColorRGB(0xC2C9DC), TColorRGB(0x2E6FD6)); // selected disabled
+        p[7] = TColorAttr(TColorRGB(0xFFD27A), TColorRGB(0x2E6FD6)); // selected hotkey
+        return p;
+    }();
+    return pal;
+}
+
 TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     TProgInit( &TurboApp::initStatusLine,
                &TurboApp::initMenuBar,
@@ -243,14 +264,15 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     }
 }
 
-// Builds the windowListMax placeholder items for the recent-windows section of
-// the Windows menu. They start disabled with a blank label; refreshMenuChecks()
-// fills in the names of the most-recently-used editor windows at runtime.
-static TMenuItem &recentWindowsItems()
+// Builds 'count' placeholder items for the recent-windows section of the Windows
+// menu. They start disabled with a blank label; refreshWindowList() fills in the
+// names of the most-recently-used editor windows at runtime. 'count' tracks the
+// number of open editors, so there are never trailing empty rows.
+static TMenuItem &recentWindowsItems(int count)
 {
     TMenuItem *head = nullptr;
     TMenuItem *tail = nullptr;
-    for (int i = 0; i < windowListMax; ++i)
+    for (int i = 0; i < count; ++i)
     {
         auto *item = new TMenuItem(" ", cmWindowBase + i, kbNoKey, hcNoContext);
         item->disabled = True;
@@ -263,7 +285,29 @@ static TMenuItem &recentWindowsItems()
 
 TMenuBar *TurboApp::initMenuBar(TRect r)
 {
+    return makeMenuBar(r, 0); // no editors open yet, so no recent-window slots
+}
+
+TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
+{
     r.b.y = r.a.y+1;
+
+    // Build the Windows submenu separately so the recent-windows list can be
+    // sized to the number of open editors. The file-tree toggle lives here,
+    // beside the in-tree navigation.
+    TSubMenu &windows = *new TSubMenu( "~W~indows", kbAltW ) +
+        *new TMenuItem( "~Z~oom", cmZoom, kbF5, hcNoContext, "F5" ) +
+        *new TMenuItem( "~R~esize/move",cmResize, kbCtrlF5, hcNoContext, "Ctrl-F5" ) +
+        *new TMenuItem( "~N~ext", cmEditorNext, kbF6, hcNoContext, "F6" ) +
+        *new TMenuItem( "~P~revious", cmEditorPrev, kbShiftF6, hcNoContext, "Shift-F6" ) +
+        *new TMenuItem( "~C~lose", cmClose, kbAltF3, hcNoContext, "Alt-F3" ) +
+        newLine() +
+        *new TMenuItem( "Toggle File ~T~ree View", cmToggleTree, kbNoKey, hcNoContext ) +
+        *new TMenuItem( "Previous (in tree)", cmTreePrev, kbAltUp, hcNoContext, "Alt-Up" ) +
+        *new TMenuItem( "Next (in tree)", cmTreeNext, kbAltDown, hcNoContext, "Alt-Down" );
+    if (recentCount > 0)
+        windows + newLine() + recentWindowsItems(recentCount);
+
     return new TurboMenuBar( r,
         *new TSubMenu( "~F~ile", kbAltF, hcNoContext ) +
             *new TMenuItem( "~N~ew", cmNew, kbCtrlN, hcNoContext, "Ctrl-N" ) +
@@ -325,7 +369,6 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             *new TMenuItem( "Toggle Line ~N~umbers", cmToggleLineNums, kbF8, hcNoContext, "F8" ) +
             *new TMenuItem( "Toggle Line ~W~rapping", cmToggleWrap, kbF9, hcNoContext, "F9" ) +
             *new TMenuItem( "Toggle Auto ~I~ndent", cmToggleIndent, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "Toggle File ~T~ree View", cmToggleTree, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Show ~H~idden Files", cmToggleHidden, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Toggle ~A~uto-save on Focus Loss", cmToggleAutoSave, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Toggle Chan~g~e History", cmToggleChangeHistory, kbNoKey, hcNoContext ) +
@@ -341,16 +384,7 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             *new TMenuItem( "~P~ush", cmGitPush, kbNoKey, hcNoContext ) +
             newLine() +
             *new TMenuItem( "~R~efresh Status", cmGitRefresh, kbNoKey, hcNoContext ) +
-        *new TSubMenu( "~W~indows", kbAltW ) +
-            *new TMenuItem( "~Z~oom", cmZoom, kbF5, hcNoContext, "F5" ) +
-            *new TMenuItem( "~R~esize/move",cmResize, kbCtrlF5, hcNoContext, "Ctrl-F5" ) +
-            *new TMenuItem( "~N~ext", cmEditorNext, kbF6, hcNoContext, "F6" ) +
-            *new TMenuItem( "~P~revious", cmEditorPrev, kbShiftF6, hcNoContext, "Shift-F6" ) +
-            *new TMenuItem( "~C~lose", cmClose, kbAltF3, hcNoContext, "Alt-F3" ) +
-            *new TMenuItem( "Previous (in tree)", cmTreePrev, kbAltUp, hcNoContext, "Alt-Up" ) +
-            *new TMenuItem( "Next (in tree)", cmTreeNext, kbAltDown, hcNoContext, "Alt-Down" ) +
-            newLine() +
-            recentWindowsItems() +
+        windows +
         *new TSubMenu( "~H~elp", kbAltH ) +
             *new TMenuItem( "~K~eyboard shortcurs", cmHelp, kbF1, hcNoContext, "F1" ) +
             newLine() +
@@ -688,15 +722,45 @@ void TurboApp::refreshMenuChecks() noexcept
     setMenuItemCheck(m, cmToggleEdge,          edge);
 }
 
+void TurboApp::rebuildMenuBar(int recentCount)
+{
+    if (menuBar)
+    {
+        remove(menuBar);
+        TObject::destroy(menuBar);
+    }
+    TRect r = getExtent();
+    menuBar = makeMenuBar(r, recentCount);
+    insert(menuBar);
+    // The branch indicator sits on top of the full-width menu bar's right end;
+    // re-insert it so the freshly inserted menu bar doesn't cover it.
+    if (branchView)
+    {
+        remove(branchView);
+        insert(branchView);
+    }
+    menuRecentCount = recentCount;
+    refreshMenuChecks(); // the new bar starts without check marks
+}
+
 void TurboApp::refreshWindowList() noexcept
 {
+    // Size the recent-window section to the number of open editors, rebuilding
+    // the menu bar when that count changes so there are never empty rows.
+    int count = 0;
+    MRUlist.forEach([&] (EditorWindow *w) { if (w) ++count; });
+    if (count > windowListMax)
+        count = windowListMax;
+    if (count != menuRecentCount)
+        rebuildMenuBar(count);
+
     auto *bar = (TurboMenuBar *) menuBar;
     if (!bar)
         return;
     TMenu *m = bar->rootMenu();
     int i = 0;
     MRUlist.forEach([&] (EditorWindow *w) {
-        if (i >= windowListMax || !w)
+        if (i >= count || !w)
             return;
         // Entries are MRU-ordered, but each is prefixed with the window's stable
         // 1..9 number -- the same one Alt-1..9 selects -- so the menu and the
@@ -711,9 +775,6 @@ void TurboApp::refreshWindowList() noexcept
         setMenuItemLabel(m, cmWindowBase + i, label.c_str(), true);
         ++i;
     });
-    // Blank and disable the unused slots.
-    for (; i < windowListMax; ++i)
-        setMenuItemLabel(m, cmWindowBase + i, " ", false);
 }
 
 void TurboApp::focusRecentWindow(int index) noexcept

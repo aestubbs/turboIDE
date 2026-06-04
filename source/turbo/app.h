@@ -42,6 +42,10 @@ struct TurboApp : public TApplication, EditorWindowParent
     TClockView *clock;
     DocumentTreeWindow *docTree;
     TCommandSet editorCmds;
+    // Number of recent-window slots currently built into the Windows menu. The
+    // menu bar is rebuilt when this needs to change, so there are never empty
+    // placeholder rows (0 open editors = no slots).
+    int menuRecentCount {0};
     bool argsParsed {false};
     int argc;
     const char **argv;
@@ -65,7 +69,15 @@ struct TurboApp : public TApplication, EditorWindowParent
     TurboApp(int argc, const char **argv) noexcept;
     ~TurboApp();
     static TMenuBar* initMenuBar(TRect r);
+    // Build the menu bar with 'recentCount' recent-window slots in the Windows
+    // menu (initMenuBar builds with 0; rebuildMenuBar swaps in a new bar when the
+    // count changes).
+    static TMenuBar* makeMenuBar(TRect r, int recentCount);
+    void rebuildMenuBar(int recentCount);
     static TStatusLine* initStatusLine(TRect r);
+    // Dark, high-contrast palette for the menu bar and status line (indices 2..7
+    // of the application palette), so disabled items stay readable.
+    TPalette &getPalette() const override;
     // Custom desktop: a solid colour fill instead of Turbo Vision's shaded
     // (\xB0) pattern background.
     static TDeskTop* initDeskTop(TRect r);
