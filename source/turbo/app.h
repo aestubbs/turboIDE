@@ -17,6 +17,8 @@
 #include "editwindow.h"
 #include "settings.h"
 #include "frecency.h"
+#include "outputwindow.h"
+#include "commandrunner.h"
 #include "cmds.h"
 
 struct EditorWindow;
@@ -65,6 +67,13 @@ struct TurboApp : public TApplication, EditorWindowParent
 
     // Open terminal views, pumped each idle tick (see newTerminal()).
     std::vector<TerminalView *> terminals;
+
+    // Build/Run: a bordered output pane docked at the bottom of the editor area,
+    // and the command runner streaming the current build into it.
+    OutputWindow *outputWin {nullptr};
+    std::unique_ptr<CommandRunner> buildRunner;
+    std::string projectRoot;      // cwd the app was opened from (build cwd)
+    std::string lastBuildCommand; // remembered between Build invocations
 
     TurboApp(int argc, const char **argv) noexcept;
     ~TurboApp();
@@ -147,6 +156,12 @@ struct TurboApp : public TApplication, EditorWindowParent
     void addEditor(turbo::TScintilla &, const char *path);
     void showEditorList(TEvent *ev);
     void toggleTreeView();
+
+    // Build/Run output pane.
+    TRect outputBounds() const;   // target bounds of the docked pane
+    void toggleOutputView();      // show/hide it (resizes editors on the Y axis)
+    void showOutput();            // ensure it is visible
+    void runBuild();              // Phase 1: prompt for + stream a build command
 
     // Terminal windows. newTerminal() opens one running the configured shell.
     // Each TerminalView registers itself so idle() can pump its PTY output.

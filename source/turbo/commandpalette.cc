@@ -84,6 +84,9 @@ const PaletteCommand kCommands[] =
     { "Toggle Long Line Guide",        cmToggleEdge,           "",             true  },
     { "Colour Scheme...",              cmThemeSettings,        "",             false },
     { "Language Servers...",           cmLspSettings,          "",             false },
+    // Build / Run
+    { "Build...",                      cmBuild,                "F7",           false },
+    { "Toggle Output Pane",            cmToggleOutput,         "",             false },
     // Git
     { "Git: Commit...",                cmGitCommit,            "",             false },
     { "Git: Fetch",                    cmGitFetch,             "",             false },

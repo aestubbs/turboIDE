@@ -333,9 +333,14 @@ Process::~Process() { terminate(); }
 
 #endif // _WIN32
 
-// --- Portable runToEnd (uses the platform primitives above) ----------------
+// --- Portable helpers (use the platform primitives above) ------------------
 
 namespace turbo {
+
+int Process::wait()
+{
+    return waitExit();
+}
 
 int Process::runToEnd( const std::string &command,
                        const std::vector<std::string> &args,

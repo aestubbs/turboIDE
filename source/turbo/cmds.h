@@ -69,6 +69,13 @@ enum : ushort
     // Fuzzy navigation overlays.
     cmGotoAnything,
     cmCommandPalette,
+    // Build / Run system.
+    cmBuild,
+    cmRun,
+    cmTest,
+    cmStop,
+    cmBuildConfig,
+    cmToggleOutput,
     // Colour-scheme dialog (Settings menu) and the "apply the active scheme"
     // notification the dialog posts to the application on Apply/OK.
     cmThemeSettings,

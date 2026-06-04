@@ -262,6 +262,17 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
         if (deskTop->size.x - docTree->size.x < 82)
             docTree->hide();
     }
+
+    // Output pane (Build/Run): a bordered window docked across the bottom of the
+    // editor area, created hidden and shown on demand. Docked the same way the
+    // file tree is, just on the Y axis.
+    {
+        outputWin = new OutputWindow(outputBounds(), &outputWin);
+        outputWin->growMode = gfGrowLoY | gfGrowHiY | gfGrowHiX;
+        outputWin->setState(sfShadow, False);
+        deskTop->insert(outputWin);
+        outputWin->hide();
+    }
 }
 
 // Builds 'count' placeholder items for the recent-windows section of the Windows
@@ -384,6 +395,10 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             *new TMenuItem( "~P~ush", cmGitPush, kbNoKey, hcNoContext ) +
             newLine() +
             *new TMenuItem( "~R~efresh Status", cmGitRefresh, kbNoKey, hcNoContext ) +
+        *new TSubMenu( "~B~uild", kbAltB ) +
+            *new TMenuItem( "~B~uild...", cmBuild, kbF7, hcNoContext, "F7" ) +
+            newLine() +
+            *new TMenuItem( "Show/Hide ~O~utput", cmToggleOutput, kbNoKey, hcNoContext ) +
         windows +
         *new TSubMenu( "~H~elp", kbAltH ) +
             *new TMenuItem( "~K~eyboard shortcuts", cmHelp, kbF1, hcNoContext, "F1" ) +
@@ -447,9 +462,12 @@ void TurboApp::shutDown()
         git->shutdown();
     if (watcher)
         watcher->stop();
+    if (buildRunner)
+        buildRunner->stop();
     docTree = nullptr;
     clock = nullptr;
     branchView = nullptr;
+    outputWin = nullptr;
     TApplication::shutDown();
 }
 
@@ -468,6 +486,10 @@ void TurboApp::idle()
     // and repaint the affected views (the reader threads wake the loop for us).
     for (auto *t : terminals)
         t->pump();
+    // Stream build-command output into the output pane (same reader-thread +
+    // wakeUp pattern as the terminals).
+    if (buildRunner)
+        buildRunner->pump();
     // Keep menu check marks in sync with per-editor toggle state and the active
     // editor. Cheap: only rewrites a label when its checked state changes.
     refreshMenuChecks();
@@ -496,6 +518,8 @@ void TurboApp::handleEvent(TEvent &event)
             case cmOpen: fileOpen(); break;
             case cmGotoAnything: gotoAnything(); break;
             case cmCommandPalette: commandPalette(); break;
+            case cmBuild: runBuild(); break;
+            case cmToggleOutput: toggleOutputView(); break;
             case cmEditorNext:
             case cmEditorPrev:
                 showEditorList(&event);
@@ -657,6 +681,7 @@ void TurboApp::scanWorkspace()
     char *cwd = ::getcwd(nullptr, 0);
     if (cwd)
     {
+        projectRoot = cwd; // build/run commands run from here
         docTree->tree->setShowHidden(settings.showHidden); // before the first scan
         docTree->tree->scanDirectory(cwd);
         if (lsp)
@@ -1232,6 +1257,9 @@ TRect TurboApp::newEditorBounds() const
             else
                 r.a.x = min(t.b.x, r.b.x - EditorWindow::minSize.x);
         }
+        // Leave room for the docked output pane at the bottom.
+        if (outputWin && (outputWin->state & sfVisible))
+            r.b.y = min(r.b.y, outputBounds().a.y);
         return r;
     }
 }
@@ -1324,10 +1352,111 @@ void TurboApp::toggleTreeView()
         });
         docTree->show();
     }
+    // The output pane spans the editor area, so its width follows the tree.
+    if (outputWin && (outputWin->state & sfVisible))
+    {
+        TRect ob = outputBounds();
+        outputWin->locate(ob);
+    }
     MRUlist.forEach([&] (auto *win) {
         win->setState(sfExposed, True);
     });
     deskTop->redraw();
+}
+
+TRect TurboApp::outputBounds() const
+{
+    TRect ext = deskTop->getExtent();
+    int totalH = ext.b.y - ext.a.y;
+    int h = max(4, totalH / 5);    // ~1/5 of the editor area, at least a few rows
+    TRect r = ext;
+    r.a.y = ext.b.y - h;           // bottom slice
+    // Span only the editor area: stop at the file tree's edge when it is shown.
+    if (docTree && (docTree->state & sfVisible))
+    {
+        TRect t = docTree->getBounds();
+        if (t.b.x >= ext.b.x)      // tree docked on the right
+            r.b.x = t.a.x;
+        else if (t.a.x <= ext.a.x) // tree docked on the left
+            r.a.x = t.b.x;
+    }
+    return r;
+}
+
+void TurboApp::showOutput()
+{
+    if (outputWin && !(outputWin->state & sfVisible))
+        toggleOutputView();
+}
+
+void TurboApp::toggleOutputView()
+{
+    if (!outputWin)
+        return;
+    // Suppress per-editor redraws while we relocate them; draw once at the end.
+    MRUlist.forEach([&] (auto *win) { win->setState(sfExposed, False); });
+    if (outputWin->state & sfVisible)
+    {
+        TRect orc = outputWin->getBounds();
+        int paneH = orc.b.y - orc.a.y;
+        outputWin->hide();
+        MRUlist.forEach([&] (auto *win) {
+            TRect r = win->getBounds();
+            if (r.b.y <= orc.a.y)  // editor sat above the pane: grow back down
+                r.b.y += paneH;
+            win->locate(r);
+        });
+    }
+    else
+    {
+        TRect orc = outputBounds();
+        outputWin->locate(orc);
+        MRUlist.forEach([&] (auto *win) {
+            TRect r = win->getBounds();
+            if (r.b.y > orc.a.y)   // shrink editors to sit above the pane
+                r.b.y = orc.a.y;
+            win->locate(r);
+        });
+        outputWin->show();
+    }
+    MRUlist.forEach([&] (auto *win) { win->setState(sfExposed, True); });
+    deskTop->redraw();
+}
+
+void TurboApp::runBuild()
+{
+    char cmd[1024] = "";
+    strnzcpy(cmd, lastBuildCommand.c_str(), sizeof cmd);
+    if (inputBox("Build", "Build ~c~ommand:", cmd, sizeof(cmd) - 1) != cmOK)
+        return;
+    std::string command = trimmed(cmd);
+    if (command.empty())
+        return;
+    lastBuildCommand = command;
+
+    showOutput();
+    if (!outputWin)
+        return;
+    outputWin->view->clear();
+    outputWin->view->addLine({"$ " + command, okInfo, "", -1});
+
+    if (buildRunner)
+        buildRunner->stop();
+    buildRunner = std::make_unique<CommandRunner>();
+    buildRunner->onLine = [this] (std::string_view line) {
+        if (outputWin)
+            outputWin->view->addLine({std::string(line), okNormal, "", -1});
+    };
+    buildRunner->onExit = [this] (int code) {
+        if (outputWin)
+            outputWin->view->addLine(
+                { code == 0 ? std::string("[build finished]")
+                            : ("[build exited with code " + std::to_string(code) + "]"),
+                  okInfo, "", -1 });
+    };
+    std::string cwd = projectRoot.empty() ? std::string(".") : projectRoot;
+    if (!buildRunner->start(command, cwd))
+        outputWin->view->addLine({"Failed to start build command.", okError, "", -1});
 }
 
 void TurboApp::newTerminal()

@@ -40,6 +40,10 @@ public:
     void closeStdin();
     void terminate();      // Ask the child to exit, then force-kill if needed.
     bool running();
+    // Reap the child and return its exit code (blocking). Safe to call once
+    // readStdout() has returned EOF (this is what runToEnd does internally).
+    // Returns -1 if the process was never started or has already been reaped.
+    int wait();
 
     // Convenience for short-lived commands: spawn, read stdout to EOF into
     // 'output', wait for exit, and return the exit code (or -1 if the process
