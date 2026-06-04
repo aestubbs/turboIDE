@@ -143,6 +143,16 @@ OutputWindow::OutputWindow(const TRect &bounds, OutputWindow **aptr) noexcept :
     insert(view);
 }
 
+void OutputWindow::sizeLimits(TPoint &min, TPoint &max) noexcept
+{
+    TWindow::sizeLimits(min, max);
+    // Allow a short docked pane. The default min height (~6 rows) makes locate()
+    // grow the pane's bottom edge downward past the desktop on smaller
+    // terminals, pushing the bottom border off-screen under the status line.
+    min.y = 3;
+    min.x = 10;
+}
+
 TColorAttr OutputWindow::mapColor(uchar index) noexcept
 {
     // Resolve chrome through the shared window scheme, like DocumentTreeWindow,

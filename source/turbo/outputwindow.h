@@ -63,6 +63,7 @@ struct OutputWindow : public TWindow
     OutputWindow(const TRect &bounds, OutputWindow **ptr) noexcept;
 
     TColorAttr mapColor(uchar index) noexcept override;
+    void sizeLimits(TPoint &min, TPoint &max) noexcept override;
     void close() override;
     void shutDown() override;
 };
