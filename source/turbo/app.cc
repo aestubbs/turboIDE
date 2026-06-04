@@ -38,6 +38,7 @@
 #include "theme.h"
 #include "commandpalette.h"
 #include "gotoanything.h"
+#include "builddialog.h"
 #include <turbo/fileeditor.h>
 #include <turbo/tpath.h>
 #include <filesystem>
@@ -400,8 +401,9 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             newLine() +
             *new TMenuItem( "~R~efresh Status", cmGitRefresh, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~B~uild", kbAltB ) +
-            *new TMenuItem( "~B~uild...", cmBuild, kbF7, hcNoContext, "F7" ) +
+            *new TMenuItem( "~B~uild", cmBuild, kbF7, hcNoContext, "F7" ) +
             newLine() +
+            *new TMenuItem( "~C~onfigure...", cmBuildConfig, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Show/Hide ~O~utput", cmToggleOutput, kbNoKey, hcNoContext ) +
         windows +
         *new TSubMenu( "~H~elp", kbAltH ) +
@@ -523,6 +525,7 @@ void TurboApp::handleEvent(TEvent &event)
             case cmGotoAnything: gotoAnything(); break;
             case cmCommandPalette: commandPalette(); break;
             case cmBuild: runBuild(); break;
+            case cmBuildConfig: editBuildConfig(); break;
             case cmToggleOutput: toggleOutputView(); break;
             case cmEditorNext:
             case cmEditorPrev:
@@ -686,6 +689,7 @@ void TurboApp::scanWorkspace()
     if (cwd)
     {
         projectRoot = cwd; // build/run commands run from here
+        buildConfig.load(projectRoot); // .turbo/config.json (no-op if absent)
         docTree->tree->setShowHidden(settings.showHidden); // before the first scan
         docTree->tree->scanDirectory(cwd);
         if (lsp)
@@ -1427,22 +1431,13 @@ void TurboApp::toggleOutputView()
     deskTop->redraw();
 }
 
-void TurboApp::runBuild()
+void TurboApp::runInOutput(const std::string &label, const std::string &command)
 {
-    char cmd[1024] = "";
-    strnzcpy(cmd, lastBuildCommand.c_str(), sizeof cmd);
-    if (inputBox("Build", "Build ~c~ommand:", cmd, sizeof(cmd) - 1) != cmOK)
-        return;
-    std::string command = trimmed(cmd);
-    if (command.empty())
-        return;
-    lastBuildCommand = command;
-
     showOutput();
     if (!outputWin)
         return;
     outputWin->view->clear();
-    outputWin->view->addLine({"$ " + command, okInfo, "", -1});
+    outputWin->view->addLine({"$ " + label, okInfo, "", -1});
 
     if (buildRunner)
         buildRunner->stop();
@@ -1454,13 +1449,38 @@ void TurboApp::runBuild()
     buildRunner->onExit = [this] (int code) {
         if (outputWin)
             outputWin->view->addLine(
-                { code == 0 ? std::string("[build finished]")
-                            : ("[build exited with code " + std::to_string(code) + "]"),
+                { code == 0 ? std::string("[finished]")
+                            : ("[exited with code " + std::to_string(code) + "]"),
                   okInfo, "", -1 });
     };
     std::string cwd = projectRoot.empty() ? std::string(".") : projectRoot;
     if (!buildRunner->start(command, cwd))
-        outputWin->view->addLine({"Failed to start build command.", okError, "", -1});
+        outputWin->view->addLine({"Failed to start command.", okError, "", -1});
+}
+
+void TurboApp::runBuild()
+{
+    std::string command = buildConfig.build;
+    if (command.empty())
+    {
+        // No build command configured yet: prompt for a one-off (configure a
+        // default in Build > Configure to skip this).
+        char cmd[1024] = "";
+        strnzcpy(cmd, lastBuildCommand.c_str(), sizeof cmd);
+        if (inputBox("Build", "Build ~c~ommand:", cmd, sizeof(cmd) - 1) != cmOK)
+            return;
+        command = trimmed(cmd);
+        if (command.empty())
+            return;
+        lastBuildCommand = command;
+    }
+    runInOutput(command, command);
+}
+
+void TurboApp::editBuildConfig()
+{
+    if (executeBuildDialog(buildConfig))
+        buildConfig.save(projectRoot);
 }
 
 void TurboApp::newTerminal()

@@ -19,6 +19,7 @@
 #include "frecency.h"
 #include "outputwindow.h"
 #include "commandrunner.h"
+#include "buildconfig.h"
 #include "cmds.h"
 
 struct EditorWindow;
@@ -74,6 +75,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     std::unique_ptr<CommandRunner> buildRunner;
     std::string projectRoot;      // cwd the app was opened from (build cwd)
     std::string lastBuildCommand; // remembered between Build invocations
+    BuildConfig buildConfig;      // .turbo/config.json (build/test/run + extras)
 
     TurboApp(int argc, const char **argv) noexcept;
     ~TurboApp();
@@ -161,7 +163,11 @@ struct TurboApp : public TApplication, EditorWindowParent
     TRect outputBounds() const;   // target bounds of the docked pane
     void toggleOutputView();      // show/hide it (resizes editors on the Y axis)
     void showOutput();            // ensure it is visible
-    void runBuild();              // Phase 1: prompt for + stream a build command
+    void runBuild();              // run the configured build (or prompt for one)
+    void editBuildConfig();       // open the build-configuration dialog
+    // Stream 'command' (a shell command) into the output pane, with 'label'
+    // shown as the echoed header line.
+    void runInOutput(const std::string &label, const std::string &command);
 
     // Terminal windows. newTerminal() opens one running the configured shell.
     // Each TerminalView registers itself so idle() can pump its PTY output.

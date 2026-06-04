@@ -203,11 +203,11 @@ static void scanInto(Node *parent, TNode **list, const std::string &dirPath,
         const auto &entry = *it;
         std::string name = entry.path().filename().string();
         // Hidden entries (dotfiles and dot-directories such as .git) are skipped
-        // unless the user has opted to show them. The .git directory in
-        // particular stays hidden either way (it is noise, not source).
+        // unless the user has opted to show them. The .git directory and Turbo's
+        // own .turbo project folder stay hidden either way (noise, not source).
         if (name.empty())
             continue;
-        if (name[0] == '.' && (!showHidden || name == ".git"))
+        if (name[0] == '.' && (!showHidden || name == ".git" || name == ".turbo"))
             continue;
         std::error_code ec2;
         bool isDir = entry.is_directory(ec2);
@@ -297,8 +297,8 @@ void DocumentTreeView::addNode(std::string_view path, bool isDir) noexcept
     TStringView base = TPath::basename(path);
     if (base.empty())
         return;
-    // Honour the show-hidden setting (mirrors scanInto); .git stays hidden.
-    if (base[0] == '.' && (!showHidden || base == ".git"))
+    // Honour the show-hidden setting (mirrors scanInto); .git and .turbo stay hidden.
+    if (base[0] == '.' && (!showHidden || base == ".git" || base == ".turbo"))
         return;
     // Locate the parent list: the root list for a top-level entry, else the
     // parent directory's child list (only if that directory is in the tree).

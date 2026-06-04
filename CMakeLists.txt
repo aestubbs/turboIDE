@@ -188,16 +188,20 @@ if (MAGIC)
     target_compile_definitions(${TURBO}-core PRIVATE HAVE_MAGIC)
 endif()
 
+# nlohmann/json is used by the project build-config storage (and the LSP
+# client), so make its single header available to turbo-core and everything that
+# links it -- regardless of whether LSP is enabled.
+target_include_directories(${TURBO}-core PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/deps/json/single_include>"
+)
+
 # Optional: Language Server Protocol support.
 option(TURBO_ENABLE_LSP "Enable Language Server Protocol support" ON)
 if (TURBO_ENABLE_LSP)
     find_package(Threads REQUIRED)
-    # PUBLIC so the 'turbo' app target inherits the JSON include path and the
-    # feature macro (its LSP glue includes the turbo-core LSP headers).
+    # PUBLIC so the 'turbo' app target inherits the feature macro (its LSP glue
+    # includes the turbo-core LSP headers).
     target_link_libraries(${TURBO}-core PUBLIC Threads::Threads)
-    target_include_directories(${TURBO}-core PUBLIC
-        "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/deps/json/single_include>"
-    )
     target_compile_definitions(${TURBO}-core PUBLIC TURBO_ENABLE_LSP)
 endif()
 
@@ -208,6 +212,11 @@ if (TURBO_BUILD_APP)
     # The terminal window (source/turbo/terminal.cc) drives libvterm; fold its
     # object files into the app and expose its public header.
     add_executable(${TURBO} ${TURBO_SRC} $<TARGET_OBJECTS:vterm>)
+    # buildconfig.cc pulls in the large nlohmann/json header; keep it out of the
+    # unity batch so it compiles once on its own instead of slowing a whole batch.
+    set_source_files_properties(
+        "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}/buildconfig.cc"
+        PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
     target_compile_features(${TURBO} PRIVATE cxx_std_17)
     turbo_set_warnings(${TURBO})
     target_link_libraries(${TURBO} PRIVATE

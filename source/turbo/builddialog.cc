@@ -1,0 +1,276 @@
+#define Uses_TDialog
+#define Uses_TInputLine
+#define Uses_TLabel
+#define Uses_TButton
+#define Uses_TStaticText
+#define Uses_TRadioButtons
+#define Uses_TSItem
+#define Uses_TListViewer
+#define Uses_TScrollBar
+#define Uses_TProgram
+#define Uses_TDeskTop
+#define Uses_TEvent
+#define Uses_TKeys
+#include <tvision/tv.h>
+
+#include "builddialog.h"
+#include "buildconfig.h"
+
+#include <cstring>
+#include <string>
+#include <vector>
+
+namespace {
+
+constexpr int kCmdMax = 512;
+
+// Dialog-local commands for the additional-commands list buttons. Handled by
+// BuildDialog while it is modal, so they don't need to be globally unique.
+enum { cmAddExtra = 1390, cmEditExtra, cmRemoveExtra };
+
+std::string trim(const char *s) noexcept
+{
+    std::string v = s ? s : "";
+    size_t a = v.find_first_not_of(" \t");
+    if (a == std::string::npos)
+        return {};
+    size_t b = v.find_last_not_of(" \t");
+    return v.substr(a, b - a + 1);
+}
+
+void seedInput(TInputLine *line, const std::string &val, int max) noexcept
+{
+    strncpy(line->data, val.c_str(), max - 1);
+    line->data[max - 1] = '\0';
+}
+
+// A plain TInputLine in this fork swallows Tab and Enter (its default key case
+// turns them into spaces) before the dialog can use them, so neither focus
+// movement nor "Enter = OK" works in a dialog with input fields. Route Tab to
+// the focus chain and Enter to the dialog's default (OK) action.
+struct FieldInputLine : public TInputLine
+{
+    FieldInputLine(const TRect &b, int maxLen) noexcept : TInputLine(b, maxLen) {}
+
+    void handleEvent(TEvent &ev) override
+    {
+        if (ev.what == evKeyDown)
+        {
+            ushort key = ev.keyDown.keyCode;
+            if (key == kbTab || key == kbShiftTab)
+            {
+                if (owner)
+                    owner->selectNext(Boolean(key == kbShiftTab));
+                clearEvent(ev);
+                return;
+            }
+            if (key == kbEnter)
+            {
+                if (owner)
+                    message(owner, evCommand, cmOK, nullptr);
+                clearEvent(ev);
+                return;
+            }
+        }
+        TInputLine::handleEvent(ev);
+    }
+};
+
+// Small modal to add/edit one {name, command} entry.
+bool editCommandDialog(const char *title, BuildCommand &bc) noexcept
+{
+    auto *d = new TDialog(TRect(0, 0, 60, 9), title);
+    d->options |= ofCentered;
+
+    auto *nameLine = new FieldInputLine(TRect(13, 2, 57, 3), 64);
+    d->insert(nameLine);
+    d->insert(new TLabel(TRect(2, 2, 13, 3), "~N~ame:", nameLine));
+    auto *cmdLine = new FieldInputLine(TRect(13, 4, 57, 5), kCmdMax);
+    d->insert(cmdLine);
+    d->insert(new TLabel(TRect(2, 4, 13, 5), "~C~ommand:", cmdLine));
+
+    d->insert(new TButton(TRect(34, 6, 44, 8), "O~K~", cmOK, bfDefault));
+    d->insert(new TButton(TRect(45, 6, 55, 8), "Cancel", cmCancel, bfNormal));
+
+    seedInput(nameLine, bc.name, 64);
+    seedInput(cmdLine, bc.command, kCmdMax);
+    d->selectNext(False);
+
+    bool ok = (TProgram::deskTop->execView(d) == cmOK);
+    if (ok)
+    {
+        bc.name = trim(nameLine->data);
+        bc.command = trim(cmdLine->data);
+    }
+    TObject::destroy(d);
+    return ok && !bc.command.empty();
+}
+
+// Scrolling list of the additional commands (name + command).
+struct CmdListView : public TListViewer
+{
+    std::vector<BuildCommand> *cmds;
+
+    CmdListView(const TRect &b, TScrollBar *vsb, std::vector<BuildCommand> *c) noexcept :
+        TListViewer(b, 1, nullptr, vsb), cmds(c)
+    {
+        setRange(c ? (short) c->size() : 0);
+    }
+
+    void getText(char *dst, short item, short maxLen) override
+    {
+        if (cmds && item >= 0 && item < (short) cmds->size())
+        {
+            const BuildCommand &bc = (*cmds)[item];
+            std::string s = bc.name.empty() ? bc.command : (bc.name + ":  " + bc.command);
+            strncpy(dst, s.c_str(), maxLen);
+            dst[maxLen] = '\0';
+        }
+        else if (dst)
+            dst[0] = '\0';
+    }
+
+    void refresh() noexcept
+    {
+        setRange(cmds ? (short) cmds->size() : 0);
+        drawView();
+    }
+};
+
+struct BuildDialog : public TDialog
+{
+    TInputLine *buildLine, *testLine, *runLine, *artifactLine;
+    TRadioButtons *modeBox;
+    CmdListView *list;
+    std::vector<BuildCommand> extra; // working copy
+
+    BuildDialog(const BuildConfig &cfg) noexcept;
+    void handleEvent(TEvent &ev) override;
+    void writeBack(BuildConfig &cfg) const noexcept;
+};
+
+BuildDialog::BuildDialog(const BuildConfig &cfg) noexcept :
+    TWindowInit(&TDialog::initFrame),
+    TDialog(TRect(0, 0, 72, 23), "Build Configuration"),
+    extra(cfg.extra)
+{
+    options |= ofCentered;
+
+    insert(new TStaticText(TRect(2, 2, 70, 3),
+        "Commands run from the project root. Saved to .turbo/config.json."));
+
+    buildLine = new FieldInputLine(TRect(13, 4, 69, 5), kCmdMax);
+    insert(buildLine);
+    insert(new TLabel(TRect(2, 4, 13, 5), "~B~uild:", buildLine));
+    testLine = new FieldInputLine(TRect(13, 5, 69, 6), kCmdMax);
+    insert(testLine);
+    insert(new TLabel(TRect(2, 5, 13, 6), "~T~est:", testLine));
+    runLine = new FieldInputLine(TRect(13, 6, 69, 7), kCmdMax);
+    insert(runLine);
+    insert(new TLabel(TRect(2, 6, 13, 7), "~R~un:", runLine));
+    artifactLine = new FieldInputLine(TRect(13, 7, 69, 8), kCmdMax);
+    insert(artifactLine);
+    insert(new TLabel(TRect(2, 7, 13, 8), "Art~i~fact:", artifactLine));
+
+    modeBox = new TRadioButtons(TRect(13, 9, 69, 12),
+        new TSItem("A~u~to (build if artifact is stale)",
+        new TSItem("Always ~b~uild first",
+        new TSItem("R~u~n only", nullptr))));
+    insert(modeBox);
+    insert(new TLabel(TRect(2, 9, 13, 10), "On Run:", modeBox));
+
+    insert(new TStaticText(TRect(2, 12, 70, 13),
+        "Additional commands (started in the background with Run):"));
+    auto *vsb = new TScrollBar(TRect(51, 13, 52, 19));
+    insert(vsb);
+    list = new CmdListView(TRect(2, 13, 51, 19), vsb, &extra);
+    insert(list);
+    insert(new TButton(TRect(53, 13, 69, 15), "~A~dd...", cmAddExtra, bfNormal));
+    insert(new TButton(TRect(53, 15, 69, 17), "~E~dit...", cmEditExtra, bfNormal));
+    insert(new TButton(TRect(53, 17, 69, 19), "Re~m~ove", cmRemoveExtra, bfNormal));
+
+    insert(new TButton(TRect(48, 20, 58, 22), "O~K~", cmOK, bfDefault));
+    insert(new TButton(TRect(59, 20, 69, 22), "Cancel", cmCancel, bfNormal));
+
+    // Seed from the current config.
+    seedInput(buildLine, cfg.build, kCmdMax);
+    seedInput(testLine, cfg.test, kCmdMax);
+    seedInput(runLine, cfg.run, kCmdMax);
+    seedInput(artifactLine, cfg.artifact, kCmdMax);
+    ushort mode = (cfg.runMode == "build") ? 1 : (cfg.runMode == "run") ? 2 : 0;
+    modeBox->setData(&mode);
+
+    selectNext(False);
+}
+
+void BuildDialog::handleEvent(TEvent &ev)
+{
+    if (ev.what == evCommand)
+    {
+        switch (ev.message.command)
+        {
+            case cmAddExtra:
+            {
+                BuildCommand bc;
+                if (editCommandDialog("Add Command", bc))
+                {
+                    extra.push_back(bc);
+                    list->refresh();
+                }
+                clearEvent(ev);
+                return;
+            }
+            case cmEditExtra:
+            {
+                int i = list->focused;
+                if (i >= 0 && i < (int) extra.size())
+                {
+                    BuildCommand bc = extra[i];
+                    if (editCommandDialog("Edit Command", bc))
+                    {
+                        extra[i] = bc;
+                        list->refresh();
+                    }
+                }
+                clearEvent(ev);
+                return;
+            }
+            case cmRemoveExtra:
+            {
+                int i = list->focused;
+                if (i >= 0 && i < (int) extra.size())
+                {
+                    extra.erase(extra.begin() + i);
+                    list->refresh();
+                }
+                clearEvent(ev);
+                return;
+            }
+        }
+    }
+    TDialog::handleEvent(ev);
+}
+
+void BuildDialog::writeBack(BuildConfig &cfg) const noexcept
+{
+    cfg.build = trim(buildLine->data);
+    cfg.test = trim(testLine->data);
+    cfg.run = trim(runLine->data);
+    cfg.artifact = trim(artifactLine->data);
+    ushort mode = 0;
+    modeBox->getData(&mode);
+    cfg.runMode = (mode == 1) ? "build" : (mode == 2) ? "run" : "auto";
+    cfg.extra = extra;
+}
+
+} // namespace
+
+bool executeBuildDialog(BuildConfig &config) noexcept
+{
+    auto *d = new BuildDialog(config);
+    bool ok = (TProgram::deskTop->execView(d) == cmOK);
+    if (ok)
+        d->writeBack(config);
+    TObject::destroy(d);
+    return ok;
+}
