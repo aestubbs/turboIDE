@@ -1,4 +1,5 @@
 #define Uses_TDialog
+#define Uses_TKeys
 #define Uses_TInputLine
 #define Uses_TLabel
 #define Uses_TButton

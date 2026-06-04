@@ -2,6 +2,10 @@
 #define Uses_TProgram
 #define Uses_TDeskTop
 #define Uses_TObject
+// Pull in <tvision/editors.h> for the cmFind/cmReplace/cmSearchAgain command
+// constants referenced in the table below, so this file does not depend on a
+// unity-build batch-mate having included editors.h first.
+#define __INC_EDITORS_H
 #include <tvision/tv.h>
 
 #include "commandpalette.h"
