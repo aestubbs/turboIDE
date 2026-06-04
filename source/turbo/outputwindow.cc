@@ -133,7 +133,7 @@ OutputWindow::OutputWindow(const TRect &bounds, OutputWindow **aptr) noexcept :
     TWindow(bounds, "Output", wnNoNumber),
     ptr(aptr)
 {
-    flags &= ~(wfZoom | wfGrow); // a docked pane: only the close box
+    flags = wfClose; // docked pane: no move/grow/zoom; top border resizes it
     options |= ofFirstClick;
     auto *vsb = standardScrollBar(sbVertical | sbHandleKeyboard);
     TRect inner = getExtent();
@@ -141,6 +141,26 @@ OutputWindow::OutputWindow(const TRect &bounds, OutputWindow **aptr) noexcept :
     view = new OutputView(inner, vsb);
     view->growMode = gfGrowHiX | gfGrowHiY;
     insert(view);
+}
+
+void OutputWindow::handleEvent(TEvent &ev)
+{
+    if (ev.what == evMouseDown)
+    {
+        TPoint m = makeLocal(ev.mouse.where);
+        // The top border (minus the close box on the left) is a vertical resize
+        // handle: drag it up/down to grow/shrink the pane. onResizeTo re-lays
+        // out the editors above on each step.
+        if (m.y == 0 && m.x >= 5 && m.x < size.x - 1 && onResizeTo)
+        {
+            do {
+                onResizeTo(ev.mouse.where.y);
+            } while (mouseEvent(ev, evMouseMove | evMouseAuto));
+            clearEvent(ev);
+            return;
+        }
+    }
+    TWindow::handleEvent(ev);
 }
 
 void OutputWindow::sizeLimits(TPoint &min, TPoint &max) noexcept

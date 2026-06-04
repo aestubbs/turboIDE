@@ -59,11 +59,16 @@ struct OutputWindow : public TWindow
 {
     OutputView *view {nullptr};
     OutputWindow **ptr;
+    // Invoked while the user drags the pane's top border, with the dragged
+    // border's screen row. The app turns that into a new pane height and
+    // re-lays out the editors above. Lets the docked pane stay anchored.
+    std::function<void(int borderScreenY)> onResizeTo;
 
     OutputWindow(const TRect &bounds, OutputWindow **ptr) noexcept;
 
     TColorAttr mapColor(uchar index) noexcept override;
     void sizeLimits(TPoint &min, TPoint &max) noexcept override;
+    void handleEvent(TEvent &ev) override;
     void close() override;
     void shutDown() override;
 };

@@ -276,6 +276,11 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
         outputWin->view->onActivate = [this] (const std::string &file, long line) {
             openOrFocus(file, line);
         };
+        // Dragging the pane's top border resizes it. The bottom is anchored to
+        // the desktop bottom, so the height is (desktop bottom - dragged row).
+        outputWin->onResizeTo = [this] (int borderScreenY) {
+            setOutputPaneHeight(deskTop->getBounds().b.y - borderScreenY);
+        };
         deskTop->insert(outputWin);
         outputWin->hide();
     }
@@ -1396,7 +1401,12 @@ TRect TurboApp::outputBounds() const
 {
     TRect ext = deskTop->getExtent();
     int totalH = ext.b.y - ext.a.y;
-    int h = max(4, totalH / 5);    // ~1/5 of the editor area, at least a few rows
+    // User-set height once dragged, else ~1/5 of the editor area. Keep the pane
+    // at least 3 rows and leave at least an editor's minimum height (minWinSize.y
+    // = 6) above, so the editor can actually shrink that far -- otherwise locate()
+    // clamps it to its minimum and it overlaps (hides) the pane's top border.
+    int h = (outputPaneHeight > 0) ? outputPaneHeight : max(4, totalH / 5);
+    h = max(3, min(h, totalH - 6));
     TRect r = ext;
     r.a.y = ext.b.y - h;           // bottom slice
     // Span only the editor area: stop at the file tree's edge when it is shown.
@@ -1451,6 +1461,40 @@ void TurboApp::toggleOutputView()
     deskTop->redraw();
 }
 
+void TurboApp::setOutputPaneHeight(int h)
+{
+    TRect ext = deskTop->getExtent();
+    int totalH = ext.b.y - ext.a.y;
+    h = max(3, min(h, totalH - 6)); // leave an editor's min height (6) above
+    if (h == outputPaneHeight)
+        return;
+    if (!outputWin || !(outputWin->state & sfVisible))
+    {
+        outputPaneHeight = h; // remembered for the next time it is shown
+        return;
+    }
+    int oldTop = outputWin->getBounds().a.y;
+    outputPaneHeight = h;
+    TRect nb = outputBounds();
+    int newTop = nb.a.y;
+    if (newTop == oldTop)
+        return;
+    // Move each editor's bottom that was sitting on the pane to the new pane top
+    // (shrinking the pane grows them, growing the pane shrinks them).
+    MRUlist.forEach([&] (auto *win) { win->setState(sfExposed, False); });
+    MRUlist.forEach([&] (auto *win) {
+        TRect r = win->getBounds();
+        if (r.b.y >= oldTop)
+        {
+            r.b.y = newTop;
+            win->locate(r);
+        }
+    });
+    outputWin->locate(nb);
+    MRUlist.forEach([&] (auto *win) { win->setState(sfExposed, True); });
+    deskTop->redraw();
+}
+
 void TurboApp::runInOutput(const std::string &label, const std::string &command,
                            std::function<void(int)> onDone)
 {
@@ -1488,7 +1532,7 @@ void TurboApp::runBuild()
     {
         // No build command configured yet: prompt for a one-off (configure a
         // default in Build > Configure to skip this).
-        char cmd[1024] = "";
+        char cmd[256] = ""; // inputBox's length limit is a uchar (<= 255)
         strnzcpy(cmd, lastBuildCommand.c_str(), sizeof cmd);
         if (inputBox("Build", "Build ~c~ommand:", cmd, sizeof(cmd) - 1) != cmOK)
             return;

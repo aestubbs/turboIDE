@@ -83,6 +83,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     // Build/Run: a bordered output pane docked at the bottom of the editor area,
     // and the command runner streaming the current build into it.
     OutputWindow *outputWin {nullptr};
+    int outputPaneHeight {0}; // user-set pane height in rows (0 = ~1/5 default)
     std::unique_ptr<CommandRunner> buildRunner;
     std::string projectRoot;      // cwd the app was opened from (build cwd)
     std::string lastBuildCommand; // remembered between Build invocations
@@ -178,6 +179,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     // Build/Run output pane.
     TRect outputBounds() const;   // target bounds of the docked pane
     void toggleOutputView();      // show/hide it (resizes editors on the Y axis)
+    void setOutputPaneHeight(int h); // resize the pane (from a top-border drag)
     void showOutput();            // ensure it is visible
     void runBuild();              // run the configured build (or prompt for one)
     void runTest();               // run the configured test command
