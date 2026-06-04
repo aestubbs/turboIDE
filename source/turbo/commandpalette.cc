@@ -62,7 +62,7 @@ const PaletteCommand kCommands[] =
     { "Select All Occurrences",        cmSelectAllOccurrences, "",             true  },
     { "Add Caret Up",                  cmAddCaretUp,           "Ctrl-Alt-Up",  true  },
     { "Add Caret Down",                cmAddCaretDown,         "Ctrl-Alt-Down",true  },
-    { "Split Selection into Lines",    cmSplitSelectionLines,  "Ctrl-Shift-L", true  },
+    { "Split Selection into Lines",    cmSplitSelectionLines,  "",             true  },
     { "Skip Occurrence",               cmSkipOccurrence,       "",             true  },
     { "Undo Last Selection",           cmUndoSelection,        "Ctrl-U",       true  },
     // Code

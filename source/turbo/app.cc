@@ -311,7 +311,7 @@ TMenuBar *TurboApp::initMenuBar(TRect r)
             newLine() +
             *new TMenuItem( "Add Caret ~U~p", cmAddCaretUp, kbNoKey, hcNoContext, "Ctrl-Alt-Up" ) +
             *new TMenuItem( "Add Caret ~D~own", cmAddCaretDown, kbNoKey, hcNoContext, "Ctrl-Alt-Down" ) +
-            *new TMenuItem( "Spl~i~t into Lines", cmSplitSelectionLines, kbNoKey, hcNoContext, "Ctrl-Shift-L" ) +
+            *new TMenuItem( "Spl~i~t into Lines", cmSplitSelectionLines, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~C~ode", kbAltC ) +
             *new TMenuItem( "Code ~F~olding", cmToggleFolding, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~T~oggle Fold at Cursor", cmFoldAtCursor, kbNoKey, hcNoContext ) +
@@ -392,11 +392,13 @@ TStatusLine *TurboApp::initStatusLine( TRect r )
             // the terminal can't distinguish it from Ctrl-P.
             *new TStatusItem( 0, kbCtrlP, cmGotoAnything ) +
             *new TStatusItem( 0, TKey('P', kbCtrlShift), cmCommandPalette ) +
-            // Multi-cursor accelerators (only fire when an editor is focused, as
-            // these commands are disabled otherwise). Convert before the editor
-            // sees the key, like the navigation overlays above.
-            *new TStatusItem( 0, kbCtrlU, cmUndoSelection ) +
-            *new TStatusItem( 0, TKey('L', kbCtrlShift), cmSplitSelectionLines )
+            // Undo-selection on Ctrl+U (only fires with an editor focused, as the
+            // command is disabled otherwise; converted before the editor sees the
+            // key, like the navigation overlays above). Split-into-lines is NOT
+            // bound to a key: in a terminal Ctrl+Shift+L is indistinguishable from
+            // Ctrl+L (Cut current line), so binding it would shadow that. Reach
+            // Split-into-lines from the Selection menu or the Command Palette.
+            *new TStatusItem( 0, kbCtrlU, cmUndoSelection )
             );
 }
 
