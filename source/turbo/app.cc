@@ -302,7 +302,7 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
         *new TMenuItem( "~P~revious", cmEditorPrev, kbShiftF6, hcNoContext, "Shift-F6" ) +
         *new TMenuItem( "~C~lose", cmClose, kbAltF3, hcNoContext, "Alt-F3" ) +
         newLine() +
-        *new TMenuItem( "Toggle File ~T~ree View", cmToggleTree, kbNoKey, hcNoContext ) +
+        *new TMenuItem( "File ~T~ree View", cmToggleTree, kbNoKey, hcNoContext ) +
         *new TMenuItem( "Previous (in tree)", cmTreePrev, kbAltUp, hcNoContext, "Alt-Up" ) +
         *new TMenuItem( "Next (in tree)", cmTreeNext, kbAltDown, hcNoContext, "Alt-Down" );
     if (recentCount > 0)
@@ -358,7 +358,7 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             *new TMenuItem( "Spl~i~t into Lines", cmSplitSelectionLines, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~C~ode", kbAltC ) +
             *new TMenuItem( "Code ~F~olding", cmToggleFolding, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "~T~oggle Fold at Cursor", cmFoldAtCursor, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Fold a~t~ Cursor", cmFoldAtCursor, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Fold ~A~ll", cmFoldAll, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~U~nfold All", cmUnfoldAll, kbNoKey, hcNoContext ) +
             newLine() +
@@ -366,13 +366,13 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             *new TMenuItem( "~N~ext Bookmark", cmNextBookmark, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~P~revious Bookmark", cmPrevBookmark, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~S~ettings", kbAltS ) +
-            *new TMenuItem( "Toggle Line ~N~umbers", cmToggleLineNums, kbF8, hcNoContext, "F8" ) +
-            *new TMenuItem( "Toggle Line ~W~rapping", cmToggleWrap, kbF9, hcNoContext, "F9" ) +
-            *new TMenuItem( "Toggle Auto ~I~ndent", cmToggleIndent, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "Show ~H~idden Files", cmToggleHidden, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "Toggle ~A~uto-save on Focus Loss", cmToggleAutoSave, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "Toggle Chan~g~e History", cmToggleChangeHistory, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "Toggle Long Line G~u~ide", cmToggleEdge, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Line ~N~umbers", cmToggleLineNums, kbF8, hcNoContext, "F8" ) +
+            *new TMenuItem( "Line ~W~rapping", cmToggleWrap, kbF9, hcNoContext, "F9" ) +
+            *new TMenuItem( "Auto ~I~ndent", cmToggleIndent, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~H~idden Files", cmToggleHidden, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~A~uto-save on Focus Loss", cmToggleAutoSave, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Chan~g~e History", cmToggleChangeHistory, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Long Line G~u~ide", cmToggleEdge, kbNoKey, hcNoContext ) +
             newLine() +
             *new TMenuItem( "~C~olour Scheme...", cmThemeSettings, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~L~anguage Servers...", cmLspSettings, kbNoKey, hcNoContext ) +
@@ -386,7 +386,7 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             *new TMenuItem( "~R~efresh Status", cmGitRefresh, kbNoKey, hcNoContext ) +
         windows +
         *new TSubMenu( "~H~elp", kbAltH ) +
-            *new TMenuItem( "~K~eyboard shortcurs", cmHelp, kbF1, hcNoContext, "F1" ) +
+            *new TMenuItem( "~K~eyboard shortcuts", cmHelp, kbF1, hcNoContext, "F1" ) +
             newLine() +
             *new TMenuItem( "~A~bout...", cmAbout, kbNoKey, hcNoContext )
             );
