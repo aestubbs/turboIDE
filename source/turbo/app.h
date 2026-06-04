@@ -9,6 +9,8 @@
 
 #include <memory>
 #include <vector>
+#include <fstream>
+#include <functional>
 
 #include <turbo/editstates.h>
 #include <turbo/filewatcher.h>
@@ -28,6 +30,15 @@ class LspManager;
 class GitManager;
 struct BranchView;
 struct TerminalView;
+
+// A background command started alongside Run (e.g. a queue runner). Its output
+// is logged to .turbo/logs/<name>.log rather than shown in the output pane.
+struct BackgroundJob
+{
+    std::string name;
+    std::unique_ptr<CommandRunner> runner;
+    std::ofstream log;
+};
 
 // TMenuView::menu (the root of the menu tree) is protected; expose it so the app
 // can rewrite toggle-item labels to show check marks.
@@ -76,6 +87,11 @@ struct TurboApp : public TApplication, EditorWindowParent
     std::string projectRoot;      // cwd the app was opened from (build cwd)
     std::string lastBuildCommand; // remembered between Build invocations
     BuildConfig buildConfig;      // .turbo/config.json (build/test/run + extras)
+    // Long-lived background commands started with Run (pumped each idle tick).
+    std::vector<std::unique_ptr<BackgroundJob>> bgJobs;
+    // Deferred action run on the next idle tick (used to start Run after a
+    // build-first finishes, so we don't reassign buildRunner inside its pump).
+    std::function<void()> pendingAfterBuild;
 
     TurboApp(int argc, const char **argv) noexcept;
     ~TurboApp();
@@ -164,10 +180,23 @@ struct TurboApp : public TApplication, EditorWindowParent
     void toggleOutputView();      // show/hide it (resizes editors on the Y axis)
     void showOutput();            // ensure it is visible
     void runBuild();              // run the configured build (or prompt for one)
+    void runTest();               // run the configured test command
+    void runRun();                // build-if-needed, then run + background cmds
+    void stopAll();               // stop the build/run and all background cmds
     void editBuildConfig();       // open the build-configuration dialog
     // Stream 'command' (a shell command) into the output pane, with 'label'
-    // shown as the echoed header line.
-    void runInOutput(const std::string &label, const std::string &command);
+    // shown as the echoed header line. 'onDone' (if set) runs on the main thread
+    // with the exit code once the command finishes.
+    void runInOutput(const std::string &label, const std::string &command,
+                     std::function<void(int)> onDone = {});
+    // Run the configured run command + start the configured background commands.
+    void startRun();
+    void startBackgroundCommands();
+    void stopBackgroundCommands();
+    // True if Run should build first (per run mode / artifact staleness).
+    bool needsBuildBeforeRun() const;
+    // True if the configured artifact is missing or older than a project source.
+    bool isArtifactStale() const;
 
     // Terminal windows. newTerminal() opens one running the configured shell.
     // Each TerminalView registers itself so idle() can pump its PTY output.

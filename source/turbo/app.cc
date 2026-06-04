@@ -41,6 +41,7 @@
 #include "builddialog.h"
 #include <turbo/fileeditor.h>
 #include <turbo/tpath.h>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 
@@ -402,6 +403,9 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             *new TMenuItem( "~R~efresh Status", cmGitRefresh, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~B~uild", kbAltB ) +
             *new TMenuItem( "~B~uild", cmBuild, kbF7, hcNoContext, "F7" ) +
+            *new TMenuItem( "~R~un", cmRun, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~T~est", cmTest, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~S~top", cmStop, kbNoKey, hcNoContext ) +
             newLine() +
             *new TMenuItem( "~C~onfigure...", cmBuildConfig, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Show/Hide ~O~utput", cmToggleOutput, kbNoKey, hcNoContext ) +
@@ -468,8 +472,10 @@ void TurboApp::shutDown()
         git->shutdown();
     if (watcher)
         watcher->stop();
+    pendingAfterBuild = nullptr;
     if (buildRunner)
         buildRunner->stop();
+    stopBackgroundCommands();
     docTree = nullptr;
     clock = nullptr;
     branchView = nullptr;
@@ -496,6 +502,17 @@ void TurboApp::idle()
     // wakeUp pattern as the terminals).
     if (buildRunner)
         buildRunner->pump();
+    for (auto &j : bgJobs)
+        if (j && j->runner)
+            j->runner->pump();
+    // Run any action deferred from a runner's onExit (e.g. start Run after a
+    // build-first), now that we're safely outside that runner's pump.
+    if (pendingAfterBuild)
+    {
+        auto action = std::move(pendingAfterBuild);
+        pendingAfterBuild = nullptr;
+        action();
+    }
     // Keep menu check marks in sync with per-editor toggle state and the active
     // editor. Cheap: only rewrites a label when its checked state changes.
     refreshMenuChecks();
@@ -525,6 +542,9 @@ void TurboApp::handleEvent(TEvent &event)
             case cmGotoAnything: gotoAnything(); break;
             case cmCommandPalette: commandPalette(); break;
             case cmBuild: runBuild(); break;
+            case cmRun: runRun(); break;
+            case cmTest: runTest(); break;
+            case cmStop: stopAll(); break;
             case cmBuildConfig: editBuildConfig(); break;
             case cmToggleOutput: toggleOutputView(); break;
             case cmEditorNext:
@@ -1431,7 +1451,8 @@ void TurboApp::toggleOutputView()
     deskTop->redraw();
 }
 
-void TurboApp::runInOutput(const std::string &label, const std::string &command)
+void TurboApp::runInOutput(const std::string &label, const std::string &command,
+                           std::function<void(int)> onDone)
 {
     showOutput();
     if (!outputWin)
@@ -1446,12 +1467,14 @@ void TurboApp::runInOutput(const std::string &label, const std::string &command)
         if (outputWin)
             outputWin->view->addLine(parseBuildLine(std::string(line), projectRoot));
     };
-    buildRunner->onExit = [this] (int code) {
+    buildRunner->onExit = [this, onDone] (int code) {
         if (outputWin)
             outputWin->view->addLine(
                 { code == 0 ? std::string("[finished]")
                             : ("[exited with code " + std::to_string(code) + "]"),
                   okInfo, "", -1 });
+        if (onDone)
+            onDone(code);
     };
     std::string cwd = projectRoot.empty() ? std::string(".") : projectRoot;
     if (!buildRunner->start(command, cwd))
@@ -1481,6 +1504,151 @@ void TurboApp::editBuildConfig()
 {
     if (executeBuildDialog(buildConfig))
         buildConfig.save(projectRoot);
+}
+
+void TurboApp::runTest()
+{
+    if (buildConfig.test.empty())
+    {
+        messageBox("No test command configured.\nSet one in Build > Configure.",
+                   mfInformation | mfOKButton);
+        return;
+    }
+    runInOutput(buildConfig.test, buildConfig.test);
+}
+
+bool TurboApp::isArtifactStale() const
+{
+    namespace fs = std::filesystem;
+    if (buildConfig.artifact.empty())
+        return true; // no artifact configured -> can't tell, treat as stale
+    std::error_code ec;
+    fs::path art = fs::path(projectRoot) / buildConfig.artifact;
+    if (!fs::exists(art, ec))
+        return true; // not built yet
+    auto artTime = fs::last_write_time(art, ec);
+    if (ec)
+        return true;
+    // Stale if any project source is newer than the artifact. Always skip the
+    // artifact file itself, and -- when the artifact lives in a subdirectory
+    // (a build/ dir) -- skip that whole directory so the build's own outputs
+    // don't count as "sources". If the artifact sits in the project root, only
+    // the artifact file is skipped.
+    std::string root = fs::path(projectRoot).lexically_normal().string();
+    std::string artFile = art.lexically_normal().string();
+    std::string artDir = art.parent_path().lexically_normal().string();
+    std::string dirPrefix;
+    if (artDir.size() > root.size())
+        dirPrefix = artDir + "/";
+    std::vector<std::string> files;
+    if (docTree && docTree->tree)
+        docTree->tree->collectFilePaths(files);
+    for (auto &f : files)
+    {
+        std::string fn = fs::path(f).lexically_normal().string();
+        if (fn == artFile)
+            continue;
+        if (!dirPrefix.empty() && fn.rfind(dirPrefix, 0) == 0)
+            continue;
+        auto t = fs::last_write_time(fs::path(f), ec);
+        if (!ec && t > artTime)
+            return true;
+    }
+    return false;
+}
+
+bool TurboApp::needsBuildBeforeRun() const
+{
+    if (buildConfig.runMode == "run")
+        return false;
+    if (buildConfig.runMode == "build")
+        return true;
+    return isArtifactStale(); // "auto": build only when the artifact is stale
+}
+
+void TurboApp::runRun()
+{
+    if (buildConfig.run.empty())
+    {
+        messageBox("No run command configured.\nSet one in Build > Configure.",
+                   mfInformation | mfOKButton);
+        return;
+    }
+    if (needsBuildBeforeRun() && !buildConfig.build.empty())
+    {
+        // Build first; on success, start Run on the next idle tick (so we don't
+        // tear down buildRunner from inside its own onExit/pump).
+        runInOutput(buildConfig.build, buildConfig.build, [this] (int code) {
+            if (code == 0)
+                pendingAfterBuild = [this] { startRun(); };
+            else if (outputWin)
+                outputWin->view->addLine({"[build failed -- not running]", okError, "", -1});
+        });
+    }
+    else
+        startRun();
+}
+
+void TurboApp::startRun()
+{
+    runInOutput(buildConfig.run, buildConfig.run); // clears + streams in the pane
+    startBackgroundCommands();                     // then note the background cmds
+}
+
+static std::string sanitizeName(const std::string &name) noexcept
+{
+    std::string s;
+    for (char c : name)
+        s += (std::isalnum((unsigned char) c) || c == '-' || c == '_') ? c : '_';
+    return s.empty() ? std::string("job") : s;
+}
+
+void TurboApp::startBackgroundCommands()
+{
+    stopBackgroundCommands();
+    if (projectRoot.empty() || buildConfig.extra.empty())
+        return;
+    std::string logDir = projectRoot + "/.turbo/logs";
+    std::error_code ec;
+    std::filesystem::create_directories(logDir, ec);
+    for (auto &cmd : buildConfig.extra)
+    {
+        if (cmd.command.empty())
+            continue;
+        auto job = std::make_unique<BackgroundJob>();
+        job->name = cmd.name.empty() ? cmd.command : cmd.name;
+        job->log.open(logDir + "/" + sanitizeName(job->name) + ".log", std::ios::trunc);
+        BackgroundJob *jp = job.get();
+        job->runner = std::make_unique<CommandRunner>();
+        job->runner->onLine = [jp] (std::string_view line) {
+            if (jp->log) { jp->log << line << '\n'; jp->log.flush(); }
+        };
+        job->runner->start(cmd.command, projectRoot);
+        bgJobs.push_back(std::move(job));
+    }
+    if (outputWin && !bgJobs.empty())
+        outputWin->view->addLine(
+            { "[started " + std::to_string(bgJobs.size()) +
+              " background command(s); output in .turbo/logs]", okInfo, "", -1 });
+}
+
+void TurboApp::stopBackgroundCommands()
+{
+    for (auto &j : bgJobs)
+        if (j && j->runner)
+            j->runner->stop();
+    bgJobs.clear();
+}
+
+void TurboApp::stopAll()
+{
+    bool had = (buildRunner && buildRunner->running()) || !bgJobs.empty();
+    pendingAfterBuild = nullptr;
+    if (buildRunner)
+        buildRunner->stop();
+    stopBackgroundCommands();
+    if (outputWin && had)
+        outputWin->view->addLine({"[stopped]", okInfo, "", -1});
 }
 
 void TurboApp::newTerminal()

@@ -86,6 +86,9 @@ const PaletteCommand kCommands[] =
     { "Language Servers...",           cmLspSettings,          "",             false },
     // Build / Run
     { "Build",                         cmBuild,                "F7",           false },
+    { "Run",                           cmRun,                  "",             false },
+    { "Test",                          cmTest,                 "",             false },
+    { "Stop",                          cmStop,                 "",             false },
     { "Build: Configure...",           cmBuildConfig,          "",             false },
     { "Toggle Output Pane",            cmToggleOutput,         "",             false },
     // Git
