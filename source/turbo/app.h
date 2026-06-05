@@ -175,6 +175,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     void addEditor(turbo::TScintilla &, const char *path);
     void showEditorList(TEvent *ev);
     void toggleTreeView();
+    void setTreeWidth(int w);     // resize the docked tree (from a left-border drag)
 
     // Build/Run output pane.
     TRect outputBounds() const;   // target bounds of the docked pane

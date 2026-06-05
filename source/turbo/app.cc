@@ -253,12 +253,18 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
         if (r.b.x > 22)
             r.a.x = r.b.x - min(max(r.b.x - 82, 22), 30);
         docTree = new DocumentTreeWindow(r, &docTree);
-        docTree->flags &= ~wfZoom;
+        // Docked side pane: no move/grow/zoom (so no bottom-right resize handle);
+        // its left border is the resize handle and the close box toggles it off.
+        docTree->flags = wfClose;
         // The grow mode assumes it's placed on the right side of the screen.
         // Greater flexibility would require some trick or a dedicated class
         // for side views.
         docTree->growMode = gfGrowLoX | gfGrowHiX | gfGrowHiY;
         docTree->setState(sfShadow, False);
+        // Drag the left border to set the width; the editors beside it re-layout.
+        docTree->onResizeTo = [this] (int borderScreenX) {
+            setTreeWidth(deskTop->getExtent().b.x - borderScreenX);
+        };
         deskTop->insert(docTree);
         // Show by default only on large terminals.
         if (deskTop->size.x - docTree->size.x < 82)
@@ -1394,6 +1400,45 @@ void TurboApp::toggleTreeView()
     MRUlist.forEach([&] (auto *win) {
         win->setState(sfExposed, True);
     });
+    deskTop->redraw();
+}
+
+void TurboApp::setTreeWidth(int w)
+{
+    if (!docTree || !(docTree->state & sfVisible))
+        return;
+    TRect ext = deskTop->getExtent();
+    int totalW = ext.b.x - ext.a.x;
+    // Keep the tree at least a window's minimum width (minWinSize.x = 16, so
+    // locate() never clamps it wider than asked) and leave an editor's minimum
+    // width beside it.
+    w = max(16, min(w, totalW - EditorWindow::minSize.x));
+    int oldLeft = docTree->getBounds().a.x;
+    int newLeft = ext.b.x - w;
+    if (newLeft == oldLeft)
+        return;
+    // Suppress per-editor redraws while we relocate; draw once at the end.
+    MRUlist.forEach([&] (auto *win) { win->setState(sfExposed, False); });
+    // Editors whose right edge sat on the tree's left edge follow it (narrowing
+    // the tree grows them, widening shrinks them).
+    MRUlist.forEach([&] (auto *win) {
+        TRect r = win->getBounds();
+        if (r.b.x >= oldLeft)
+        {
+            r.b.x = newLeft;
+            win->locate(r);
+        }
+    });
+    TRect tb = docTree->getBounds();
+    tb.a.x = newLeft;
+    docTree->locate(tb);
+    // The output pane spans the editor area, so its width follows the tree too.
+    if (outputWin && (outputWin->state & sfVisible))
+    {
+        TRect ob = outputBounds();
+        outputWin->locate(ob);
+    }
+    MRUlist.forEach([&] (auto *win) { win->setState(sfExposed, True); });
     deskTop->redraw();
 }
 

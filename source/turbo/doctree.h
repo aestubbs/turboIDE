@@ -6,6 +6,7 @@
 #define Uses_TInputLine
 #include <tvision/tv.h>
 
+#include <functional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -156,6 +157,10 @@ struct DocumentTreeWindow : public TWindow {
     DocumentTreeWindow **ptr;
     std::string baseTitle {"Files"};
     std::string titleBuf;   // backing store for getTitle()
+    // Invoked while the user drags the tree's (editor-facing) left border, with
+    // the dragged border's screen column. The app turns that into a new tree
+    // width and re-lays out the editors beside it. Keeps the tree docked.
+    std::function<void(int borderScreenX)> onResizeTo;
 
     DocumentTreeWindow(const TRect &bounds, DocumentTreeWindow **ptr) noexcept;
     ~DocumentTreeWindow();
@@ -175,6 +180,7 @@ struct DocumentTreeWindow : public TWindow {
     // using Turbo Vision's default bright-blue window palette.
     TColorAttr mapColor(uchar index) noexcept override;
 
+    void handleEvent(TEvent &ev) override;
     void close() override;
 
 };

@@ -95,15 +95,14 @@ void BasicEditorWindow::handleNotification(const SCNotification &scn, Editor &ed
     }
 }
 
-#define dialogColor(i) cpAppColor[(uchar) (cpDialog[i] - 1)]
-
 // 24-bit window-chrome palette, coherent with the navy editor background and the
 // Turbo-blue frames. The frame and scrollbar entries are what's normally visible
 // on an editor window (and what the theme dialog exposes); the remaining
 // button/label/cluster entries only show when dialog-like views are embedded in
-// a window, but are given matching RGB values for consistency. The input-line,
-// history and list-viewer entries are inherited from the application dialog
-// palette via 'dialogColor' (left as-is; they degrade gracefully).
+// a window. Every entry -- including the input-line, history and list-viewer
+// ones (e.g. the file-tree name filter and its list) -- is given an explicit RGB
+// value here so nothing falls back to Turbo Vision's bright-blue BIOS dialog
+// palette, which clashed with the dark theme.
 // TColorDesired (not TColorRGB): its int constructor is constexpr, which the
 // constexpr scheme below requires.
 namespace {
@@ -148,18 +147,18 @@ constexpr TColorDesired
     /* wndClusterNormal            */ {wcLabelFg,    wcNavy},       \
     /* wndClusterSelected          */ {wcFrameFgAct, wcSelBg},      \
     /* wndClusterShortcut          */ {wcShortcut,   wcNavy},       \
-    dialogColor(wndInputLineNormal         ),                      \
-    dialogColor(wndInputLineSelected       ),                      \
-    dialogColor(wndInputLineArrows         ),                      \
+    /* wndInputLineNormal          */ {wcFrameFgAct, wcFramePsv},   \
+    /* wndInputLineSelected        */ {wcFrameFgAct, wcFrameAct},   \
+    /* wndInputLineArrows          */ {wcBarArrows,  wcFramePsv},   \
     /* wndHistoryArrow             */ {wcFrameFgAct, wcBtnBg},      \
     /* wndHistorySides             */ {wcIcon,       wcNavy},       \
-    dialogColor(wndHistWinScrollBarPageArea),                      \
-    dialogColor(wndHistWinScrollBarControls),                      \
-    dialogColor(wndListViewerNormal        ),                      \
-    dialogColor(wndListViewerFocused       ),                      \
-    dialogColor(wndListViewerSelected      ),                      \
-    dialogColor(wndListViewerDivider       ),                      \
-    dialogColor(wndInfoPane                ),                      \
+    /* wndHistWinScrollBarPageArea */ {wcBarThumb,   wcBarTrough},  \
+    /* wndHistWinScrollBarControls */ {wcBarArrows,  wcBarTrough},  \
+    /* wndListViewerNormal         */ {wcTextFg,     wcFrameAct},   \
+    /* wndListViewerFocused        */ {wcFrameFgAct, wcBtnSelBg},   \
+    /* wndListViewerSelected       */ {wcFrameFgAct, wcSelBg},      \
+    /* wndListViewerDivider        */ {wcBarThumb,   wcNavy},       \
+    /* wndInfoPane                 */ {wcTextFg,     wcNavy},       \
     /* wndClusterDisabled          */ {wcDim,        wcNavy},
 
 extern constexpr WindowColorScheme windowSchemeDefault = { WINDOW_SCHEME_BODY };
@@ -169,7 +168,6 @@ extern constexpr WindowColorScheme windowSchemeDefault = { WINDOW_SCHEME_BODY };
 WindowColorScheme windowSchemeActive = { WINDOW_SCHEME_BODY };
 
 #undef WINDOW_SCHEME_BODY
-#undef dialogColor
 
 void resetWindowSchemeToDefault() noexcept
 {

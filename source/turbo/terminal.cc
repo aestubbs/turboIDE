@@ -18,6 +18,9 @@
 #include "app.h"
 #include "cmds.h"
 
+#include <turbo/basicwindow.h> // shared window-chrome scheme (windowSchemeActive)
+#include <turbo/styles.h>      // schemeActive/sNormal for theme-matched defaults
+
 #include <vterm.h>
 
 #include <cstring>
@@ -52,11 +55,14 @@ void appendUtf8(std::string &s, uint32_t cp) noexcept
     }
 }
 
-// Default terminal colours: light grey on the classic Turbo blue, so an
-// otherwise-unstyled terminal matches the editor and file-tree windows. Cells
-// that request their own colour via SGR (e.g. `ls --color`) keep it.
-const TColorDesired kTermDefaultFg = TColorBIOS(0x7);
-const TColorDesired kTermDefaultBg = TColorBIOS(0x1);
+// Default terminal colours follow the editor's normal text style (the active
+// 24-bit theme), so an otherwise-unstyled terminal matches the editor windows
+// and the rest of the app -- and re-themes along with them. Cells that request
+// their own colour via SGR (e.g. `ls --color`) keep it.
+TColorDesired termDefaultFg() noexcept
+    { return ::getFore(turbo::schemeActive[turbo::sNormal]); }
+TColorDesired termDefaultBg() noexcept
+    { return ::getBack(turbo::schemeActive[turbo::sNormal]); }
 
 // Map a libvterm colour to a Turbo Vision colour. Default fg/bg fall back to the
 // Turbo window colours above; indexed colours go through the xterm-256 palette
@@ -65,9 +71,9 @@ const TColorDesired kTermDefaultBg = TColorBIOS(0x1);
 TColorDesired mapColor(const VTermColor &c, bool isFg) noexcept
 {
     if (isFg && VTERM_COLOR_IS_DEFAULT_FG(&c))
-        return kTermDefaultFg;
+        return termDefaultFg();
     if (!isFg && VTERM_COLOR_IS_DEFAULT_BG(&c))
-        return kTermDefaultBg;
+        return termDefaultBg();
     if (VTERM_COLOR_IS_RGB(&c))
         return TColorDesired(int((c.rgb.red << 16) | (c.rgb.green << 8) | c.rgb.blue));
     return TColorDesired(TColorXTerm(c.indexed.idx));
@@ -450,7 +456,7 @@ void TerminalView::pump() noexcept
 
 void TerminalView::draw()
 {
-    const TColorAttr defAttr = TColorAttr(kTermDefaultFg, kTermDefaultBg);
+    const TColorAttr defAttr = TColorAttr(termDefaultFg(), termDefaultBg());
     int w = size.x, h = size.y;
     int S = (int) scrollback.size();
     for (int y = 0; y < h; ++y)
@@ -800,6 +806,15 @@ TerminalWindow::TerminalWindow(const TRect &bounds) noexcept :
 const char *TerminalWindow::getTitle(short)
 {
     return titleBuf.c_str();
+}
+
+TColorAttr TerminalWindow::mapColor(uchar index) noexcept
+{
+    // Resolve chrome through the shared window scheme, like the editor windows,
+    // file tree and output pane, instead of TVision's default bright-blue palette.
+    if (index > 0 && index - 1 < turbo::WindowPaletteItemCount)
+        return turbo::windowSchemeActive[index - 1];
+    return errorAttr;
 }
 
 void TerminalWindow::sizeLimits(TPoint &min, TPoint &max)

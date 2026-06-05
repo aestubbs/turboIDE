@@ -1052,6 +1052,27 @@ const char *DocumentTreeWindow::getTitle(short)
     return titleBuf.empty() ? baseTitle.c_str() : titleBuf.c_str();
 }
 
+void DocumentTreeWindow::handleEvent(TEvent &ev)
+{
+    if (ev.what == evMouseDown)
+    {
+        TPoint m = makeLocal(ev.mouse.where);
+        // The left border (between the corners) is a horizontal resize handle:
+        // drag it left/right to widen/narrow the docked tree. onResizeTo re-lays
+        // out the editors beside it on each step. The close box sits on the top
+        // border (row 0), so starting at row >= 1 never steals it.
+        if (m.x == 0 && m.y >= 1 && m.y < size.y - 1 && onResizeTo)
+        {
+            do {
+                onResizeTo(ev.mouse.where.x);
+            } while (mouseEvent(ev, evMouseMove | evMouseAuto));
+            clearEvent(ev);
+            return;
+        }
+    }
+    TWindow::handleEvent(ev);
+}
+
 void DocumentTreeWindow::close()
 {
     message(TProgram::application, evCommand, cmToggleTree, 0);

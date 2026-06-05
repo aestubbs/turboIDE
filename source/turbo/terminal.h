@@ -113,6 +113,9 @@ struct TerminalWindow : public TWindow
     TerminalWindow(const TRect &bounds) noexcept;
 
     const char *getTitle(short) override;
+    // Resolve the frame/scrollbar through the shared window-chrome scheme so the
+    // terminal matches the editor windows, file tree and output pane.
+    TColorAttr mapColor(uchar index) noexcept override;
     void sizeLimits(TPoint &min, TPoint &max) override;
     // Update the caption from an OSC window-title sequence ("" restores default).
     void setTermTitle(std::string_view text) noexcept;
