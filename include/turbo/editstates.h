@@ -121,6 +121,19 @@ enum ReplaceMethod : uint8_t
 void replace(TScintilla &scintilla, TStringView text, TStringView withText, ReplaceMethod method, SearchSettings settings);
 void clearIndicator(TScintilla &scintilla, Indicator indicator);
 
+// Symbol-marker numbers for the bookmark (margin 1) and change-history
+// (margin 2) markers, set up in Editor::setUpExtraMargins. Both margins are
+// hidden (width 0) by default, and Scintilla only excludes a margin's markers
+// from the in-line background mask when that margin is visible (see
+// ViewStyle::CalculateMarginWidthAndMask). With the margin hidden the marker
+// behaves as an in-line *background* marker, so its background paints the whole
+// marked line. applyTheming therefore pins these markers' backgrounds to the
+// normal text background, keeping a marked (modified/bookmarked) line from
+// rendering in the terminal-default colour. Shared here so applyTheming and the
+// margin setup agree on the numbers.
+constexpr int markBookmark = 1;
+constexpr int markChanged = 2;
+
 // Updates 'scintilla' so that it makes use of the current state of
 // 'lexer' and 'scheme'. If 'scheme' is null, 'schemeDefault' is used instead.
 void applyTheming(const LexerSettings *lexer, const ColorScheme *scheme, TScintilla &scintilla);

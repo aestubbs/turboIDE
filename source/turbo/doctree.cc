@@ -634,11 +634,14 @@ void DocumentTreeView::showContextMenu(int row, TPoint where) noexcept
     auto *items  = new TMenuItem("~O~pen", cmTreeOpen, kbNoKey, hcNoContext);
     auto *rename = new TMenuItem("~R~ename...", cmTreeRename, kbNoKey, hcNoContext);
     auto *newf   = new TMenuItem("~N~ew File...", cmTreeNewFile, kbNoKey, hcNoContext);
+    // Accelerator 'F' (not 'o') so it doesn't collide with "Open" in this menu.
+    auto *newd   = new TMenuItem("New ~F~older...", cmTreeNewFolder, kbNoKey, hcNoContext);
     auto *sep    = &newLine();
     auto *add    = new TMenuItem("Git ~A~dd", cmTreeGitAdd, kbNoKey, hcNoContext);
     items->append(rename);
     rename->append(newf);
-    newf->append(sep);
+    newf->append(newd);
+    newd->append(sep);
     sep->append(add);
     TMenuItem *tail = add;
     // Offer Revert only for a tracked file with committed content to restore
@@ -673,6 +676,7 @@ void DocumentTreeView::showContextMenu(int row, TPoint where) noexcept
                 app->treeRenamePath(path, isDir);
             break;
         case cmTreeNewFile:
+        case cmTreeNewFolder:
         {
             // Create inside a folder; for a file, create alongside it.
             std::string dir = path;
@@ -682,7 +686,12 @@ void DocumentTreeView::showContextMenu(int row, TPoint where) noexcept
                 dir.assign(d.data(), d.size());
             }
             if (app)
-                app->treeCreateFile(dir);
+            {
+                if (cmd == cmTreeNewFile)
+                    app->treeCreateFile(dir);
+                else
+                    app->treeCreateFolder(dir);
+            }
             break;
         }
         case cmTreeGitAdd:

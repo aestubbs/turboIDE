@@ -589,6 +589,16 @@ void applyTheming(const LexerSettings *lexer, const ColorScheme *aScheme, TScint
             setMarkerColor(scintilla, m, foldAttr);
     }
     setIndicatorColor(scintilla, idtrReplaceHighlight, scheme[sReplaceHighlight]);
+    // The bookmark and change-history markers sit on hidden (width-0) margins,
+    // so Scintilla treats them as in-line background markers and paints the
+    // whole marked line with the marker's background (see markBookmark /
+    // markChanged in editstates.h). Pin that background to the normal text
+    // background -- which here already carries the active/passive frame shade --
+    // so a modified or bookmarked line is not drawn in the terminal-default
+    // colour. Only the background is set; the margin glyph colours come from
+    // Editor::setUpExtraMargins.
+    setMarkerBackColor(scintilla, markBookmark, scheme[sNormal]);
+    setMarkerBackColor(scintilla, markChanged, scheme[sNormal]);
     if (lexer)
     {
         // Create the lexer through Lexilla (lexers are no longer part of

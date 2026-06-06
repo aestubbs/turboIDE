@@ -386,6 +386,7 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
     return new TurboMenuBar( r,
         *new TSubMenu( "~F~ile", kbAltF, hcNoContext ) +
             *new TMenuItem( "~N~ew", cmNew, kbCtrlN, hcNoContext, "Ctrl-N" ) +
+            *new TMenuItem( "New ~F~ile...", cmNewNamedFile, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~O~pen", cmOpen, kbCtrlO, hcNoContext, "Ctrl-O" ) +
             *new TMenuItem( "Go to ~A~nything...", cmGotoAnything, kbNoKey, hcNoContext, "Ctrl-P" ) +
             *new TMenuItem( "Command Pa~l~ette...", cmCommandPalette, kbNoKey, hcNoContext, "Ctrl-B" ) +
@@ -603,6 +604,7 @@ void TurboApp::handleEvent(TEvent &event)
         handled = true;
         switch (event.message.command) {
             case cmNew: fileNew(); break;
+            case cmNewNamedFile: fileNewNamedFile(); break;
             case cmOpen: fileOpen(); break;
             case cmGotoAnything: gotoAnything(); break;
             case cmCommandPalette: commandPalette(); break;
@@ -700,6 +702,30 @@ void TurboApp::parseArgs()
 void TurboApp::fileNew()
 {
     addEditor(createScintilla(), "");
+}
+
+void TurboApp::fileNewNamedFile()
+{
+    // Guided new file: open a scratch buffer, then immediately run Save As so the
+    // name and location are chosen up front. Setting the path detects the
+    // language, so the correct lexer (and line numbers) apply from the first
+    // keystroke -- unlike plain cmNew, which leaves an unnamed, unlexed buffer.
+    // If the user cancels the dialog, discard the throwaway buffer so "New
+    // File..." leaves nothing behind.
+    addEditor(createScintilla(), "");
+    EditorWindow *w = MRUlist.empty() ? nullptr : MRUlist.next->self;
+    if (!w)
+        return;
+    TurboFileDialogs dlgs {*this};
+    if (w->getEditor().saveAs(dlgs))
+    {
+        // The new file now exists on disk; the filesystem watcher adds it to the
+        // tree. Refresh git so its status badge appears without delay.
+        if (git)
+            git->requestStatus();
+    }
+    else
+        message(w, evCommand, cmClose, 0);
 }
 
 void TurboApp::fileOpen()
@@ -1048,6 +1074,34 @@ void TurboApp::treeCreateFile(const std::string &dirPath)
     fileOpenOrNew(full.c_str());
     if (git)
         git->requestStatus();
+}
+
+void TurboApp::treeCreateFolder(const std::string &dirPath)
+{
+    char name[256] = "";
+    if (inputBox("New Folder", "Folder ~n~ame:", name, sizeof(name) - 1) != cmOK)
+        return;
+    std::string n = trimmed(name);
+    if (n.empty())
+        return;
+    std::string full = dirPath + "/" + n;
+    std::error_code ec;
+    if (std::filesystem::exists(full, ec))
+    {
+        messageBox(mfError | mfOKButton, "'%s' already exists.", n.c_str());
+        return;
+    }
+    // Allow nested paths in the name (e.g. "a/b/c").
+    std::filesystem::create_directories(full, ec);
+    if (ec)
+    {
+        messageBox(mfError | mfOKButton, "Unable to create '%s'.", full.c_str());
+        return;
+    }
+    // Show the new directory immediately (the watcher would also pick it up).
+    // Git tracks files, not empty directories, so there is no status to refresh.
+    if (docTree)
+        docTree->tree->addNode(full, true);
 }
 
 void TurboApp::treeRenamePath(const std::string &path, bool isDir)

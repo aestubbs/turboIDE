@@ -70,6 +70,10 @@ enum : ushort
     cmGitResolveFile, // mark the conflict-bar's editor file resolved (save + git add)
     cmToggleHidden,
     cmNewTerminal,
+    // Guided "New File...": prompt for a name+location up front (via the Save As
+    // dialog) so the buffer is created on disk with the right lexer from the
+    // start. Distinct from cmNew, which opens an unnamed scratch buffer.
+    cmNewNamedFile,
     // Fuzzy navigation overlays.
     cmGotoAnything,
     cmCommandPalette,
@@ -88,6 +92,7 @@ enum : ushort
     cmTreeOpen,
     cmTreeRename,
     cmTreeNewFile,
+    cmTreeNewFolder,
     cmTreeGitAdd,
     cmTreeGitRevert,
     // Recent-windows list in the Windows menu: cmWindowBase + i selects the

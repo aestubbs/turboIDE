@@ -53,6 +53,11 @@ TColorAttr getStyleColor(TScintilla &, int style);
 void setSelectionColor(TScintilla &, TColorAttr attr);
 void setWhitespaceColor(TScintilla &, TColorAttr attr);
 void setMarkerColor(TScintilla &, int markerNum, TColorAttr attr);
+// Sets only a marker's background (from attr's background), leaving its
+// foreground untouched -- used to pin a hidden margin marker's leaked line
+// background to the editor background without disturbing the glyph colour
+// shown when the margin is open.
+void setMarkerBackColor(TScintilla &, int markerNum, TColorAttr attr);
 TStringView getRangePointer(TScintilla &, Sci_Position start, Sci_Position end);
 
 enum CaseConversion

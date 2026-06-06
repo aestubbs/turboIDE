@@ -314,8 +314,8 @@ bool Editor::inSavePoint()
 // Scintilla's reserved ranges. The terminal Surface can only draw fills and
 // text, so every marker is defined as SC_MARK_CHARACTER (drawn via DrawText) or
 // SC_MARK_EMPTY for the fold connector lines (which would need line drawing).
-static constexpr int markBookmark = 1;
-static constexpr int markChanged = 2;
+// markBookmark / markChanged are declared in editstates.h so applyTheming can
+// pin their backgrounds (these margins are hidden by default; see there).
 
 void Editor::setUpExtraMargins() noexcept
 {

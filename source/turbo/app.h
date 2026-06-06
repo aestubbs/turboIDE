@@ -117,6 +117,9 @@ struct TurboApp : public TApplication, EditorWindowParent
     void parseArgs();
 
     void fileNew();
+    // Guided "New File...": prompt for name+location (Save As), then create and
+    // open it so the right lexer applies from the start (see cmNewNamedFile).
+    void fileNewNamedFile();
     void fileOpen();
     void fileOpenOrNew(const char *path);
     void openFileFromTree(const char *absPath);
@@ -143,6 +146,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     void onFilesChanged();
     // File-tree context-menu actions. Paths are absolute.
     void treeCreateFile(const std::string &dirPath);     // prompt + create + open
+    void treeCreateFolder(const std::string &dirPath);   // prompt + mkdir
     void treeRenamePath(const std::string &path, bool isDir); // prompt + rename
     void treeStagePath(const std::string &path);         // git add
     void treeRevertPath(const std::string &path);        // confirm + git checkout HEAD

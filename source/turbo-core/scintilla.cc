@@ -266,6 +266,12 @@ void setMarkerColor(TScintilla &self, int markerNum, TColorAttr attr)
     call(self, SCI_MARKERSETBACK, markerNum, convertColor(::getBack(attr)).OpaqueRGB());
 }
 
+void setMarkerBackColor(TScintilla &self, int markerNum, TColorAttr attr)
+{
+    using namespace Scintilla::Internal;
+    call(self, SCI_MARKERSETBACK, markerNum, convertColor(::getBack(attr)).OpaqueRGB());
+}
+
 TStringView getRangePointer(TScintilla &self, Sci_Position start, Sci_Position end)
 {
     auto length = end - start;
