@@ -9,7 +9,8 @@
 namespace turbo {
 
 bool Process::start(const std::string &command, const std::vector<std::string> &args,
-                    const std::string &cwd, const std::vector<std::string> &env)
+                    const std::string &cwd, const std::vector<std::string> &env,
+                    bool mergeStderr)
 {
     SECURITY_ATTRIBUTES sa {};
     sa.nLength = sizeof(sa);
@@ -60,7 +61,8 @@ bool Process::start(const std::string &command, const std::vector<std::string> &
     si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdInput = inRead;
     si.hStdOutput = outWrite;
-    si.hStdError = nul;
+    // Send stderr to the same pipe as stdout when asked, else to the null device.
+    si.hStdError = mergeStderr ? outWrite : nul;
 
     PROCESS_INFORMATION pi {};
     std::vector<char> mutableCmd(cmdline.begin(), cmdline.end());
@@ -167,7 +169,8 @@ extern char **environ;
 namespace turbo {
 
 bool Process::start(const std::string &command, const std::vector<std::string> &args,
-                    const std::string &cwd, const std::vector<std::string> &env)
+                    const std::string &cwd, const std::vector<std::string> &env,
+                    bool mergeStderr)
 {
     int inPipe[2], outPipe[2];
     if (pipe(inPipe) != 0)
@@ -190,8 +193,12 @@ bool Process::start(const std::string &command, const std::vector<std::string> &
     // Child stdin <- read end of inPipe; child stdout -> write end of outPipe.
     posix_spawn_file_actions_adddup2(&fa, inPipe[0], STDIN_FILENO);
     posix_spawn_file_actions_adddup2(&fa, outPipe[1], STDOUT_FILENO);
-    // Silence the child's stderr so it cannot draw over the terminal UI.
-    posix_spawn_file_actions_addopen(&fa, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+    // Send the child's stderr to the same pipe as stdout when asked; otherwise
+    // silence it so a child's logging cannot draw over the terminal UI.
+    if (mergeStderr)
+        posix_spawn_file_actions_adddup2(&fa, outPipe[1], STDERR_FILENO);
+    else
+        posix_spawn_file_actions_addopen(&fa, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
     // Close the inherited pipe fds in the child.
     posix_spawn_file_actions_addclose(&fa, inPipe[0]);
     posix_spawn_file_actions_addclose(&fa, inPipe[1]);
@@ -346,11 +353,12 @@ int Process::runToEnd( const std::string &command,
                        const std::vector<std::string> &args,
                        std::string &output,
                        const std::string &cwd,
-                       const std::vector<std::string> &env )
+                       const std::vector<std::string> &env,
+                       bool mergeStderr )
 {
     output.clear();
     Process p;
-    if (!p.start(command, args, cwd, env))
+    if (!p.start(command, args, cwd, env, mergeStderr))
         return -1;
     p.closeStdin(); // we provide no input
     char buf[16384];

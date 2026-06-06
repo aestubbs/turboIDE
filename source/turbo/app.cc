@@ -41,11 +41,50 @@
 #include "builddialog.h"
 #include <turbo/fileeditor.h>
 #include <turbo/tpath.h>
+#include <tvision/internal/codepage.h>
 #include <cctype>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 
 using namespace Scintilla;
+
+namespace {
+
+// Restyle every window/menu border and the file-tree's hierarchy connectors to a
+// uniform rounded single-line look. TVision renders frames (and the tree graph)
+// from CP437 box-drawing bytes via a CP437->UTF-8 table; we repoint that table so
+// the same bytes draw rounded/single glyphs. Both frames and the tree's "|- -"
+// connectors use these bytes, so this restyles both at once. Active vs inactive
+// windows are then told apart by colour alone (the frame palette) -- Unicode has
+// no heavy/rounded corner glyph to reserve for "active".
+void applyRoundedFrames() noexcept
+{
+    static char tbl[256][4];
+    for (int c = 0; c < 256; ++c)
+        std::memcpy(tbl[c], tvision::CpTranslator::toUtf8((unsigned char) c), 4);
+    // Each glyph literal is exactly 3 UTF-8 bytes + NUL (== 4), matching a slot.
+    const struct { unsigned char b; const char *g; } remap[] = {
+        // corners -> rounded
+        {0xDA, "╭"}, {0xBF, "╮"}, {0xC0, "╰"}, {0xD9, "╯"},   // single
+        {0xC9, "╭"}, {0xBB, "╮"}, {0xC8, "╰"}, {0xBC, "╯"},   // double
+        {0xD5, "╭"}, {0xD6, "╭"}, {0xB7, "╮"}, {0xB8, "╮"},   // mixed
+        {0xD3, "╰"}, {0xD4, "╰"}, {0xBD, "╯"}, {0xBE, "╯"},
+        // double lines -> single
+        {0xCD, "─"}, {0xBA, "│"},
+        // tees / crosses (double or mixed) -> single
+        {0xCC, "├"}, {0xC6, "├"}, {0xC7, "├"},
+        {0xB9, "┤"}, {0xB5, "┤"}, {0xB6, "┤"},
+        {0xCB, "┬"}, {0xD1, "┬"}, {0xD2, "┬"},
+        {0xCA, "┴"}, {0xCF, "┴"}, {0xD0, "┴"},
+        {0xCE, "┼"}, {0xD7, "┼"}, {0xD8, "┼"},
+    };
+    for (auto &r : remap)
+        std::memcpy(tbl[r.b], r.g, 4);
+    tvision::CpTranslator::setTranslation(&tbl); // copies tbl + rebuilds the map
+}
+
+} // namespace
 
 // Branch indicator that lives at the right of the menu bar. It draws the current
 // branch (icon + name) like the clock used to, and a click opens a popup listing
@@ -166,6 +205,7 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     argc(argc),
     argv(argv)
 {
+    applyRoundedFrames(); // rounded single-line chrome before the first draw
     loadSettings(settings);
     frecency.load();
     // Fold any saved colour overrides onto the built-in 24-bit defaults before
@@ -290,6 +330,13 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
         deskTop->insert(outputWin);
         outputWin->hide();
     }
+
+    // Pipe git's (otherwise swallowed) command output into the output pane,
+    // revealing it on demand. Runs on the main thread from git->pump().
+    git->setOutputSink([this] (const std::string &label, int code,
+                               const std::string &output) {
+        reportGitOutput(label, code, output);
+    });
 }
 
 // Builds 'count' placeholder items for the recent-windows section of the Windows
@@ -411,6 +458,10 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             *new TMenuItem( "Pu~l~l", cmGitPull, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~P~ush", cmGitPush, kbNoKey, hcNoContext ) +
             newLine() +
+            *new TMenuItem( "~M~erge Branch...", cmGitMerge, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~A~bort Merge", cmGitMergeAbort, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Co~n~tinue Merge", cmGitMergeContinue, kbNoKey, hcNoContext ) +
+            newLine() +
             *new TMenuItem( "~R~efresh Status", cmGitRefresh, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~B~uild", kbAltB ) +
             *new TMenuItem( "~B~uild", cmBuild, kbF7, hcNoContext, "F7" ) +
@@ -504,7 +555,10 @@ void TurboApp::idle()
     if (watcher)
         onFilesChanged();
     if (git)
+    {
         git->pump(docTree);
+        updateEditorConflictBars();
+    }
     // Drain any output the terminal child processes produced since the last tick
     // and repaint the affected views (the reader threads wake the loop for us).
     for (auto *t : terminals)
@@ -575,6 +629,13 @@ void TurboApp::handleEvent(TEvent &event)
             case cmGitFetch: gitRemote(0); break;
             case cmGitPull: gitRemote(1); break;
             case cmGitPush: gitRemote(2); break;
+            case cmGitMerge: gitMerge(); break;
+            case cmGitMergeAbort: gitMergeAbort(); break;
+            case cmGitMergeContinue: gitMergeContinue(); break;
+            case cmGitResolveFile:
+                if (auto *w = (EditorWindow *) event.message.infoPtr)
+                    gitResolveFile(w);
+                break;
             case cmShowCompletion:
                 if (lsp)
                     if (auto *w = (EditorWindow *) event.message.infoPtr)
@@ -903,8 +964,15 @@ void TurboApp::applyActiveTheme() noexcept
 
 void TurboApp::gitRefresh()
 {
-    if (git)
-        git->requestStatus();
+    // The explicit "Refresh Status" menu command echoes a human-readable
+    // `git status` to the output pane (and refreshes the tree badges). The
+    // automatic refreshes elsewhere call requestStatus() directly and stay silent.
+    if (!git || !git->isRepo())
+    {
+        messageBox("This folder is not a git repository.", mfInformation | mfOKButton);
+        return;
+    }
+    git->statusToOutput();
 }
 
 void TurboApp::onFilesChanged()
@@ -1270,6 +1338,116 @@ void TurboApp::gitRemote(int which)
     }
 }
 
+void TurboApp::gitMerge()
+{
+    if (!git || !git->isRepo())
+    {
+        messageBox("This folder is not a git repository.", mfInformation | mfOKButton);
+        return;
+    }
+    if (git->currentStatus().merging)
+    {
+        messageBox("A merge is already in progress. Resolve the conflicts and "
+                   "Continue Merge, or Abort Merge first.", mfInformation | mfOKButton);
+        return;
+    }
+    std::string branch;
+    int favor = 0;
+    if (!executeMergeDialog(*git, branch, favor))
+        return;
+    GitManager::MergeFavor f = favor == 1 ? GitManager::MergeFavor::Ours
+                             : favor == 2 ? GitManager::MergeFavor::Theirs
+                                          : GitManager::MergeFavor::None;
+    git->merge(branch, f, [this, branch] (int code, const std::string &output) {
+        // The working tree changed either way (a merge commit, or conflict
+        // markers written into the files), so reload clean editors from disk.
+        reloadCleanEditorsFromDisk();
+        bool conflicted = output.find("CONFLICT") != std::string::npos ||
+                          output.find("Automatic merge failed") != std::string::npos;
+        if (conflicted)
+            messageBox("Merge has conflicts. Resolve the files marked 'U' (open "
+                       "one and use the editor's conflict toolbar to take ours / "
+                       "theirs per change), then Git > Continue Merge -- or "
+                       "Git > Abort Merge to back out.", mfInformation | mfOKButton);
+        else if (code != 0)
+        {
+            std::string m = "git merge '" + branch + "' failed:\n" +
+                (output.empty() ? std::string("(see Git output)") : output.substr(0, 400));
+            messageBox(m.c_str(), mfError | mfOKButton);
+        }
+    });
+}
+
+void TurboApp::gitMergeAbort()
+{
+    if (!git || !git->isRepo())
+    {
+        messageBox("This folder is not a git repository.", mfInformation | mfOKButton);
+        return;
+    }
+    git->mergeAbort([this] (int code, const std::string &output) {
+        reloadCleanEditorsFromDisk();
+        if (code != 0)
+        {
+            std::string m = "git merge --abort failed:\n" +
+                (output.empty() ? std::string("(no merge in progress?)") : output.substr(0, 400));
+            messageBox(m.c_str(), mfError | mfOKButton);
+        }
+    });
+}
+
+void TurboApp::gitMergeContinue()
+{
+    if (!git || !git->isRepo())
+    {
+        messageBox("This folder is not a git repository.", mfInformation | mfOKButton);
+        return;
+    }
+    git->mergeContinue([this] (int code, const std::string &output) {
+        reloadCleanEditorsFromDisk();
+        if (code != 0)
+        {
+            std::string m = "Could not complete the merge:\n" +
+                (output.empty() ? std::string("(resolve all 'U' files first)")
+                                : output.substr(0, 400));
+            messageBox(m.c_str(), mfError | mfOKButton);
+        }
+    });
+}
+
+void TurboApp::gitResolveFile(EditorWindow *w) noexcept
+{
+    if (!w || !git || !git->isRepo())
+        return;
+    // Save the resolved file to disk (synchronous), then stage it so git marks
+    // the path resolved; the next status refresh clears the conflict toolbar.
+    message(w, evCommand, cmSave, nullptr);
+    std::string path = w->filePath();
+    git->stage({path}, [] (int code, const std::string &output) {
+        if (code != 0)
+        {
+            std::string m = "git add failed:\n" +
+                (output.empty() ? std::string("(see Git output)") : output.substr(0, 400));
+            messageBox(m.c_str(), mfError | mfOKButton);
+        }
+    });
+}
+
+void TurboApp::updateEditorConflictBars() noexcept
+{
+    if (!git)
+        return;
+    const auto &files = git->currentStatus().files;
+    MRUlist.forEach([&] (EditorWindow *w) {
+        if (!w)
+            return;
+        auto it = files.find(w->filePath());
+        bool conflicted = it != files.end() &&
+                          it->second.state == GitFileState::Conflicted;
+        w->setConflictMode(conflicted);
+    });
+}
+
 void TurboApp::closeAll()
 {
     while (!MRUlist.empty()) {
@@ -1546,19 +1724,22 @@ void TurboApp::runInOutput(const std::string &label, const std::string &command,
     showOutput();
     if (!outputWin)
         return;
-    outputWin->view->clear();
-    outputWin->view->addLine({"$ " + label, okInfo, "", -1});
+    // BUILD tab: wiped at the start of each run, then shown.
+    outputWin->view->clear(otBuild);
+    outputWin->view->showTab(otBuild);
+    outputWin->view->addLine(otBuild, {"$ " + label, okInfo, "", -1});
 
     if (buildRunner)
         buildRunner->stop();
     buildRunner = std::make_unique<CommandRunner>();
     buildRunner->onLine = [this] (std::string_view line) {
         if (outputWin)
-            outputWin->view->addLine(parseBuildLine(std::string(line), projectRoot));
+            outputWin->view->addLine(otBuild,
+                parseBuildLine(std::string(line), projectRoot));
     };
     buildRunner->onExit = [this, onDone] (int code) {
         if (outputWin)
-            outputWin->view->addLine(
+            outputWin->view->addLine(otBuild,
                 { code == 0 ? std::string("[finished]")
                             : ("[exited with code " + std::to_string(code) + "]"),
                   okInfo, "", -1 });
@@ -1567,7 +1748,42 @@ void TurboApp::runInOutput(const std::string &label, const std::string &command,
     };
     std::string cwd = projectRoot.empty() ? std::string(".") : projectRoot;
     if (!buildRunner->start(command, cwd))
-        outputWin->view->addLine({"Failed to start command.", okError, "", -1});
+        outputWin->view->addLine(otBuild, {"Failed to start command.", okError, "", -1});
+}
+
+void TurboApp::reportGitOutput(const std::string &label, int code,
+                               const std::string &output)
+{
+    showOutput();
+    if (!outputWin)
+        return;
+    // GIT tab: a continuous log (never auto-cleared). Show it and echo the
+    // command like a shell prompt, then the captured output verbatim.
+    outputWin->view->showTab(otGit);
+    outputWin->view->addLine(otGit, {"$ " + label, okInfo, "", -1});
+    size_t start = 0;
+    while (start < output.size())
+    {
+        size_t nl = output.find('\n', start);
+        size_t end = (nl == std::string::npos) ? output.size() : nl;
+        // Drop a trailing '\r' so CRLF output doesn't leave stray carriage returns.
+        size_t len = end - start;
+        if (len && output[start + len - 1] == '\r')
+            --len;
+        outputWin->view->addLine(otGit, {output.substr(start, len),
+                                  code == 0 ? okNormal : okError, "", -1});
+        if (nl == std::string::npos)
+            break;
+        start = nl + 1;
+    }
+    if (code != 0)
+        outputWin->view->addLine(otGit,
+            {"[" + label + " exited with code " + std::to_string(code) + "]",
+             okError, "", -1});
+    else if (output.empty())
+        // A silent success (e.g. `git add`) would otherwise show only the header;
+        // confirm it ran so the pane doesn't look like nothing happened.
+        outputWin->view->addLine(otGit, {"[done]", okInfo, "", -1});
 }
 
 void TurboApp::runBuild()
@@ -1671,7 +1887,7 @@ void TurboApp::runRun()
             if (code == 0)
                 pendingAfterBuild = [this] { startRun(); };
             else if (outputWin)
-                outputWin->view->addLine({"[build failed -- not running]", okError, "", -1});
+                outputWin->view->addLine(otBuild, {"[build failed -- not running]", okError, "", -1});
         });
     }
     else
@@ -1716,7 +1932,7 @@ void TurboApp::startBackgroundCommands()
         bgJobs.push_back(std::move(job));
     }
     if (outputWin && !bgJobs.empty())
-        outputWin->view->addLine(
+        outputWin->view->addLine(otBuild,
             { "[started " + std::to_string(bgJobs.size()) +
               " background command(s); output in .turbo/logs]", okInfo, "", -1 });
 }
@@ -1737,7 +1953,7 @@ void TurboApp::stopAll()
         buildRunner->stop();
     stopBackgroundCommands();
     if (outputWin && had)
-        outputWin->view->addLine({"[stopped]", okInfo, "", -1});
+        outputWin->view->addLine(otBuild, {"[stopped]", okInfo, "", -1});
 }
 
 void TurboApp::newTerminal()

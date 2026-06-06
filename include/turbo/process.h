@@ -27,9 +27,14 @@ public:
     // (argv[0] is set to 'command'). Returns false on failure.
     // If 'cwd' is non-empty, the child runs in that working directory.
     // 'env' entries ("NAME=value") are added to the child's environment.
+    // If 'mergeStderr' is true the child's stderr is sent to the same pipe as
+    // its stdout (so readStdout() sees both); otherwise stderr goes to the null
+    // device. git in particular writes most of its output (push/pull/fetch
+    // progress and many messages) to stderr, so capture it when that matters.
     bool start(const std::string &command, const std::vector<std::string> &args,
                const std::string &cwd = {},
-               const std::vector<std::string> &env = {});
+               const std::vector<std::string> &env = {},
+               bool mergeStderr = false);
 
     // Blocking read from the child's stdout. Returns bytes read, 0 on EOF,
     // or -1 on error.
@@ -47,12 +52,14 @@ public:
 
     // Convenience for short-lived commands: spawn, read stdout to EOF into
     // 'output', wait for exit, and return the exit code (or -1 if the process
-    // could not be started). Blocking; call from a worker thread.
+    // could not be started). Blocking; call from a worker thread. When
+    // 'mergeStderr' is true the child's stderr is captured into 'output' too.
     static int runToEnd( const std::string &command,
                          const std::vector<std::string> &args,
                          std::string &output,
                          const std::string &cwd = {},
-                         const std::vector<std::string> &env = {} );
+                         const std::vector<std::string> &env = {},
+                         bool mergeStderr = false );
 
 private:
 #ifdef _WIN32

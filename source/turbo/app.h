@@ -162,6 +162,12 @@ struct TurboApp : public TApplication, EditorWindowParent
     void gitRefresh();
     void gitCommitDialog();
     void gitRemote(int which); // 0=fetch 1=pull 2=push
+    void gitMerge();           // pick a branch + strategy, then merge
+    void gitMergeAbort();      // git merge --abort
+    void gitMergeContinue();   // commit the resolved merge
+    void gitResolveFile(EditorWindow *w) noexcept; // save + git add a resolved file
+    // Show/hide each open editor's conflict toolbar from git's unmerged set.
+    void updateEditorConflictBars() noexcept;
     void configureLsp();
     void editLspSettings();
     // Colour-scheme dialog. 'editThemeSettings' runs the dialog (which posts
@@ -192,6 +198,11 @@ struct TurboApp : public TApplication, EditorWindowParent
     // with the exit code once the command finishes.
     void runInOutput(const std::string &label, const std::string &command,
                      std::function<void(int)> onDone = {});
+    // Show a finished git command's output in the output pane (revealing the pane
+    // if hidden): an echoed "$ <label>" header, the captured output, and -- on
+    // failure -- the exit code. Wired to GitManager's output sink.
+    void reportGitOutput(const std::string &label, int code,
+                         const std::string &output);
     // Run the configured run command + start the configured background commands.
     void startRun();
     void startBackgroundCommands();

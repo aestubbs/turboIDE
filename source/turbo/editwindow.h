@@ -48,6 +48,23 @@ struct EditorFrame : public turbo::BasicEditorFrame
     void handleEvent(TEvent &ev) override;
 };
 
+// A one-row toolbar docked at the top of an editor window (just under the title
+// bar), shown only while the file is in a git merge-conflict state. It is shaded
+// to match the active window frame and hosts [Button]-style clickable controls
+// for navigating and resolving the conflict markers git wrote into the file.
+struct EditorConflictBar : public TView
+{
+    EditorWindow *win {nullptr};
+    enum Btn { bPrev, bNext, bOurs, bTheirs, bBoth, bResolve, bAbort, bCount };
+    int hx0[bCount] {};   // per-button hit ranges, recomputed each draw
+    int hx1[bCount] {};
+
+    EditorConflictBar(const TRect &bounds, EditorWindow *win) noexcept;
+
+    void draw() override;
+    void handleEvent(TEvent &ev) override;
+};
+
 struct EditorWindowParent
 {
     virtual void handleFocus(EditorWindow &w) noexcept = 0;
@@ -79,6 +96,7 @@ struct EditorWindow : public turbo::BasicEditorWindow
     TCommandSet enabledCmds, disabledCmds;
 
     TView *bottomView {nullptr};
+    EditorConflictBar *conflictBar {nullptr};
     SearchState searchState;
 
     EditorWindow( const TRect &bounds, TurboEditor &aEditor, active_counter &fileCounter,
@@ -94,6 +112,15 @@ struct EditorWindow : public turbo::BasicEditorWindow
     void sizeLimits(TPoint &min, TPoint &max) override;
     void updateCommands() noexcept;
     void handleNotification(const SCNotification &scn, turbo::Editor &) override;
+
+    // Re-theme the editor so its background follows the window's active state
+    // (the unified blue when active, a dimmer shade when not), matching the
+    // other windows. Called on activation changes.
+    void applyActiveStateTheme() noexcept;
+
+    // Show/hide the merge-conflict toolbar at the top of the window. Idempotent;
+    // driven from git status (the file's Conflicted/unmerged state).
+    void setConflictMode(bool on) noexcept;
 
     void closeBottomView();
     void setBottomView(TView *view);

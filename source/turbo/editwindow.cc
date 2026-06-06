@@ -9,13 +9,19 @@
 
 #include <turbo/tpath.h>
 #include <turbo/util.h>
+#include <turbo/scintilla.h>
+#include <turbo/styles.h>
+#include <turbo/editstates.h>
 #include "editwindow.h"
 #include "app.h"
 #include "apputils.h"
+#include "cmds.h"
 #include "search.h"
 #include "gotoline.h"
 #include <iostream>
 #include <sstream>
+#include <string>
+#include <vector>
 using std::ios;
 
 EditorFrame::EditorFrame(const TRect &bounds) noexcept :
@@ -50,6 +56,243 @@ void EditorFrame::handleEvent(TEvent &ev)
         }
     }
     turbo::BasicEditorFrame::handleEvent(ev);
+}
+
+// ---------------------------------------------------------------------------
+// EditorConflictBar -- in-editor git merge-conflict resolution toolbar.
+
+namespace {
+
+// A parsed conflict block, as line indices into the document:
+//   <<<<<<<   startLine
+//   ours...
+//   |||||||   baseLine  (-1 unless diff3 conflict style)
+//   base...
+//   =======   sepLine
+//   theirs...
+//   >>>>>>>   endLine
+struct ConflictBlock { int startLine, baseLine, sepLine, endLine; };
+
+bool markerAt(const std::string &doc, size_t at, const char *mk) noexcept
+{
+    return at + 7 <= doc.size() && doc.compare(at, 7, mk) == 0;
+}
+
+// Byte offset of the start of each line.
+std::vector<size_t> lineStarts(const std::string &doc)
+{
+    std::vector<size_t> v;
+    v.push_back(0);
+    for (size_t i = 0; i < doc.size(); ++i)
+        if (doc[i] == '\n')
+            v.push_back(i + 1);
+    return v;
+}
+
+std::vector<ConflictBlock> parseConflicts(const std::string &doc,
+                                          const std::vector<size_t> &ls)
+{
+    std::vector<ConflictBlock> out;
+    int n = (int) ls.size();
+    for (int i = 0; i < n; )
+    {
+        if (markerAt(doc, ls[i], "<<<<<<<"))
+        {
+            ConflictBlock b {i, -1, -1, -1};
+            for (int j = i + 1; j < n; ++j)
+            {
+                if (b.sepLine < 0 && b.baseLine < 0 && markerAt(doc, ls[j], "|||||||"))
+                    b.baseLine = j;
+                else if (b.sepLine < 0 && markerAt(doc, ls[j], "======="))
+                    b.sepLine = j;
+                else if (markerAt(doc, ls[j], ">>>>>>>")) { b.endLine = j; break; }
+            }
+            if (b.sepLine >= 0 && b.endLine >= 0)
+            {
+                out.push_back(b);
+                i = b.endLine + 1;
+                continue;
+            }
+        }
+        ++i;
+    }
+    return out;
+}
+
+std::string docText(turbo::Editor &ed)
+{
+    long len = (long) ed.callScintilla(SCI_GETLENGTH, 0U, 0U);
+    TStringView sv = turbo::getRangePointer(ed.scintilla, 0, len);
+    return std::string(sv.data(), sv.size());
+}
+
+long caretLine(turbo::Editor &ed)
+{
+    long pos = (long) ed.callScintilla(SCI_GETCURRENTPOS, 0U, 0U);
+    return (long) ed.callScintilla(SCI_LINEFROMPOSITION, pos, 0U);
+}
+
+// The conflict block to act on: the one containing the caret, else the first
+// at/after it, else the first.
+int targetBlock(const std::vector<ConflictBlock> &blocks, long cl)
+{
+    for (int i = 0; i < (int) blocks.size(); ++i)
+        if (cl >= blocks[i].startLine && cl <= blocks[i].endLine)
+            return i;
+    for (int i = 0; i < (int) blocks.size(); ++i)
+        if (blocks[i].startLine >= cl)
+            return i;
+    return 0;
+}
+
+// Replace the caret's conflict block: kind 0 = ours, 1 = theirs, 2 = both.
+void applyChoice(EditorWindow *win, int kind)
+{
+    auto &ed = win->getEditor();
+    std::string doc = docText(ed);
+    auto ls = lineStarts(doc);
+    auto blocks = parseConflicts(doc, ls);
+    if (blocks.empty())
+        return;
+    const ConflictBlock &bk = blocks[targetBlock(blocks, caretLine(ed))];
+    auto byteOf = [&] (int line) -> size_t {
+        return line < (int) ls.size() ? ls[line] : doc.size();
+    };
+    int oursEnd = bk.baseLine >= 0 ? bk.baseLine : bk.sepLine;
+    std::string ours   = doc.substr(byteOf(bk.startLine + 1),
+                                    byteOf(oursEnd) - byteOf(bk.startLine + 1));
+    std::string theirs = doc.substr(byteOf(bk.sepLine + 1),
+                                    byteOf(bk.endLine) - byteOf(bk.sepLine + 1));
+    std::string repl = kind == 0 ? ours : kind == 1 ? theirs : ours + theirs;
+    size_t start = byteOf(bk.startLine), end = byteOf(bk.endLine + 1);
+    ed.callScintilla(SCI_BEGINUNDOACTION, 0U, 0U);
+    ed.callScintilla(SCI_DELETERANGE, (uptr_t) start, (sptr_t) (end - start));
+    ed.callScintilla(SCI_INSERTTEXT, (uptr_t) start, (sptr_t) repl.c_str());
+    ed.callScintilla(SCI_ENDUNDOACTION, 0U, 0U);
+    ed.callScintilla(SCI_GOTOPOS, (uptr_t) start, 0U);
+    ed.callScintilla(SCI_SCROLLCARET, 0U, 0U);
+    ed.redraw();
+    if (win->conflictBar)
+        win->conflictBar->drawView(); // refresh the remaining-count label
+}
+
+// Move the caret to the next (dir>0) / previous (dir<0) conflict, wrapping.
+void navConflict(EditorWindow *win, int dir)
+{
+    auto &ed = win->getEditor();
+    std::string doc = docText(ed);
+    auto ls = lineStarts(doc);
+    auto blocks = parseConflicts(doc, ls);
+    if (blocks.empty())
+        return;
+    long cl = caretLine(ed);
+    int n = (int) blocks.size(), target = -1;
+    if (dir >= 0)
+    {
+        for (int i = 0; i < n; ++i)
+            if (blocks[i].startLine > cl) { target = i; break; }
+        if (target < 0) target = 0;       // wrap to first
+    }
+    else
+    {
+        for (int i = n - 1; i >= 0; --i)
+            if (blocks[i].endLine < cl) { target = i; break; }
+        if (target < 0) target = n - 1;   // wrap to last
+    }
+    ed.callScintilla(SCI_GOTOLINE, (uptr_t) blocks[target].startLine, 0U);
+    ed.callScintilla(SCI_SCROLLCARET, 0U, 0U);
+    ed.redraw();
+}
+
+} // namespace
+
+EditorConflictBar::EditorConflictBar(const TRect &bounds, EditorWindow *aWin) noexcept :
+    TView(bounds), win(aWin)
+{
+    eventMask |= evMouseDown;
+}
+
+void EditorConflictBar::draw()
+{
+    TColorAttr cBar = win ? win->mapColor(turbo::wndFrameActive + 1) : TColorAttr {};
+    TColorAttr cBtn = cBar;            // buttons: frame colours reversed, so they
+    setFore(cBtn, getBack(cBar));      // read as raised [Label] controls
+    setBack(cBtn, getFore(cBar));
+
+    int n = 0;
+    if (win)
+    {
+        std::string doc = docText(win->getEditor());
+        n = (int) parseConflicts(doc, lineStarts(doc)).size();
+    }
+
+    TDrawBuffer b;
+    b.moveChar(0, ' ', cBar, size.x);
+    for (int i = 0; i < bCount; ++i) hx0[i] = hx1[i] = -1;
+
+    int x = 1;
+    auto button = [&] (Btn id, const char *label) {
+        std::string s = "[" + std::string(label) + "]";
+        b.moveStr(x, s.c_str(), cBtn);
+        hx0[id] = x; hx1[id] = x + (int) s.size();
+        x = hx1[id] + 1;
+    };
+    auto text = [&] (const std::string &s) {
+        b.moveStr(x, s.c_str(), cBar);
+        x += (int) s.size();
+    };
+
+    button(bPrev, "Prev");
+    button(bNext, "Next");
+    text("  " + std::to_string(n) + (n == 1 ? " conflict   " : " conflicts   "));
+    button(bOurs, "Ours");
+    button(bTheirs, "Theirs");
+    button(bBoth, "Both");
+    text("   ");
+    button(bResolve, "Mark Resolved");
+    text(" ");
+    button(bAbort, "Abort Merge");
+
+    writeLine(0, 0, size.x, 1, b);
+}
+
+void EditorConflictBar::handleEvent(TEvent &ev)
+{
+    if (ev.what == evMouseDown && win)
+    {
+        TPoint m = makeLocal(ev.mouse.where);
+        int hit = -1;
+        for (int i = 0; i < bCount; ++i)
+            if (m.x >= hx0[i] && m.x < hx1[i]) { hit = i; break; }
+        switch (hit)
+        {
+            case bPrev:   navConflict(win, -1); break;
+            case bNext:   navConflict(win, +1); break;
+            case bOurs:   applyChoice(win, 0); break;
+            case bTheirs: applyChoice(win, 1); break;
+            case bBoth:   applyChoice(win, 2); break;
+            case bResolve:
+            {
+                std::string doc = docText(win->getEditor());
+                if (!parseConflicts(doc, lineStarts(doc)).empty())
+                    messageBox("This file still has conflict markers. Resolve "
+                               "every conflict, then Mark Resolved.",
+                               mfInformation | mfOKButton);
+                else
+                    message(TProgram::application, evCommand, cmGitResolveFile, win);
+                break;
+            }
+            case bAbort:
+                if (messageBox("Abort the merge? This discards the merge and any "
+                               "conflict resolution done so far.",
+                               mfWarning | mfYesButton | mfNoButton) == cmYes)
+                    message(TProgram::application, evCommand, cmGitMergeAbort, nullptr);
+                break;
+        }
+        clearEvent(ev);
+        return;
+    }
+    TView::handleEvent(ev);
 }
 
 TFrame *EditorWindow::initFrame(TRect bounds)
@@ -327,11 +570,31 @@ void EditorWindow::handleEvent(TEvent &ev)
         super::handleEvent(ev);
 }
 
+void EditorWindow::applyActiveStateTheme() noexcept
+{
+    using namespace turbo;
+    // Editor background follows the window's active state, like the tree/output:
+    // the unified blue when active, the dimmer passive shade when not. We re-theme
+    // from a copy of the active scheme with only the normal-text background swapped
+    // (other styles inherit it), so syntax colours are preserved.
+    bool active = (state & sfActive) != 0;
+    TColorDesired bg = ::getBack(windowSchemeActive[active ? wndFrameActive
+                                                           : wndFramePassive]);
+    ColorScheme s;
+    for (int i = 0; i < TextStyleCount; ++i)
+        s[i] = schemeActive[i];
+    ::setBack(s[sNormal], bg);
+    auto &ed = getEditor();
+    applyTheming(ed.lexer, &s, ed.scintilla);
+    ed.redraw();
+}
+
 void EditorWindow::setState(ushort aState, Boolean enable)
 {
     super::setState(aState, enable);
     if (aState == sfActive)
     {
+        applyActiveStateTheme(); // dim/undim the editor background
         updateCommands();
         if (enable)
             parent.handleFocus(*this);
@@ -431,6 +694,40 @@ void EditorWindow::setBottomView(TView *view)
     bottomView = view;
     int dy = -(bottomView->size.y + !!(bottomView->options & ofFramed));
     growEditor(editor, dy);
+}
+
+// Move the editor view + line-number margin's TOP edge by 'dy' rows, to free (or
+// reclaim) a row at the top of the window for the conflict toolbar.
+static void shiftEditorTop(turbo::Editor &editor, int dy)
+{
+    turbo::forEachNotNull([&] (TView &v) {
+        TRect r = v.getBounds();
+        r.a.y += dy;
+        v.setBounds(r);
+    }, editor.view, editor.leftMargin);
+}
+
+void EditorWindow::setConflictMode(bool on) noexcept
+{
+    if (on == (conflictBar != nullptr))
+        return; // idempotent: already in the requested state
+    if (on)
+    {
+        TRect r = getExtent();
+        r.grow(-1, -1);
+        r.b.y = r.a.y + 1;            // single interior row under the title bar
+        conflictBar = new EditorConflictBar(r, this);
+        conflictBar->growMode = gfGrowHiX; // stretch horizontally, stay at the top
+        insert(conflictBar);
+        shiftEditorTop(editor, +1);
+    }
+    else
+    {
+        shiftEditorTop(editor, -1);
+        TObject::destroy(conflictBar);
+        conflictBar = nullptr;
+    }
+    editor.redraw();
 }
 
 template <class T, class ...Args>

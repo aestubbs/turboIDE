@@ -38,6 +38,7 @@ struct GitRepoStatus
     int ahead {0};
     int behind {0};
     bool detached {false};
+    bool merging {false};    // a merge is in progress (MERGE_HEAD exists)
     // Absolute path -> status, for every non-clean file.
     std::unordered_map<std::string, GitFileStatus> files;
     // Local branch short-names (refs/heads), sorted; includes the current one.
@@ -53,6 +54,11 @@ namespace GitClient
     // (out.isRepo will be false).
     bool status(const std::string &root, GitRepoStatus &out) noexcept;
 
+    // Human-readable `git status` (long form) for display in the output pane,
+    // captured into 'output' (combined stdout+stderr). Returns the exit code.
+    // Distinct from status() above, which parses porcelain v2 for file badges.
+    int statusText(const std::string &root, std::string &output) noexcept;
+
     // Mutations (later phases). Each returns the git exit code (0 = success) and
     // captures combined output into 'output'. Paths are absolute or repo-relative.
     int stage(const std::string &root, const std::vector<std::string> &paths,
@@ -65,6 +71,17 @@ namespace GitClient
                std::string &output) noexcept;
     int commit(const std::string &root, const std::string &message,
                std::string &output) noexcept;
+
+    // Merge 'branch' into the current branch. 'favor': 0 = default (stop on
+    // conflicts for manual resolution), 1 = -X ours, 2 = -X theirs (auto-resolve
+    // text conflicts toward that side). Returns the git exit code (non-zero on
+    // conflict or failure); output captures git's messages.
+    int merge(const std::string &root, const std::string &branch, int favor,
+              std::string &output) noexcept;
+    // Abort an in-progress merge (restore the pre-merge state).
+    int mergeAbort(const std::string &root, std::string &output) noexcept;
+    // Conclude an in-progress merge once conflicts are resolved/staged.
+    int mergeContinue(const std::string &root, std::string &output) noexcept;
 
     // Branch switching and stash, for the menu-bar branch dropdown.
     int checkout(const std::string &root, const std::string &branch, bool force,

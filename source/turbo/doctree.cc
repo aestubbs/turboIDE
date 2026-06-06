@@ -8,6 +8,7 @@
 #include <turbo/tpath.h>
 
 #define Uses_TProgram
+#define Uses_TFrame
 #define Uses_TDrawBuffer
 #define Uses_TKeys
 #define Uses_TEvent
@@ -466,25 +467,44 @@ void markSubtree(Node *n, bool v) noexcept
     for (Node *c = (Node *) n->childList; c; c = (Node *) c->next)
         markSubtree(c, v);
 }
-// Compute visibility for a node and its descendants; returns whether the node
-// is visible. A file is visible iff its name matches; a folder is visible iff
-// its own name matches (revealing its whole subtree) or any descendant matches.
-bool computeVisible(Node *n, const std::string &q) noexcept
+// Does a file node satisfy the git-status filter?
+bool gitFilterMatch(const Node *n, int gf) noexcept
 {
-    bool selfMatch = containsCI(n->text, q);
+    if (gf == tgfAll)
+        return true;
+    switch (gf)
+    {
+        case tgfModified:   return n->gitStatus == 'M' || n->gitStatus == 'R' ||
+                                   n->gitStatus == 'D' || n->gitStatus == 'A';
+        case tgfStaged:     return n->gitStaged;
+        case tgfUntracked:  return n->gitStatus == '?';
+        case tgfConflicted: return n->gitStatus == 'U';
+    }
+    return true;
+}
+// Compute visibility for a node and its descendants; returns whether the node
+// is visible. A file is visible iff its name matches the query AND its git state
+// matches the git filter. A folder is visible iff its own name matches (revealing
+// its whole subtree -- name filter only) or any descendant is visible.
+bool computeVisible(Node *n, const std::string &q, int gf) noexcept
+{
+    bool nameMatch = q.empty() || containsCI(n->text, q);
     if (!n->isDir)
     {
-        n->visible = selfMatch;
-        return selfMatch;
+        bool v = nameMatch && gitFilterMatch(n, gf);
+        n->visible = v;
+        return v;
     }
-    if (selfMatch)
+    // The "folder name matches -> reveal its whole subtree" shortcut applies only
+    // to the pure name filter; a git filter must still match descendant files.
+    if (gf == tgfAll && !q.empty() && containsCI(n->text, q))
     {
-        markSubtree(n, true); // folder name matches -> reveal its contents
+        markSubtree(n, true);
         return true;
     }
     bool any = false;
     for (Node *c = (Node *) n->childList; c; c = (Node *) c->next)
-        any |= computeVisible(c, q);
+        any |= computeVisible(c, q, gf);
     n->visible = any;
     return any;
 }
@@ -495,7 +515,7 @@ void DocumentTreeView::recomputeVisibility() noexcept
     if (!filtering())
         return; // the overrides ignore 'visible' when no filter is active
     for (Node *n = (Node *) root; n; n = (Node *) n->next)
-        computeVisible(n, filter);
+        computeVisible(n, filter, gitFilter);
 }
 
 void DocumentTreeView::setFilter(std::string_view query) noexcept
@@ -520,6 +540,24 @@ void DocumentTreeView::setFilter(std::string_view query) noexcept
         });
     foc = (pos >= 0) ? pos : 0; // first visible row if the old node is now hidden
     update();    // recompute range, clamp foc, scroll it into view
+    drawView();
+}
+
+void DocumentTreeView::setGitFilter(int gf) noexcept
+{
+    if (gf == gitFilter)
+        return;
+    Node *focusedNode = (Node *) getNode(foc); // keep the same node highlighted
+    gitFilter = gf;
+    recomputeVisibility();
+    int pos = -1;
+    if (focusedNode)
+        firstThat([focusedNode, &pos] (Node *n, int p) {
+            if (n == focusedNode) { pos = p; return true; }
+            return false;
+        });
+    foc = (pos >= 0) ? pos : 0;
+    update();
     drawView();
 }
 
@@ -668,10 +706,13 @@ enum class TreeRole { Normal, Focused, Selected };
 // the tree matches the editor windows (and follows any theme edits). Returned as
 // a TAttrPair: the low attr paints folder/expanded rows and the row fill, while
 // the high attr (color >> 8) paints file/leaf text.
-TAttrPair treeColors(TreeRole role) noexcept
+TAttrPair treeColors(TreeRole role, bool active) noexcept
 {
     using namespace turbo;
-    TColorDesired bg = ::getBack(windowSchemeActive[wndFrameActive]); // unified window blue
+    // Normal rows track the window's active state (the unified blue when active,
+    // a dimmer shade when not) -- matching the frame and the other windows.
+    TColorDesired bg = ::getBack(windowSchemeActive[active ? wndFrameActive
+                                                           : wndFramePassive]);
     switch (role)
     {
         case TreeRole::Focused:
@@ -694,17 +735,33 @@ Boolean drawNode( TOutlineViewer *v, TNode *cur, int level, int position,
     {
         if (position >= v->delta.y + v->size.y)
             return True;
+        bool winActive = v->owner && (v->owner->state & sfActive);
         TAttrPair color;
         if (position == v->foc && (v->state & sfFocused))
-            color = treeColors(TreeRole::Focused);
+            color = treeColors(TreeRole::Focused, winActive);
         else if (v->isSelected(position))
-            color = treeColors(TreeRole::Selected);
+            color = treeColors(TreeRole::Selected, winActive);
         else
-            color = treeColors(TreeRole::Normal);
+            color = treeColors(TreeRole::Normal, winActive);
         dBuf.moveChar(0, ' ', color, v->size.x);
         int x;
         {
-            TStringView graph = v->getGraph(level, lines, flags);
+            // The root level draws no connector for files, so its vertical line
+            // runs only between folders: column 0 (the root ancestor's line) is
+            // kept only while the root folder has another folder after it. A root
+            // folder followed only by files is therefore the "last folder" -- it
+            // ends as a corner, and its whole subtree drops column 0.
+            long glines = lines;
+            ushort gflags = flags;
+            {
+                Node *root = (Node *) cur;
+                while (root->parent) root = root->parent;
+                bool rootNextFolder = root->next && ((Node *) root->next)->isDir;
+                if (rootNextFolder) glines |= 1L; else glines &= ~1L;
+                if (level == 0 && ((Node *) cur)->isDir && !rootNextFolder)
+                    gflags |= ovLast; // last folder among the root entries -> corner
+            }
+            TStringView graph = v->getGraph(level, glines, gflags);
             x = strwidth(graph) - v->delta.x;
             if (x > 0)
                 dBuf.moveStr(0, graph, color, (ushort) -1U, v->delta.x);
@@ -747,16 +804,22 @@ char *DocumentTreeView::getGraph(int level, long lines, ushort flags)
 {
     if (level == 0)
     {
-        // One ASCII column, aligned across root entries:
-        //   '+' collapsed folder, '-' expanded folder, ' ' file/empty dir.
-        char *g = new char[2];
+        // One column, aligned across root entries, then a space before the name:
+        //   '+' collapsed, '┬' expanded (a folder follows), '└' expanded (last
+        //   folder), ' ' file. The down-leg '┬' is only used when the root line
+        //   continues to another folder below; the last folder closes with a
+        //   corner so its leg doesn't dangle into the trailing root files.
+        char *g = new char[3];
         if (!(flags & ovExpanded))
             g[0] = '+';                 // has children, currently collapsed
+        else if ((flags & ovChildren) && !(flags & ovLast))
+            g[0] = '\xC2';              // ┬ : expanded, another folder follows
         else if (flags & ovChildren)
-            g[0] = '-';                 // has children, currently expanded
+            g[0] = '\xC0';              // └ : expanded last folder, line ends here
         else
             g[0] = ' ';                 // leaf
-        g[1] = '\0';
+        g[1] = ' ';                     // gap between the marker and the name
+        g[2] = '\0';
         return g;
     }
     // Deeper levels, built as tight as possible: one column per ancestor level
@@ -766,15 +829,25 @@ char *DocumentTreeView::getGraph(int level, long lines, ushort flags)
     // A collapsed folder shows '+' in the connector slot (the classic
     // expandable-node marker), so the affordance survives without any extra
     // width; files and expanded folders show the usual branch glyph.
-    char *g = new char[level + 2]; // 'level' ancestor cols + connector + NUL
+    char *g = new char[level + 3]; // ancestor cols + connector + space + NUL
     char *p = g;
     long l = lines;
     for (int i = 0; i < level; ++i, l >>= 1)
         *p++ = (l & 1) ? '\xB3' : ' ';          // │ (continues) or gap
     if (!(flags & ovExpanded))
         *p++ = '+';                             // collapsed folder
+    else if ((flags & ovChildren) && !(flags & ovLast))
+        // ┼ : an expanded folder with siblings below. The sibling line runs
+        // through it (up + down) so it stays connected to its parent and the
+        // siblings around it, while the horizontal bar leads into its own name
+        // and (one column right) its children -- a plain '┬' would break the
+        // line by lacking the upward leg.
+        *p++ = '\xC5';
     else
-        *p++ = (flags & ovLast) ? '\xC0' : '\xC3'; // └ (last) or ├
+        // └ for any last child (file or expanded folder -- its line ends, so no
+        // leg to dangle), ├ for a non-last file.
+        *p++ = (flags & ovLast) ? '\xC0' : '\xC3';
+    *p++ = ' ';                                 // gap between the connector and the name
     *p = '\0';
     return g;
 }
@@ -784,7 +857,7 @@ void DocumentTreeView::draw()
     TDrawBuffer dBuf;
     DrawCtx ctx {&dBuf, -1};
     TOutlineViewer::firstThat(drawNode, &ctx);
-    TAttrPair nrmColor = treeColors(TreeRole::Normal);
+    TAttrPair nrmColor = treeColors(TreeRole::Normal, owner && (owner->state & sfActive));
     dBuf.moveChar(0, ' ', nrmColor, size.x);
     writeLine(0, ctx.last + 1, size.x, size.y - (ctx.last - delta.y), dBuf);
 }
@@ -934,6 +1007,7 @@ static void clearStatusRecursive(Node *list) noexcept
     {
         bool had = n->gitStatus != 0;
         n->gitStatus = 0;
+        n->gitStaged = false;
         if (had)
             n->refreshText();
         if (n->childList)
@@ -951,6 +1025,7 @@ void DocumentTreeView::applyGitStatus(
         if (!node)
             continue; // file outside the scanned tree (e.g. ignored dir)
         node->gitStatus = badgeFor(kv.second);
+        node->gitStaged = kv.second.staged;
         node->refreshText();
         // Roll the "contains changes" marker up to ancestor directories.
         for (Node *p = node->parent; p; p = p->parent)
@@ -960,8 +1035,113 @@ void DocumentTreeView::applyGitStatus(
                 p->refreshText();
             }
     }
+    // Keep an active git-status filter live as badges change (e.g. a file that
+    // just became conflicted should appear under the Conflicted filter).
+    if (filtering())
+        recomputeVisibility();
     update();
     drawView();
+}
+
+namespace {
+
+const char *gitFilterLabel(int gf) noexcept
+{
+    switch (gf)
+    {
+        case tgfModified:   return "Modified";
+        case tgfStaged:     return "Staged";
+        case tgfUntracked:  return "Untracked";
+        case tgfConflicted: return "Conflicted";
+        default:            return "All";
+    }
+}
+
+// The git-status filter dropdown, a one-row control under the name filter.
+// Clicking it pops a menu of states; choosing one filters the tree.
+struct TreeGitFilterBar : public TView
+{
+    DocumentTreeWindow *win {nullptr};
+
+    TreeGitFilterBar(const TRect &b, DocumentTreeWindow *w) noexcept :
+        TView(b), win(w) { eventMask |= evMouseDown; }
+
+    void draw() override
+    {
+        int gf = (win && win->tree) ? win->tree->gitFilter : tgfAll;
+        TColorAttr c = win ? win->mapColor(turbo::wndInputLineNormal + 1) : TColorAttr {};
+        TDrawBuffer b;
+        b.moveChar(0, ' ', c, size.x);
+        std::string s = "Git: " + std::string(gitFilterLabel(gf));
+        b.moveStr(1, s.c_str(), c);
+        if (size.x >= 3)
+            b.moveStr(size.x - 2, "v", c); // dropdown affordance
+        writeLine(0, 0, size.x, 1, b);
+    }
+
+    void handleEvent(TEvent &ev) override
+    {
+        if (ev.what == evMouseDown && win && win->tree)
+        {
+            static const char *labels[tgfCount] =
+                {"All", "Modified", "Staged", "Untracked", "Conflicted"};
+            TMenuItem *head = nullptr, *tail = nullptr;
+            for (int i = 0; i < tgfCount; ++i)
+            {
+                auto *it = new TMenuItem(labels[i], cmTreeGitFilterBase + i,
+                                         kbNoKey, hcNoContext);
+                if (!head) head = tail = it;
+                else { tail->append(it); tail = it; }
+            }
+            ushort cmd = popupMenu(ev.mouse.where, *head, nullptr);
+            int sel = (int) cmd - cmTreeGitFilterBase;
+            if (sel >= 0 && sel < tgfCount)
+            {
+                win->tree->setGitFilter(sel);
+                drawView();
+            }
+            clearEvent(ev);
+            return;
+        }
+        TView::handleEvent(ev);
+    }
+};
+
+// The tree window's frame, customised to rule one interior row (the filter-area
+// divider) with a line that joins the side borders via the proper tee
+// connectors -- so it reads as part of the window chrome rather than a detached
+// rule floating inside it. Drawn by the frame (not a separate view) so it stays
+// correct across the frame's own redraws (activation, title change).
+struct TreeFrame : public TFrame
+{
+    int dividerRow {-1}; // window-local row to rule, or -1 for none
+
+    TreeFrame(const TRect &b) noexcept : TFrame(b) {}
+
+    void draw() override
+    {
+        TFrame::draw();
+        if (dividerRow <= 0 || dividerRow >= size.y - 1)
+            return;
+        // Match the border colour, then lay a single-line rule with double-line
+        // tee junctions (CP437: 0xC7 = ╟, 0xC4 = ─, 0xB6 = ╢) -- the same bytes
+        // TFrame uses, so they track the active/passive frame palette.
+        TColorAttr c = getColor((state & sfActive) ? 0x0503 : 0x0101);
+        TDrawBuffer b;
+        for (int x = 0; x < size.x; ++x)
+        {
+            b.putChar(x, x == 0 ? '\xC7' : (x == size.x - 1 ? '\xB6' : '\xC4'));
+            b.putAttribute(x, c);
+        }
+        writeLine(0, dividerRow, size.x, 1, b);
+    }
+};
+
+} // namespace
+
+TFrame *DocumentTreeWindow::initFrame(TRect bounds)
+{
+    return new TreeFrame(bounds);
 }
 
 DocumentTreeWindow::DocumentTreeWindow(const TRect &bounds, DocumentTreeWindow **ptr) noexcept :
@@ -975,16 +1155,37 @@ DocumentTreeWindow::DocumentTreeWindow(const TRect &bounds, DocumentTreeWindow *
     options |= ofFirstClick;
     auto *hsb = standardScrollBar(sbHorizontal),
          *vsb = standardScrollBar(sbVertical);
-    // Reserve the top interior row for the single-line name filter; the tree
-    // fills the rest.
+    // Delineated filter area at the top: name filter (row 0), git-status filter
+    // dropdown (row 1), a divider (row 2, ruled by the frame); the tree below.
     TRect inner = getExtent();
     inner.grow(-1, -1);
-    TRect boxR = inner;  boxR.b.y = boxR.a.y + 1;
-    TRect treeR = inner; treeR.a.y += 1;
-    auto *box = new TreeFilterInputLine(boxR, this);
+    TRect nameR = inner; nameR.b.y = nameR.a.y + 1;
+    TRect gitR  = inner; gitR.a.y = nameR.b.y;  gitR.b.y = gitR.a.y + 1;
+    TRect divR  = inner; divR.a.y = gitR.b.y;   divR.b.y = divR.a.y + 1;
+    TRect treeR = inner; treeR.a.y = divR.b.y;
+
+    auto *box = new TreeFilterInputLine(nameR, this);
     box->growMode = gfGrowHiX; // full width, pinned to the top
     insert(box);
     filterBox = box;
+
+    auto *gbar = new TreeGitFilterBar(gitR, this);
+    gbar->growMode = gfGrowHiX;
+    insert(gbar);
+
+    // The divider row is ruled by the frame so the line joins the side borders.
+    if (frame)
+        ((TreeFrame *) frame)->dividerRow = divR.a.y;
+
+    // The vertical scrollbar belongs to the tree only: start it below the filter
+    // area so it doesn't run up alongside the filter rows.
+    {
+        TRect sr = vsb->getBounds();
+        sr.a.y = treeR.a.y;
+        vsb->setBounds(sr);
+        vsb->growMode = gfGrowLoX | gfGrowHiX | gfGrowHiY;
+    }
+
     tree = new DocumentTreeView(treeR, hsb, vsb, nullptr);
     tree->growMode = gfGrowHiX | gfGrowHiY;
     tree->win = this;
@@ -1071,6 +1272,15 @@ void DocumentTreeWindow::handleEvent(TEvent &ev)
         }
     }
     TWindow::handleEvent(ev);
+}
+
+void DocumentTreeWindow::setState(ushort aState, Boolean enable)
+{
+    TWindow::setState(aState, enable);
+    // The tree rows dim when the window is inactive; repaint them on the change
+    // (the frame already repaints itself).
+    if ((aState & sfActive) && tree)
+        tree->drawView();
 }
 
 void DocumentTreeWindow::close()

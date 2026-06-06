@@ -3,6 +3,7 @@
 #include <turbo/process.h>
 
 #include <cstring>
+#include <filesystem>
 
 namespace {
 
@@ -72,6 +73,16 @@ std::string findRepoRoot(const std::string &dir) noexcept
     return trimNewline(std::move(out));
 }
 
+int statusText(const std::string &root, std::string &output) noexcept
+{
+    // Human-readable status for the output pane. Force colour off so ANSI
+    // escapes never leak into the pane: git auto-disables colour on a pipe, but
+    // a user's `color.ui=always` would otherwise re-enable it.
+    return turbo::Process::runToEnd(
+        "git", {"-c", "color.ui=false", "status"}, output, root,
+        nonInteractiveEnv(), true);
+}
+
 bool status(const std::string &root, GitRepoStatus &out) noexcept
 {
     out = GitRepoStatus {};
@@ -87,6 +98,15 @@ bool status(const std::string &root, GitRepoStatus &out) noexcept
     if (rc != 0)
         return false;
     out.isRepo = true;
+
+    // A merge is in progress while MERGE_HEAD exists. (Cheap filesystem check;
+    // covers the common ".git is a directory" case -- linked worktrees, where
+    // .git is a gitdir-redirect file, won't flag here, but the conflict badges
+    // and the merge menu commands still work regardless.)
+    {
+        std::error_code ec;
+        out.merging = std::filesystem::exists(root + "/.git/MERGE_HEAD", ec);
+    }
 
     auto records = splitNul(buf);
     for (size_t i = 0; i < records.size(); ++i)
@@ -179,7 +199,7 @@ int stage(const std::string &root, const std::vector<std::string> &paths,
 {
     std::vector<std::string> args = {"add", "--"};
     for (auto &p : paths) args.push_back(p);
-    return turbo::Process::runToEnd("git", args, output, root, nonInteractiveEnv());
+    return turbo::Process::runToEnd("git", args, output, root, nonInteractiveEnv(), true);
 }
 
 int unstage(const std::string &root, const std::vector<std::string> &paths,
@@ -187,7 +207,7 @@ int unstage(const std::string &root, const std::vector<std::string> &paths,
 {
     std::vector<std::string> args = {"restore", "--staged", "--"};
     for (auto &p : paths) args.push_back(p);
-    return turbo::Process::runToEnd("git", args, output, root, nonInteractiveEnv());
+    return turbo::Process::runToEnd("git", args, output, root, nonInteractiveEnv(), true);
 }
 
 int revert(const std::string &root, const std::vector<std::string> &paths,
@@ -198,7 +218,35 @@ int revert(const std::string &root, const std::vector<std::string> &paths,
     // step (and restores a file deleted in the work tree).
     std::vector<std::string> args = {"checkout", "HEAD", "--"};
     for (auto &p : paths) args.push_back(p);
-    return turbo::Process::runToEnd("git", args, output, root, nonInteractiveEnv());
+    return turbo::Process::runToEnd("git", args, output, root, nonInteractiveEnv(), true);
+}
+
+int merge(const std::string &root, const std::string &branch, int favor,
+          std::string &output) noexcept
+{
+    // --no-edit: don't open an editor for the merge-commit message on a clean
+    // auto-merge (which would hang under the TUI). -X ours/theirs auto-resolves
+    // textual conflicts toward one side while still merging the other changes.
+    std::vector<std::string> args = {"merge", "--no-edit"};
+    if (favor == 1)      { args.push_back("-X"); args.push_back("ours"); }
+    else if (favor == 2) { args.push_back("-X"); args.push_back("theirs"); }
+    args.push_back(branch);
+    return turbo::Process::runToEnd("git", args, output, root, nonInteractiveEnv(), true);
+}
+
+int mergeAbort(const std::string &root, std::string &output) noexcept
+{
+    return turbo::Process::runToEnd(
+        "git", {"merge", "--abort"}, output, root, nonInteractiveEnv(), true);
+}
+
+int mergeContinue(const std::string &root, std::string &output) noexcept
+{
+    // Conclude the merge by committing the resolved index with the prepared
+    // MERGE_MSG. --no-edit avoids the commit-message editor (fails, as it
+    // should, if unmerged paths remain).
+    return turbo::Process::runToEnd(
+        "git", {"commit", "--no-edit"}, output, root, nonInteractiveEnv(), true);
 }
 
 int checkout(const std::string &root, const std::string &branch, bool force,
@@ -208,42 +256,42 @@ int checkout(const std::string &root, const std::string &branch, bool force,
     if (force)
         args.push_back("--force");
     args.push_back(branch);
-    return turbo::Process::runToEnd("git", args, output, root, nonInteractiveEnv());
+    return turbo::Process::runToEnd("git", args, output, root, nonInteractiveEnv(), true);
 }
 
 int stashPush(const std::string &root, std::string &output) noexcept
 {
     return turbo::Process::runToEnd(
-        "git", {"stash", "push"}, output, root, nonInteractiveEnv());
+        "git", {"stash", "push"}, output, root, nonInteractiveEnv(), true);
 }
 
 int stashPop(const std::string &root, std::string &output) noexcept
 {
     return turbo::Process::runToEnd(
-        "git", {"stash", "pop"}, output, root, nonInteractiveEnv());
+        "git", {"stash", "pop"}, output, root, nonInteractiveEnv(), true);
 }
 
 int commit(const std::string &root, const std::string &message,
            std::string &output) noexcept
 {
     return turbo::Process::runToEnd(
-        "git", {"commit", "-m", message}, output, root, nonInteractiveEnv());
+        "git", {"commit", "-m", message}, output, root, nonInteractiveEnv(), true);
 }
 
 int fetch(const std::string &root, std::string &output) noexcept
 {
-    return turbo::Process::runToEnd("git", {"fetch"}, output, root, nonInteractiveEnv());
+    return turbo::Process::runToEnd("git", {"fetch"}, output, root, nonInteractiveEnv(), true);
 }
 
 int pull(const std::string &root, std::string &output) noexcept
 {
     return turbo::Process::runToEnd(
-        "git", {"pull", "--ff-only"}, output, root, nonInteractiveEnv());
+        "git", {"pull", "--ff-only"}, output, root, nonInteractiveEnv(), true);
 }
 
 int push(const std::string &root, std::string &output) noexcept
 {
-    return turbo::Process::runToEnd("git", {"push"}, output, root, nonInteractiveEnv());
+    return turbo::Process::runToEnd("git", {"push"}, output, root, nonInteractiveEnv(), true);
 }
 
 } // namespace GitClient

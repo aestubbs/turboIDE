@@ -2,6 +2,7 @@
 #define TURBO_DOCTREE_H
 
 #define Uses_TWindow
+#define Uses_TFrame
 #define Uses_TOutline
 #define Uses_TInputLine
 #include <tvision/tv.h>
@@ -16,6 +17,11 @@ struct EditorWindow;
 struct GitFileStatus;
 struct DocumentTreeWindow;
 
+// Git-status filter shown in the tree's filter area (a dropdown). 'All' clears
+// it; the rest restrict the tree to files in that state.
+enum TreeGitFilter { tgfAll = 0, tgfModified, tgfStaged, tgfUntracked,
+                     tgfConflicted, tgfCount };
+
 struct DocumentTreeView : public TOutline {
 
     struct Node : public TNode {
@@ -28,6 +34,7 @@ struct DocumentTreeView : public TOutline {
         // Git status badge char: 0 = clean, else 'M' 'A' 'D' 'R' '?' 'U' for a
         // file, or '.' for a directory that contains changes.
         char gitStatus {0};
+        bool gitStaged {false}; // the file's change is staged (for the Staged filter)
         // Whether this node is shown under the current filter (see setFilter).
         // Only consulted while a filter is active; ignored otherwise.
         bool visible {true};
@@ -99,7 +106,13 @@ struct DocumentTreeView : public TOutline {
     // expanded; a folder whose own name matches reveals its entire contents. The
     // underlying node tree is never modified -- only what the outline iterates.
     void setFilter(std::string_view query) noexcept;
-    bool filtering() const noexcept { return !filter.empty(); }
+    bool filtering() const noexcept { return !filter.empty() || gitFilter != tgfAll; }
+
+    // --- Git-status filter ------------------------------------------------
+    // Restrict the tree to files in a given git state (combined with the name
+    // filter). tgfAll clears it. Folders stay visible iff they contain a match.
+    int gitFilter {tgfAll};
+    void setGitFilter(int gf) noexcept;
 
     // The owning window wires this up so the tree can drive the search box
     // (Ctrl-F to focus it, Esc to clear it).
@@ -165,6 +178,9 @@ struct DocumentTreeWindow : public TWindow {
     DocumentTreeWindow(const TRect &bounds, DocumentTreeWindow **ptr) noexcept;
     ~DocumentTreeWindow();
 
+    // Custom frame (draws the filter-area divider so it joins the side borders).
+    static TFrame *initFrame(TRect bounds);
+
     // Search-box coordination (called from the box and the tree).
     void focusFilter() noexcept;          // put the cursor in the search box
     void applyFilterFromBox() noexcept;   // push the box text into the tree filter
@@ -181,6 +197,7 @@ struct DocumentTreeWindow : public TWindow {
     TColorAttr mapColor(uchar index) noexcept override;
 
     void handleEvent(TEvent &ev) override;
+    void setState(ushort aState, Boolean enable) override; // repaint tree on activate
     void close() override;
 
 };

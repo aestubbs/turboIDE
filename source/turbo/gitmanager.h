@@ -31,8 +31,25 @@ public:
     bool isRepo() const noexcept { return !root.empty(); }
     const std::string &repoRoot() const noexcept { return root; }
 
-    // Queue a status refresh (cheap to call repeatedly; coalesced).
+    // Queue a status refresh (cheap to call repeatedly; coalesced). Silent:
+    // used for automatic/background refreshes (file changes, after mutations).
     void requestStatus() noexcept;
+
+    // Like requestStatus(), but also echoes a human-readable `git status` to the
+    // output sink. For the explicit "Refresh Status" menu command, so it gives
+    // visible feedback like the other Git-menu commands.
+    void statusToOutput() noexcept;
+
+    // A sink for the combined output of every git command (commit, fetch, pull,
+    // push, stage, unstage, revert, branch switch), invoked on the main thread
+    // from pump() with a short command label (e.g. "git push"), the exit code,
+    // and the captured stdout+stderr. The app wires this to the output pane's GIT
+    // tab -- a continuous log -- so git's normally-swallowed output is visible
+    // and every action is acknowledged. Status refreshes are NOT routed here
+    // (they are internal and parsed for badges, not user-issued commands).
+    using OutputSink = std::function<void(const std::string &label, int code,
+                                          const std::string &output)>;
+    void setOutputSink(OutputSink sink) noexcept { outputSink = std::move(sink); }
 
     // The most recent status applied on the main thread (updated by pump()).
     const GitRepoStatus &currentStatus() const noexcept { return lastStatus; }
@@ -59,6 +76,14 @@ public:
     void pull(OpCallback onDone = {}) noexcept;
     void push(OpCallback onDone = {}) noexcept;
 
+    // Merge 'branch' into the current branch. 'favor' picks the conflict
+    // strategy (None = manual, Ours/Theirs = -X ours/theirs auto-resolve).
+    enum class MergeFavor { None, Ours, Theirs };
+    void merge(const std::string &branch, MergeFavor favor,
+               OpCallback onDone = {}) noexcept;
+    void mergeAbort(OpCallback onDone = {}) noexcept;     // restore pre-merge state
+    void mergeContinue(OpCallback onDone = {}) noexcept;  // commit the resolved merge
+
     // Apply any ready results to the tree window. Cheap; call every idle tick.
     void pump(DocumentTreeWindow *treeWindow) noexcept;
 
@@ -81,10 +106,14 @@ private:
     bool stopping {false};
     std::atomic<bool> statusQueued {false};
 
+    OutputSink outputSink; // main-thread only (set once at startup, read in pump())
+
     // Worker -> main results.
     std::mutex resMx;
     std::optional<GitRepoStatus> pendingStatus;
-    struct OpResult { OpCallback cb; int code; std::string output; };
+    // 'label' is the echoed header for the output sink (e.g. "git push"). An
+    // empty label means the op is not routed to the sink.
+    struct OpResult { OpCallback cb; int code; std::string output; std::string label; };
     std::vector<OpResult> pendingOps;
 };
 

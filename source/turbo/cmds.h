@@ -64,6 +64,10 @@ enum : ushort
     cmGitFetch,
     cmGitPull,
     cmGitPush,
+    cmGitMerge,
+    cmGitMergeAbort,
+    cmGitMergeContinue,
+    cmGitResolveFile, // mark the conflict-bar's editor file resolved (save + git add)
     cmToggleHidden,
     cmNewTerminal,
     // Fuzzy navigation overlays.
@@ -92,6 +96,9 @@ enum : ushort
     // Branch dropdown in the menu bar: cmBranchBase + i checks out the i-th
     // branch shown in the list (i in [0, branchListMax)).
     cmBranchBase = 1200,
+    // File-tree git-status filter dropdown: cmTreeGitFilterBase + i selects the
+    // i-th TreeGitFilter (i in [0, tgfCount)).
+    cmTreeGitFilterBase = 1300,
 };
 
 enum { windowListMax = 10 };

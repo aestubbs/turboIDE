@@ -3,6 +3,9 @@
 #define Uses_TLabel
 #define Uses_TButton
 #define Uses_TCheckBoxes
+#define Uses_TRadioButtons
+#define Uses_TListBox
+#define Uses_TStringCollection
 #define Uses_TSItem
 #define Uses_TStaticText
 #define Uses_TScrollBar
@@ -179,4 +182,67 @@ unsigned short executeBranchSwitchDialog(const char *branch) noexcept
     unsigned short res = TProgram::deskTop->execView(d);
     TObject::destroy(d);
     return res;
+}
+
+bool executeMergeDialog(GitManager &git, std::string &branch, int &favor) noexcept
+{
+    const GitRepoStatus &st = git.currentStatus();
+    std::vector<std::string> others;
+    for (auto &b : st.branches)
+        if (b != st.branch)
+            others.push_back(b);
+    if (others.empty())
+    {
+        messageBox("No other branches to merge.", mfInformation | mfOKButton);
+        return false;
+    }
+
+    auto *d = new TDialog(TRect(0, 0, 58, 18), "Merge");
+    d->options |= ofCentered;
+
+    std::string head = st.branch.empty() ? std::string("the current branch")
+                                         : ("'" + st.branch + "'");
+    d->insert(new TStaticText(TRect(2, 1, 56, 2),
+        ("Merge a branch into " + head + ":").c_str()));
+
+    // Branch list (TStringCollection sorts the names; read the selection back by
+    // index from the collection so display order and result stay in sync).
+    auto *vsb = new TScrollBar(TRect(54, 3, 55, 9));
+    d->insert(vsb);
+    auto *coll = new TStringCollection((ccIndex) others.size(), 8);
+    for (auto &b : others)
+        coll->insert(newStr(b.c_str()));
+    auto *list = new TListBox(TRect(3, 3, 54, 9), 1, vsb);
+    list->newList(coll);
+    d->insert(list);
+
+    d->insert(new TLabel(TRect(2, 10, 22, 11), "Conflict ~s~trategy:", nullptr));
+    auto *strat = new TRadioButtons(TRect(3, 11, 56, 14),
+        new TSItem("~D~efault (resolve manually)",
+        new TSItem("Favor ~o~urs (-X ours)",
+        new TSItem("Favor ~t~heirs (-X theirs)", nullptr))));
+    d->insert(strat);
+
+    int by = 15;
+    d->insert(new TButton(TRect(32, by, 44, by + 2), "~M~erge", cmOK, bfDefault));
+    d->insert(new TButton(TRect(45, by, 56, by + 2), "Cancel", cmCancel, bfNormal));
+
+    d->selectNext(False);
+
+    bool ok = false;
+    if (TProgram::deskTop->execView(d) == cmOK)
+    {
+        short sel = list->focused;
+        if (sel >= 0 && sel < (short) coll->getCount())
+        {
+            branch = (const char *) coll->at(sel);
+            ushort s = 0;
+            strat->getData(&s);
+            favor = (int) s;
+            ok = true;
+        }
+    }
+    TObject::destroy(d);     // destroys the listbox (which does not own the list)
+    TObject::destroy(coll);  // free the strings ourselves
+    return ok;
 }

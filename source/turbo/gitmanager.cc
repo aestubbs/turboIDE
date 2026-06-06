@@ -77,6 +77,18 @@ void GitManager::requestStatus() noexcept
     enqueue([this] { runStatus(); });
 }
 
+void GitManager::statusToOutput() noexcept
+{
+    if (root.empty())
+        return;
+    enqueue([this] {
+        std::string out;
+        int code = GitClient::statusText(root, out);
+        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({{}, code, out, "git status"}); }
+        runStatus(); // also refresh the file badges / branch info from porcelain
+    });
+}
+
 void GitManager::runStatus() noexcept
 {
     statusQueued.store(false);
@@ -95,6 +107,8 @@ std::string GitManager::branchInfo(const GitRepoStatus &st) const
         std::snprintf(buf, sizeof buf, " +%d-%d", st.ahead, st.behind);
         s += buf;
     }
+    if (st.merging)
+        s += " | MERGING";
     return s;
 }
 
@@ -104,7 +118,7 @@ void GitManager::revert(const std::vector<std::string> &paths, OpCallback onDone
     enqueue([this, paths, onDone] {
         std::string out;
         int code = GitClient::revert(root, paths, out);
-        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out}); }
+        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out, "git restore"}); }
         runStatus();
     });
 }
@@ -135,7 +149,7 @@ void GitManager::switchBranch(const std::string &branch, SwitchMode mode,
         else
             code = GitClient::checkout(root, branch,
                                        mode == SwitchMode::Force, out);
-        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out}); }
+        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out, "git checkout " + branch}); }
         runStatus(); // refreshes file badges, current branch and branch list
     });
 }
@@ -146,7 +160,7 @@ void GitManager::commit(const std::string &message, OpCallback onDone) noexcept
     enqueue([this, message, onDone] {
         std::string out;
         int code = GitClient::commit(root, message, out);
-        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out}); }
+        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out, "git commit"}); }
         runStatus();
     });
 }
@@ -157,7 +171,7 @@ void GitManager::stage(const std::vector<std::string> &paths, OpCallback onDone)
     enqueue([this, paths, onDone] {
         std::string out;
         int code = GitClient::stage(root, paths, out);
-        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out}); }
+        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out, "git add"}); }
         runStatus();
     });
 }
@@ -168,7 +182,42 @@ void GitManager::unstage(const std::vector<std::string> &paths, OpCallback onDon
     enqueue([this, paths, onDone] {
         std::string out;
         int code = GitClient::unstage(root, paths, out);
-        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out}); }
+        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out, "git restore --staged"}); }
+        runStatus();
+    });
+}
+
+void GitManager::merge(const std::string &branch, MergeFavor favor,
+                       OpCallback onDone) noexcept
+{
+    if (root.empty()) return;
+    enqueue([this, branch, favor, onDone] {
+        std::string out;
+        int fav = favor == MergeFavor::Ours ? 1 : favor == MergeFavor::Theirs ? 2 : 0;
+        int code = GitClient::merge(root, branch, fav, out);
+        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out, "git merge " + branch}); }
+        runStatus();
+    });
+}
+
+void GitManager::mergeAbort(OpCallback onDone) noexcept
+{
+    if (root.empty()) return;
+    enqueue([this, onDone] {
+        std::string out;
+        int code = GitClient::mergeAbort(root, out);
+        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out, "git merge --abort"}); }
+        runStatus();
+    });
+}
+
+void GitManager::mergeContinue(OpCallback onDone) noexcept
+{
+    if (root.empty()) return;
+    enqueue([this, onDone] {
+        std::string out;
+        int code = GitClient::mergeContinue(root, out);
+        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out, "git merge --continue"}); }
         runStatus();
     });
 }
@@ -179,7 +228,7 @@ void GitManager::fetch(OpCallback onDone) noexcept
     enqueue([this, onDone] {
         std::string out;
         int code = GitClient::fetch(root, out);
-        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out}); }
+        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out, "git fetch"}); }
         runStatus();
     });
 }
@@ -190,7 +239,7 @@ void GitManager::pull(OpCallback onDone) noexcept
     enqueue([this, onDone] {
         std::string out;
         int code = GitClient::pull(root, out);
-        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out}); }
+        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out, "git pull"}); }
         runStatus();
     });
 }
@@ -201,7 +250,7 @@ void GitManager::push(OpCallback onDone) noexcept
     enqueue([this, onDone] {
         std::string out;
         int code = GitClient::push(root, out);
-        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out}); }
+        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out, "git push"}); }
         runStatus();
     });
 }
@@ -216,9 +265,15 @@ void GitManager::pump(DocumentTreeWindow *treeWindow) noexcept
         ops.swap(pendingOps);
     }
     // Deliver op results first (they may show messages), then refresh the view.
+    // Route each labelled op's output to the sink (the output pane's GIT tab) so
+    // git's normally-swallowed output is visible, then run any per-call callback.
     for (auto &op : ops)
+    {
+        if (outputSink && !op.label.empty())
+            outputSink(op.label, op.code, op.output);
         if (op.cb)
             op.cb(op.code, op.output);
+    }
     if (status)
     {
         // Update the main-thread cache BEFORE touching the tree, and regardless
