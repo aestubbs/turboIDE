@@ -43,48 +43,10 @@
 #include <turbo/tpath.h>
 #include <tvision/internal/codepage.h>
 #include <cctype>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 
 using namespace Scintilla;
-
-namespace {
-
-// Restyle every window/menu border and the file-tree's hierarchy connectors to a
-// uniform rounded single-line look. TVision renders frames (and the tree graph)
-// from CP437 box-drawing bytes via a CP437->UTF-8 table; we repoint that table so
-// the same bytes draw rounded/single glyphs. Both frames and the tree's "|- -"
-// connectors use these bytes, so this restyles both at once. Active vs inactive
-// windows are then told apart by colour alone (the frame palette) -- Unicode has
-// no heavy/rounded corner glyph to reserve for "active".
-void applyRoundedFrames() noexcept
-{
-    static char tbl[256][4];
-    for (int c = 0; c < 256; ++c)
-        std::memcpy(tbl[c], tvision::CpTranslator::toUtf8((unsigned char) c), 4);
-    // Each glyph literal is exactly 3 UTF-8 bytes + NUL (== 4), matching a slot.
-    const struct { unsigned char b; const char *g; } remap[] = {
-        // corners -> rounded
-        {0xDA, "╭"}, {0xBF, "╮"}, {0xC0, "╰"}, {0xD9, "╯"},   // single
-        {0xC9, "╭"}, {0xBB, "╮"}, {0xC8, "╰"}, {0xBC, "╯"},   // double
-        {0xD5, "╭"}, {0xD6, "╭"}, {0xB7, "╮"}, {0xB8, "╮"},   // mixed
-        {0xD3, "╰"}, {0xD4, "╰"}, {0xBD, "╯"}, {0xBE, "╯"},
-        // double lines -> single
-        {0xCD, "─"}, {0xBA, "│"},
-        // tees / crosses (double or mixed) -> single
-        {0xCC, "├"}, {0xC6, "├"}, {0xC7, "├"},
-        {0xB9, "┤"}, {0xB5, "┤"}, {0xB6, "┤"},
-        {0xCB, "┬"}, {0xD1, "┬"}, {0xD2, "┬"},
-        {0xCA, "┴"}, {0xCF, "┴"}, {0xD0, "┴"},
-        {0xCE, "┼"}, {0xD7, "┼"}, {0xD8, "┼"},
-    };
-    for (auto &r : remap)
-        std::memcpy(tbl[r.b], r.g, 4);
-    tvision::CpTranslator::setTranslation(&tbl); // copies tbl + rebuilds the map
-}
-
-} // namespace
 
 // Branch indicator that lives at the right of the menu bar. It draws the current
 // branch (icon + name) like the clock used to, and a click opens a popup listing
@@ -205,7 +167,9 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     argc(argc),
     argv(argv)
 {
-    applyRoundedFrames(); // rounded single-line chrome before the first draw
+    // Opt into the fork's modern rounded/single box-drawing for all chrome
+    // (frames, menus, file-tree connectors). The library default is faithful CP437.
+    tvision::CpTranslator::setBoxDrawing(tvision::CpTranslator::BoxDrawing::Rounded);
     loadSettings(settings);
     frecency.load();
     // Fold any saved colour overrides onto the built-in 24-bit defaults before

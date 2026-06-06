@@ -1,6 +1,7 @@
 [submodule "deps/tvision"]
 	path = deps/tvision
-	url = https://github.com/magiblot/tvision
+	url = https://github.com/aestubbs/tvision
+	branch = master
 [submodule "deps/fmt"]
 	path = deps/fmt
 	url = https://github.com/fmtlib/fmt
