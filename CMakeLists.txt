@@ -55,6 +55,10 @@ if (TURBO_MINIMIZE_SIZE AND NOT MSVC)
         string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--gc-sections -Wl,--as-needed")
     endif()
 endif()
+# Note: not applied to MSVC. The MSVC artifact jobs build MinSizeRel (/O1) with a
+# static runtime, and the linker already does /OPT:REF,ICF dead-stripping by
+# default; whole-program optimization (/GL + /LTCG) was measured to give ~0 size
+# change (x64 -0.5%, x86 +0.3%) for a large link-time cost, so it is not used.
 
 include(GNUInstallDirs)
 
