@@ -308,6 +308,11 @@ if (TURBO_BUILD_TESTS)
     add_executable(${TURBO}-test ${TEST_SRC})
     target_compile_features(${TURBO}-test PRIVATE cxx_std_17)
     turbo_set_warnings(${TURBO}-test)
+    # test/test.h includes <turbo/scintilla/internals.h>, which pulls in
+    # Scintilla's internal headers (Debugging.h etc.). turbo-core keeps
+    # deps/scintilla/src PRIVATE, so the test target must add it explicitly.
+    target_include_directories(${TURBO}-test PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/deps/scintilla/src")
     find_library(GTEST gtest REQUIRED)
     find_library(GTEST_MAIN gtest_main REQUIRED)
     target_link_libraries(${TURBO}-test PRIVATE

@@ -36,7 +36,9 @@ git submodule update --init --recursive
 Then, make sure the following dependencies are installed:
 
 * CMake.
-* A compiler supporting C++17.
+* A C++17 compiler with `std::filesystem` in the standard library: **GCC ≥ 9**,
+  **Clang ≥ 9**, or **MSVC 2019+**. (Older compilers such as GCC 7/8, where
+  `std::filesystem` is only in `<experimental/filesystem>`, are not supported.)
 * `libncursesw` (note the 'w') (Unix only).
 
 Additionally, you may also want to install these optional dependencies:
@@ -63,19 +65,6 @@ sudo apt install build-essential cmake gettext-base git libgpm-dev libmagic-dev 
 git clone --recursive https://github.com/magiblot/turbo.git
 cd turbo
 cmake . -DCMAKE_BUILD_TYPE=Release
-cmake --build . -- -j$(nproc) # Build Turbo.
-sudo cp turbo /usr/local/bin/ # Install (optional).
-```
-</details>
-<details>
-<summary><b>Detailed build instructions for Ubuntu 18.04</b></summary>
-
-```sh
-sudo apt update && sudo apt upgrade
-sudo apt install build-essential cmake g++-8 gettext-base git libgpm-dev libmagic-dev libncursesw5-dev xsel
-git clone --recursive https://github.com/magiblot/turbo.git
-cd turbo
-CXX=g++-8 cmake . -DCMAKE_BUILD_TYPE=Release
 cmake --build . -- -j$(nproc) # Build Turbo.
 sudo cp turbo /usr/local/bin/ # Install (optional).
 ```
