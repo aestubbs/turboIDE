@@ -975,8 +975,10 @@ void TurboApp::onFilesChanged()
     {
         gitTouched = true; // any change under the worktree may affect git status
         // Skip git's own internals for tree structure (they are hidden anyway);
-        // they only matter for the status refresh below.
-        if (p.find("/.git/") != std::string::npos)
+        // they only matter for the status refresh below. Check both separators
+        // so the Windows watcher's backslash paths match too.
+        if (p.find("/.git/") != std::string::npos ||
+            p.find("\\.git\\") != std::string::npos)
             continue;
         if (!docTree)
             continue;

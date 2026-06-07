@@ -335,8 +335,13 @@ void TerminalView::startShell() noexcept
         shellCmd = app->settings.terminalShell;
     if (shellCmd.empty())
     {
+#ifdef _WIN32
+        const char *s = getenv("ComSpec"); // typically C:\Windows\System32\cmd.exe
+        shellCmd = (s && *s) ? s : "cmd.exe";
+#else
         const char *s = getenv("SHELL");
         shellCmd = (s && *s) ? s : "/bin/sh";
+#endif
     }
     std::string prog;
     std::vector<std::string> args;
@@ -377,9 +382,10 @@ void TerminalView::startShell() noexcept
 
 void TerminalView::stopShell() noexcept
 {
-    pty.terminate();               // closes the master fd -> reader read() ends
+    pty.terminate();               // hangs up the child and unblocks the reader
     if (reader.joinable())
-        reader.join();
+        reader.join();             // reader has now returned from pty.read()
+    pty.closeRead();               // safe to close the read side: no reader left
     if (vt)
     {
         vterm_free(vt);

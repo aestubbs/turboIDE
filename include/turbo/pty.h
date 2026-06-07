@@ -17,9 +17,9 @@ namespace turbo {
 // child writes to its terminal, write() feeds the child's terminal input.
 // Reads block, so drive them from a dedicated reader thread (see TerminalView).
 //
-// Only one implementation is provided: POSIX (forkpty). On Windows, start()
-// returns false and the caller is expected to report that the terminal is not
-// available (a full ConPTY backend is out of scope here).
+// Two implementations are provided: POSIX (forkpty) and Windows (ConPTY,
+// Windows 10 1809+). On older Windows, start() returns false and the caller is
+// expected to report that the terminal is not available.
 class PtyProcess
 {
 public:
@@ -46,10 +46,23 @@ public:
     void resize(int cols, int rows);
 
     void terminate();   // Hang up the child, then force-kill if needed.
+    // Close the read side of the terminal. On Windows this MUST be called only
+    // after the reader thread has been joined (closing the handle while a read
+    // is in flight is a Win32 handle-recycling race); terminate() leaves it open
+    // and merely unblocks the reader. On POSIX it is a no-op (terminate() already
+    // closed the master fd, which is the race-safe way to unblock read() there).
+    void closeRead();
     bool running();
 
 private:
-#ifndef _WIN32
+#ifdef _WIN32
+    // Win32/ConPTY state, stored as void* so this header needn't include
+    // <windows.h> (HPCON and HANDLE are both pointer types).
+    void *hPC {nullptr};        // HPCON pseudoconsole
+    void *hInWrite {nullptr};   // write end of the child's console input
+    void *hOutRead {nullptr};   // read end of the child's console output
+    void *hProcess {nullptr};   // child process handle
+#else
     int pid {-1};
     int masterFd {-1};
 #endif
