@@ -42,7 +42,7 @@ void clearBeforeTentativeStart(TScintilla &self)
 
 void insertPasteStream(TScintilla &self, TStringView text)
 {
-    self.InsertPasteShape(text.data(), text.size(), TScintilla::PasteShape::stream);
+    self.InsertPasteStream(text.data(), text.size());
 }
 
 void insertCharacter(TScintilla &self, TStringView text)

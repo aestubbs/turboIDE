@@ -54,6 +54,15 @@ public:
     using super::ClearBeforeTentativeStart;
     using super::InsertPasteShape;
     using super::PasteShape;
+    // Insert 'text' as a stream paste. Wraps InsertPasteShape so callers need not
+    // name the PasteShape enum: it is protected in Scintilla's Editor, and a
+    // public using-declaration re-exposes the type name but not the enumerators'
+    // access -- MSVC rejects `TScintilla::PasteShape::stream` from a non-member,
+    // while Clang/GCC accept it. Naming the enum inside this member sidesteps that.
+    void InsertPasteStream(const char *text, Sci::Position len)
+    {
+        InsertPasteShape(text, len, PasteShape::stream);
+    }
     using super::InsertCharacter;
     using super::IdleWork;
     using super::PointMainCaret;
