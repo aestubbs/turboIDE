@@ -19,6 +19,43 @@ project (turbo)
 
 set(TURBO_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
+# Optional: optimize the standalone executable for minimum on-disk size.
+#
+# The app's own dependencies (tvision, scintilla, lexilla, libvterm, turbo-core)
+# are already linked statically, so the binary is self-contained: on macOS it
+# only references system frameworks/dylibs that ship with every install (a fully
+# static binary is not possible there -- Apple provides no static libSystem).
+# This option trades a little speed (-Oz) for a much smaller binary: it builds
+# every translation unit for size, lets the linker dead-strip unreferenced
+# code/data, and strips the symbol table from the final executable. Measured on
+# arm64: ~4.3 MB (Release -O3) -> ~1.9 MB.
+option(TURBO_MINIMIZE_SIZE "Optimize the turbo executable for minimum size" OFF)
+if (TURBO_MINIMIZE_SIZE AND NOT MSVC)
+    # -Oz is the clang spelling for "optimize aggressively for size"; GCC uses -Os.
+    set(_turbo_size_opt "-Oz")
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        set(_turbo_size_opt "-Os")
+    endif()
+    set(_turbo_size_flags
+        "${_turbo_size_opt} -fvisibility=hidden -fvisibility-inlines-hidden -ffunction-sections -fdata-sections")
+    # Applied globally (right after project()) so every contributing target --
+    # including the tvision submodule and the object libraries -- is built for size.
+    # The flags must also go on the per-config variables (RELEASE/MINSIZEREL/...)
+    # because those land AFTER CMAKE_CXX_FLAGS on the command line: without this,
+    # the active config's own -O3 would override our -Oz. Appending here makes the
+    # size opt level the last one seen, so it wins regardless of CMAKE_BUILD_TYPE
+    # (the empty entry covers builds with no build type set).
+    foreach(_cfg "" _RELEASE _MINSIZEREL _RELWITHDEBINFO)
+        string(APPEND CMAKE_C_FLAGS${_cfg} " ${_turbo_size_flags}")
+        string(APPEND CMAKE_CXX_FLAGS${_cfg} " ${_turbo_size_flags}")
+    endforeach()
+    if (APPLE)
+        string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,-dead_strip")
+    else()
+        string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--gc-sections -Wl,--as-needed")
+    endif()
+endif()
+
 include(GNUInstallDirs)
 
 # Targets 'scintilla' (5.x core) and 'lexilla' (language lexers)
@@ -227,6 +264,15 @@ if (TURBO_BUILD_APP)
         "${CMAKE_CURRENT_LIST_DIR}/deps/libvterm/include"
     )
     install(TARGETS ${TURBO} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    # Strip the symbol table from the final binary when minimizing size. Attached
+    # before the macOS icon POST_BUILD so it runs first (POST_BUILD commands run
+    # in attachment order, and stripping rewrites the Mach-O).
+    if (TURBO_MINIMIZE_SIZE AND CMAKE_STRIP)
+        add_custom_command(TARGET ${TURBO} POST_BUILD
+            COMMAND ${CMAKE_STRIP} $<TARGET_FILE:${TURBO}>
+            COMMENT "Stripping symbols from ${TURBO} (TURBO_MINIMIZE_SIZE)")
+    endif()
 
     if (NOT "${TURBO_COMMIT_SHA}" STREQUAL "")
         string(SUBSTRING "${TURBO_COMMIT_SHA}" 0 8 TURBO_COMMIT_SHORT_SHA)
