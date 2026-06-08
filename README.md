@@ -1,23 +1,52 @@
-# Turbo
+# Turbo — a lightweight terminal IDE
 
-Turbo is an experimental text editor for the terminal, based on the [Scintilla](https://www.scintilla.org/index.html) code editing component by Neil Hodgson and the [Turbo Vision](https://github.com/magiblot/tvision) application framework.
+A small, fast, keyboard-driven IDE that runs entirely in your terminal.
 
-It was created to demonstrate new features in Turbo Vision. In particular, it has served as testing ground for Turbo Vision's Unicode capabilities.
+> **This is a fork of [`magiblot/turbo`](https://github.com/magiblot/turbo).**
+> Upstream Turbo is an experimental terminal text editor built on Neil Hodgson's
+> [Scintilla](https://www.scintilla.org/index.html) editing component and the
+> [Turbo Vision](https://github.com/magiblot/tvision) application framework. This
+> fork builds on that foundation and grows it into a lightweight, terminal-based
+> IDE, while preserving the upstream editor's behaviour. For the canonical editor,
+> see the [original repository](https://github.com/magiblot/turbo).
 
-As a text editor, Turbo aims at being intuitive and easy to use. Usability and productivity are its two other major objectives, although it has not got that far yet. And only for being a Turbo Vision application, it offers a vintage look and feel.
+![Turbo editing its own source, with the project file tree and Git status pane](docs/screenshot.png)
 
-The original location of this project is https://github.com/magiblot/turbo.
+## What this fork adds
 
-> **About this fork.** This is a fork of the original [`magiblot/turbo`](https://github.com/magiblot/turbo) that adds simple IDE-style features on top of the upstream editor, with the goal of turning Turbo into a lightweight, terminal-based IDE while staying as close to the original as possible. So far this includes a recursive directory file tree, opening files from the tree, auto-save when an editor loses focus, and Language Server Protocol (LSP) support — diagnostics, completion and hover — configurable per language. All upstream functionality is preserved; for the canonical version, please refer to the original repository linked above.
+On top of Turbo's editor core, this fork adds the building blocks of an IDE:
 
-![Turbo](https://user-images.githubusercontent.com/20713561/89552632-b7053380-d80c-11ea-92e0-a8c30f80cd49.png)
+- **Project file tree** — a recursive view of the working directory in a side
+  pane: open files straight from the tree, create new files and folders, and the
+  tree stays in sync as files change on disk.
+- **Light Git integration** — file status shown in the tree, and the common loop
+  without leaving the editor: stage/unstage, commit, fetch/pull/push, switch
+  branches, stash, and resolve merges with a conflict toolbar.
+- **Integrated terminal** — a real terminal window inside the app (ConPTY on
+  Windows, a PTY on Unix/macOS) for running commands alongside your code.
+- **Build commands & output pane** — configure build/run commands per project
+  and watch their results in a dedicated, resizable output window.
+- **Latest Scintilla** — upgraded to the current Scintilla 5.5 release for editing
+  improvements and a wider set of language lexers.
+- **Modernised look & feel** — refreshed theming with rounded box-drawing and
+  unified active/inactive styling.
+
+It also carries the earlier additions this fork grew from: auto-save when an
+editor loses focus, and Language Server Protocol (LSP) support — diagnostics,
+completion and hover — configurable per language. All upstream functionality is
+preserved.
 
 ## Downloads
 
-* Unix systems: you'll have to build Turbo yourself. You may follow the build instructions in the next section.
-* Windows: you can find up-to-date binaries in the [Actions](https://github.com/magiblot/turbo/actions?query=branch:master+event:push) page. Click on the first successful workflow (with a green tick) in the list. At the bottom of the workflow page, as long as you have logged in to GitHub, you'll find an *Artifacts* section with the following files:
-    * `turbo-x86.zip`: 32-bit executable built with MSVC. Windows Vista or later required.
-    * `turbo-x64.zip`: 64-bit executable built with MSVC. x64 Windows Vista or later required.
+Prebuilt binaries are attached to every [release](https://github.com/aestubbs/turbo/releases):
+
+* `turbo-x64.exe` — 64-bit Windows (Intel/AMD).
+* `turbo-x86.exe` — 32-bit Windows.
+* `turbo-macos-arm64` — macOS (Apple Silicon).
+
+For the newest per-commit builds, see the [Actions](https://github.com/aestubbs/turbo/actions)
+page and download the artifacts at the bottom of a successful run (you must be
+signed in to GitHub). On Linux, build from source — see [Building](#building) below.
 
 ## Building
 
@@ -62,7 +91,7 @@ The above will generate the `turbo` binary.
 ```sh
 sudo apt update && sudo apt upgrade
 sudo apt install build-essential cmake gettext-base git libgpm-dev libmagic-dev libncursesw5-dev xsel
-git clone --recursive https://github.com/magiblot/turbo.git
+git clone --recursive https://github.com/aestubbs/turbo.git
 cd turbo
 cmake . -DCMAKE_BUILD_TYPE=Release
 cmake --build . -- -j$(nproc) # Build Turbo.
@@ -125,39 +154,9 @@ Support for these key combinations may vary among terminal applications, but any
 
 See the Turbo Vision [documentation](https://github.com/magiblot/tvision#clipboard).
 
-## Features
+## Acknowledgements
 
-Scintilla has [lots of features](https://www.scintilla.org/ScintillaDoc.html), of which Turbo only offers a few. Making more of them available is just a matter of time, so contributions are welcome.
-
-Below is a TO-DO list of features I would like to implement in Turbo:
-
-- [x] Several files open at the same time.
-- [x] Line numbers.
-- [x] Word wrap.
-- [x] Suspend to shell.
-- [x] Unicode in documents (in particular, UTF-8).
-- [x] Double-width characters.
-- [x] Opening binary files without freaking out.
-- [x] List of open documents in MRU order.
-- [x] Tree view of open documents.
-- [x] Tree view sorted alphabetically.
-- [x] Case-insensitive search.
-- [x] Find as you type.
-- [x] Replace.
-- [x] Go to line.
-- [ ] List of recently opened files.
-- [x] Remove trailing whitespaces on save.
-- [x] Ensure newline at end of file.
-- [ ] Detect open files modified on disk.
-- [ ] Persistent configuration.
-- [ ] Keybinding customization.
-- [ ] Color scheme customization.
-- [x] Syntax highlighting for some languages (C/C++, Rust, Python, JavaScript, Make, Bash, Ruby, JSON, YAML, HTML, INI, Go, PHP).
-- [ ] Syntax highlighting for the rest of [languages supported by Scintilla](https://github.com/ScintillaOrg/lexilla/blob/master/include/SciLexer.h).
-- [x] Comment toggling.
-- [x] Brace match highlighting.
-- [ ] VIM input mode.
-- [ ] Localization.
-- [x] Integration with the system clipboard.
-- [x] Unicode in dialog text boxes (this depends on Turbo Vision).
-- [ ] True Color support (this depends on Turbo Vision).
+This project stands on the work of [Turbo](https://github.com/magiblot/turbo) by
+magiblot, the [Turbo Vision](https://github.com/magiblot/tvision) framework, and
+Neil Hodgson's [Scintilla](https://www.scintilla.org/) and
+[Lexilla](https://github.com/ScintillaOrg/lexilla) editing components.
