@@ -26,15 +26,13 @@ On top of Turbo's editor core, this fork adds the building blocks of an IDE:
   Windows, a PTY on Unix/macOS) for running commands alongside your code.
 - **Build commands & output pane** — configure build/run commands per project
   and watch their results in a dedicated, resizable output window.
+- **Language Server Protocol (LSP)** — diagnostics, completion and hover,
+  configurable per language.
+- **Auto-save** — documents are saved automatically when their editor loses focus.
 - **Latest Scintilla** — upgraded to the current Scintilla 5.5 release for editing
   improvements and a wider set of language lexers.
 - **Modernised look & feel** — refreshed theming with rounded box-drawing and
   unified active/inactive styling.
-
-It also carries the earlier additions this fork grew from: auto-save when an
-editor loses focus, and Language Server Protocol (LSP) support — diagnostics,
-completion and hover — configurable per language. All upstream functionality is
-preserved.
 
 ## Downloads
 
