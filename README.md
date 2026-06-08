@@ -99,18 +99,18 @@ sudo cp turbo /usr/local/bin/ # Install (optional).
 
 ## Usage
 
-### From the command line
+### Opening a project
 
-* **turbo** [*file*...]
-
-In order to open several files in a directory tree you should use wildcards or subcommands, if they are supported by your command shell. For example, in Unix:
+Run `turbo` from the root of the project you want to work on:
 
 ```sh
-# Open all .c and .h files in the current directory and its subdirectories
-turbo `find . -type f -name '*.c' -o -name '*.h'`
-# Open all files in the current directory and its subdirectories, excluding executables and hidden files or directories
-turbo `find . -type f \! -executable \! -path '*/.*'`
+cd my-project
+turbo
 ```
+
+Turbo scans that directory and shows it in the **Files** tree on the right; open
+files by selecting them there. The integrated terminal, Git status and build
+commands all operate on this same directory.
 
 ### In-app
 
