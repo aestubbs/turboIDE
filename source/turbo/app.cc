@@ -154,6 +154,72 @@ TPalette &TurboApp::getPalette() const
         p[5] = TColorAttr(TColorRGB(0xFFFFFF), TColorRGB(0x2E6FD6)); // selected item
         p[6] = TColorAttr(TColorRGB(0xC2C9DC), TColorRGB(0x2E6FD6)); // selected disabled
         p[7] = TColorAttr(TColorRGB(0xFFD27A), TColorRGB(0x2E6FD6)); // selected hotkey
+
+        // Dialog boxes (the gray-dialog block: app palette 32..63, in cpDialog
+        // entry order). The stock entries are BIOS colours -- light-gray body,
+        // green buttons -- resolved through the terminal's 16-colour table, so
+        // dialogs clashed with the fixed-RGB chrome and the default button
+        // could be unreadable. Recolour the block to the app's dark scheme:
+        // a slate body like the menu bar, controls at rest on the passive
+        // window-frame blue, the default button on the active window-frame
+        // blue, and the focused button on the menus' selection blue. The three
+        // button blues are kept in one family because the hotkey-letter entry
+        // (45) is shared across button states, so its cell shows through on
+        // the default/focused button. TFrame fills the dialog interior with
+        // the frame attribute, so every body-level background must equal the
+        // active frame's.
+        const TColorRGB
+            dlgBody {0x303648}, // interior + frame (lighter than the menu bar)
+            dlgLine {0xD7DCE8}, // frame lines, title, prominent text
+            dlgText {0xE0E6F8}, // static text
+            dlgSoft {0xB8C2E0}, // label text
+            dlgDim  {0x8A93A8}, // passive frame / disabled foregrounds
+            dlgGold {0xE8C07D}, // hotkey letters
+            ctlBg   {0x16335E}, // controls at rest (passive frame blue)
+            ctlHot  {0x1E4D8C}, // engaged control (active frame blue)
+            ctlSel  {0x2E6FD6}, // focused highlight (menu selection blue)
+            ctlDis  {0x1A2540}, // disabled control background
+            trough  {0x1A2E52}, // scrollbar trough
+            thumb   {0x3A5C92}, // scrollbar slider / dividers
+            arrows  {0xD0DEFF}, // scrollbar + input-line overflow arrows
+            teal    {0x7FE0B0}, // frame icons / history sides
+            white   {0xFFFFFF},
+            shadow  {0x0A1020}; // button shadow (drawn as fg half-block glyphs)
+        p[32] = TColorAttr(dlgDim,  dlgBody); // frame passive
+        p[33] = TColorAttr(dlgLine, dlgBody); // frame active (+ interior fill)
+        p[34] = TColorAttr(teal,    dlgBody); // frame icon
+        p[35] = TColorAttr(thumb,   trough);  // scrollbar page area
+        p[36] = TColorAttr(arrows,  trough);  // scrollbar controls
+        p[37] = TColorAttr(dlgText, dlgBody); // static text
+        p[38] = TColorAttr(dlgSoft, dlgBody); // label normal
+        p[39] = TColorAttr(white,   dlgBody); // label selected
+        p[40] = TColorAttr(dlgGold, dlgBody); // label shortcut
+        p[41] = TColorAttr(dlgLine, ctlBg);   // button normal
+        p[42] = TColorAttr(white,   ctlHot);  // button default
+        p[43] = TColorAttr(white,   ctlSel);  // button selected
+        p[44] = TColorAttr(dlgDim,  ctlDis);  // button disabled
+        p[45] = TColorAttr(dlgGold, ctlBg);   // button shortcut
+        // The shadow attr's background must be the body: TButton paints its
+        // left column and the start of its bottom row with this attr to erase
+        // the face colour there; the visible offset shadow is the half-block
+        // glyphs drawn with the foreground on the bottom and right.
+        p[46] = TColorAttr(shadow,  dlgBody); // button shadow
+        p[47] = TColorAttr(dlgLine, dlgBody); // cluster normal (check/radio)
+        p[48] = TColorAttr(white,   ctlHot);  // cluster selected
+        p[49] = TColorAttr(dlgGold, dlgBody); // cluster shortcut
+        p[50] = TColorAttr(dlgText, ctlBg);   // input line normal
+        p[51] = TColorAttr(white,   ctlHot);  // input line focused
+        p[52] = TColorAttr(arrows,  ctlBg);   // input line arrows
+        p[53] = TColorAttr(dlgText, ctlBg);   // history arrow
+        p[54] = TColorAttr(teal,    dlgBody); // history sides
+        p[55] = TColorAttr(thumb,   trough);  // history scrollbar page area
+        p[56] = TColorAttr(arrows,  trough);  // history scrollbar controls
+        p[57] = TColorAttr(dlgText, ctlBg);   // list viewer normal
+        p[58] = TColorAttr(white,   ctlSel);  // list viewer focused
+        p[59] = TColorAttr(white,   ctlHot);  // list viewer selected
+        p[60] = TColorAttr(thumb,   dlgBody); // list viewer divider
+        p[61] = TColorAttr(dlgText, dlgBody); // info pane
+        p[62] = TColorAttr(dlgDim,  dlgBody); // cluster disabled
         return p;
     }();
     return pal;
