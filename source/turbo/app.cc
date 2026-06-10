@@ -423,6 +423,7 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             *new TMenuItem( "Pu~l~l", cmGitPull, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~P~ush", cmGitPush, kbNoKey, hcNoContext ) +
             newLine() +
+            *new TMenuItem( "Ne~w~ Branch...", cmGitNewBranch, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~M~erge Branch...", cmGitMerge, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~A~bort Merge", cmGitMergeAbort, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Co~n~tinue Merge", cmGitMergeContinue, kbNoKey, hcNoContext ) +
@@ -595,6 +596,7 @@ void TurboApp::handleEvent(TEvent &event)
             case cmGitFetch: gitRemote(0); break;
             case cmGitPull: gitRemote(1); break;
             case cmGitPush: gitRemote(2); break;
+            case cmGitNewBranch: gitNewBranch(); break;
             case cmGitMerge: gitMerge(); break;
             case cmGitMergeAbort: gitMergeAbort(); break;
             case cmGitMergeContinue: gitMergeContinue(); break;
@@ -1274,12 +1276,19 @@ void TurboApp::showBranchMenu(TPoint where) noexcept
         it->disabled = True;
         append(it);
     }
+    append(&newLine());
+    append(new TMenuItem("New branch...", cmGitNewBranch, kbNoKey, hcNoContext));
 
     // popupMenu takes ownership of the chain (wraps it in a TMenu it deletes).
     unsigned short cmd = popupMenu(where, *head, nullptr);
-    int idx = (int) cmd - cmBranchBase;
-    if (idx >= 0 && idx < n)
-        switchToBranch(others[idx]);
+    if (cmd == cmGitNewBranch)
+        gitNewBranch();
+    else
+    {
+        int idx = (int) cmd - cmBranchBase;
+        if (idx >= 0 && idx < n)
+            switchToBranch(others[idx]);
+    }
 }
 
 void TurboApp::switchToBranch(const std::string &branch) noexcept
@@ -1320,6 +1329,28 @@ void TurboApp::switchToBranch(const std::string &branch) noexcept
     else if (choice == cmNo)
         git->switchBranch(branch, GitManager::SwitchMode::Force, onDone);
     // cmCancel (or closing the dialog): stay on the current branch.
+}
+
+void TurboApp::gitNewBranch()
+{
+    if (!git || !git->isRepo())
+    {
+        messageBox("This folder is not a git repository.", mfInformation | mfOKButton);
+        return;
+    }
+    std::string name;
+    if (!executeNewBranchDialog(name))
+        return;
+    // `checkout -b` keeps the working tree, so open editors need no reloading;
+    // the queued status refresh updates the branch indicator and dropdown.
+    git->createBranch(name, [name] (int code, const std::string &output) {
+        if (code != 0)
+        {
+            std::string m = "Could not create branch '" + name + "':\n" +
+                (output.empty() ? std::string("(see Git output)") : output.substr(0, 400));
+            messageBox(m.c_str(), mfError | mfOKButton);
+        }
+    });
 }
 
 void TurboApp::gitCommitDialog()

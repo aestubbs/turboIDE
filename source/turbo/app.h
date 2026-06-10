@@ -163,6 +163,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     void refreshBranchView() noexcept;        // idle: update the indicator's text
     void showBranchMenu(TPoint where) noexcept; // build & run the branch popup
     void switchToBranch(const std::string &branch) noexcept; // confirm + checkout
+    void gitNewBranch();       // prompt for a name, then create + switch to it
     void gitRefresh();
     void gitCommitDialog();
     void gitRemote(int which); // 0=fetch 1=pull 2=push

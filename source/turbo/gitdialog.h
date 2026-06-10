@@ -14,6 +14,10 @@ bool executeGitCommitDialog(GitManager &git) noexcept;
 // cmYes (stash & switch), cmNo (force / discard) or cmCancel (stay put).
 unsigned short executeBranchSwitchDialog(const char *branch) noexcept;
 
+// New-branch dialog: ask for a branch name. On OK fills 'name' (trimmed,
+// non-empty) and returns true; returns false if cancelled or the name is empty.
+bool executeNewBranchDialog(std::string &name) noexcept;
+
 // Merge dialog: pick a branch to merge into the current one and a conflict
 // strategy. On OK fills 'branch' and 'favor' (0 = default, 1 = favor ours,
 // 2 = favor theirs) and returns true; returns false if cancelled / no branches.

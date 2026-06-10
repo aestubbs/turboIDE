@@ -154,6 +154,17 @@ void GitManager::switchBranch(const std::string &branch, SwitchMode mode,
     });
 }
 
+void GitManager::createBranch(const std::string &branch, OpCallback onDone) noexcept
+{
+    if (root.empty()) return;
+    enqueue([this, branch, onDone] {
+        std::string out;
+        int code = GitClient::createBranch(root, branch, out);
+        { std::lock_guard<std::mutex> lock(resMx); pendingOps.push_back({onDone, code, out, "git checkout -b " + branch}); }
+        runStatus(); // refreshes the current branch and branch list
+    });
+}
+
 void GitManager::commit(const std::string &message, OpCallback onDone) noexcept
 {
     if (root.empty()) return;

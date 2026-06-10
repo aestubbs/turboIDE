@@ -141,6 +141,7 @@ static constexpr TStringView helpParagraphs[] =
     " │             │ Push                   │ Git menu           │\n"
     " │             │ Refresh status         │ Git menu           │\n"
     " │             │ Switch branch          │ Menu bar           │\n"
+    " │             │ New branch...          │ Git menu/menu bar  │\n"
     " ├─────────────┼────────────────────────┼────────────────────┤\n"
     " │ Tools       │ New terminal           │ File menu          │\n"
     " └─────────────┴────────────────────────┴────────────────────┘\n",
@@ -166,7 +167,8 @@ static constexpr TStringView helpParagraphs[] =
     "'Split into Lines' on the Selection menu turns a multi-line selection into "
     "one caret per line, and Esc collapses back to a single caret.\n\n",
     "\nThe Git menu's commit/fetch/pull/push and the branch shown in the menu "
-    "bar (click it to switch branches) operate on the workspace repository. "
+    "bar (click it to switch or create branches) operate on the workspace "
+    "repository. "
     "The file tree shows per-file Git status badges; right-click a file for "
     "Open, Rename, New File and Git Add / Git Revert.\n\n",
     "File > New Terminal opens a shell in a window. Set 'terminal.shell' in "

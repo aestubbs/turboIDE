@@ -11,6 +11,8 @@
 #define Uses_TScrollBar
 #define Uses_TProgram
 #define Uses_TDeskTop
+#define Uses_TEvent
+#define Uses_TKeys
 #define Uses_MsgBox
 #include <tvision/tv.h>
 
@@ -47,6 +49,37 @@ std::string relPath(const std::string &root, const std::string &abs)
         return abs.substr(root.size() + 1);
     return abs;
 }
+
+// Same fix as builddialog.cc's FieldInputLine: a plain TInputLine in this fork
+// swallows Tab and Enter before the dialog can use them, so route Tab to the
+// focus chain and Enter to the dialog's default (OK) action.
+struct FieldInputLine : public TInputLine
+{
+    FieldInputLine(const TRect &b, int maxLen) noexcept : TInputLine(b, maxLen) {}
+
+    void handleEvent(TEvent &ev) override
+    {
+        if (ev.what == evKeyDown)
+        {
+            ushort key = ev.keyDown.keyCode;
+            if (key == kbTab || key == kbShiftTab)
+            {
+                if (owner)
+                    owner->selectNext(Boolean(key == kbShiftTab));
+                clearEvent(ev);
+                return;
+            }
+            if (key == kbEnter)
+            {
+                if (owner)
+                    message(owner, evCommand, cmOK, nullptr);
+                clearEvent(ev);
+                return;
+            }
+        }
+        TInputLine::handleEvent(ev);
+    }
+};
 
 } // namespace
 
@@ -182,6 +215,44 @@ unsigned short executeBranchSwitchDialog(const char *branch) noexcept
     unsigned short res = TProgram::deskTop->execView(d);
     TObject::destroy(d);
     return res;
+}
+
+bool executeNewBranchDialog(std::string &name) noexcept
+{
+    auto *d = new TDialog(TRect(0, 0, 56, 10), "New Branch");
+    d->options |= ofCentered;
+
+    d->insert(new TStaticText(TRect(2, 2, 54, 4),
+        "Create a branch at the current commit and switch to "
+        "it. Uncommitted changes come along."));
+
+    auto *input = new FieldInputLine(TRect(9, 5, 54, 6), 128);
+    d->insert(new TLabel(TRect(2, 5, 8, 6), "~N~ame:", input));
+    d->insert(input);
+
+    int by = 7;
+    d->insert(new TButton(TRect(31, by, 43, by + 2), "C~r~eate", cmOK, bfDefault));
+    d->insert(new TButton(TRect(44, by, 54, by + 2), "Cancel", cmCancel, bfNormal));
+
+    d->selectNext(False);
+
+    bool ok = false;
+    if (TProgram::deskTop->execView(d) == cmOK)
+    {
+        std::string n = input->data;
+        size_t a = n.find_first_not_of(" \t");
+        size_t b = n.find_last_not_of(" \t");
+        n = (a == std::string::npos) ? std::string() : n.substr(a, b - a + 1);
+        if (n.empty())
+            messageBox("Branch name is empty.", mfError | mfOKButton);
+        else
+        {
+            name = n;
+            ok = true;
+        }
+    }
+    TObject::destroy(d);
+    return ok;
 }
 
 bool executeMergeDialog(GitManager &git, std::string &branch, int &favor) noexcept

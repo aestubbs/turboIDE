@@ -68,6 +68,7 @@ enum : ushort
     cmGitMergeAbort,
     cmGitMergeContinue,
     cmGitResolveFile, // mark the conflict-bar's editor file resolved (save + git add)
+    cmGitNewBranch,   // prompt for a name, then create + switch (checkout -b)
     cmToggleHidden,
     cmNewTerminal,
     // Guided "New File...": prompt for a name+location up front (via the Save As

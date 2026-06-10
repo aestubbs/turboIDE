@@ -259,6 +259,13 @@ int checkout(const std::string &root, const std::string &branch, bool force,
     return turbo::Process::runToEnd("git", args, output, root, nonInteractiveEnv(), true);
 }
 
+int createBranch(const std::string &root, const std::string &branch,
+                 std::string &output) noexcept
+{
+    return turbo::Process::runToEnd(
+        "git", {"checkout", "-b", branch}, output, root, nonInteractiveEnv(), true);
+}
+
 int stashPush(const std::string &root, std::string &output) noexcept
 {
     return turbo::Process::runToEnd(

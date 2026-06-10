@@ -100,6 +100,7 @@ const PaletteCommand kCommands[] =
     { "Git: Fetch",                    cmGitFetch,             "",             false },
     { "Git: Pull",                     cmGitPull,              "",             false },
     { "Git: Push",                     cmGitPush,              "",             false },
+    { "Git: New Branch...",            cmGitNewBranch,         "",             false },
     { "Git: Refresh Status",           cmGitRefresh,           "",             false },
     // Windows
     { "Zoom Window",                   cmZoom,                 "F5",           true  },

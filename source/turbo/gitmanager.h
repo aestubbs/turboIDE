@@ -72,6 +72,8 @@ public:
     // Switch to 'branch'. 'onDone' reports the checkout's exit code/output.
     void switchBranch(const std::string &branch, SwitchMode mode,
                       OpCallback onDone = {}) noexcept;
+    // Create 'branch' at HEAD and switch to it (uncommitted changes come along).
+    void createBranch(const std::string &branch, OpCallback onDone = {}) noexcept;
     void fetch(OpCallback onDone = {}) noexcept;
     void pull(OpCallback onDone = {}) noexcept;
     void push(OpCallback onDone = {}) noexcept;

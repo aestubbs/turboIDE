@@ -86,6 +86,10 @@ namespace GitClient
     // Branch switching and stash, for the menu-bar branch dropdown.
     int checkout(const std::string &root, const std::string &branch, bool force,
                  std::string &output) noexcept;
+    // Create 'branch' at HEAD and switch to it (`checkout -b`). Uncommitted
+    // changes are carried over to the new branch.
+    int createBranch(const std::string &root, const std::string &branch,
+                     std::string &output) noexcept;
     int stashPush(const std::string &root, std::string &output) noexcept;
     int stashPop(const std::string &root, std::string &output) noexcept;
 
