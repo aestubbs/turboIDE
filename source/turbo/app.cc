@@ -918,19 +918,29 @@ static std::string luaEditorText(EditorWindow &w)
 
 // Run a shell command in the app's working directory (== projectRoot) and
 // return its stdout. Synchronous: scripts run on the UI thread for v1.
+// popen/pclose are POSIX; MSVC spells them _popen/_pclose.
+#ifdef _WIN32
+#define TURBO_POPEN  ::_popen
+#define TURBO_PCLOSE ::_pclose
+#else
+#define TURBO_POPEN  ::popen
+#define TURBO_PCLOSE ::pclose
+#endif
 static std::string luaShellCapture(const std::string &cmd)
 {
     std::string out;
-    if (FILE *p = ::popen(cmd.c_str(), "r"))
+    if (FILE *p = TURBO_POPEN(cmd.c_str(), "r"))
     {
         char buf[4096];
         size_t n;
         while ((n = std::fread(buf, 1, sizeof buf, p)) > 0)
             out.append(buf, n);
-        ::pclose(p);
+        TURBO_PCLOSE(p);
     }
     return out;
 }
+#undef TURBO_POPEN
+#undef TURBO_PCLOSE
 
 void TurboApp::initLua() noexcept
 {
