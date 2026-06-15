@@ -28,6 +28,11 @@ On top of Turbo's editor core, this fork adds the building blocks of an IDE:
   and watch their results in a dedicated, resizable output window.
 - **Language Server Protocol (LSP)** — diagnostics, completion and hover,
   configurable per language.
+- **Lua scripting** — an embedded [Lua 5.4](https://www.lua.org/) interpreter to
+  configure and extend the editor: run scripts from the **Lua** menu and hook
+  into editor events (commit, save, file open/close, …). Scripts live in a
+  project-local `.turbo/` and a global `~/.turbo/`. See
+  [docs/plan_lua_scripting.md](docs/plan_lua_scripting.md).
 - **Auto-save** — documents are saved automatically when their editor loses focus.
 - **Latest Scintilla** — upgraded to the current Scintilla 5.5 release for editing
   improvements and a wider set of language lexers.
@@ -48,7 +53,7 @@ signed in to GitHub). On Linux, build from source — see [Building](#building) 
 
 ## Building
 
-First of all, you should clone this repository along its submodules with the `--recursive` option of `git clone`. This is **required**: the build depends on the submodules in `deps/` — Turbo Vision (`deps/tvision`) and, for the LSP support, [nlohmann/json](https://github.com/nlohmann/json) (`deps/json`). A non-recursive clone will fail to build with missing headers such as `nlohmann/json.hpp`.
+First of all, you should clone this repository along its submodules with the `--recursive` option of `git clone`. This is **required**: the build depends on the submodules in `deps/` — Turbo Vision (`deps/tvision`), for the LSP support [nlohmann/json](https://github.com/nlohmann/json) (`deps/json`), and for scripting [Lua](https://www.lua.org/) (`deps/lua`). A non-recursive clone will fail to build with missing headers such as `nlohmann/json.hpp`.
 
 ```sh
 git clone --recursive https://github.com/aestubbs/turbo.git
@@ -151,6 +156,102 @@ Support for these key combinations may vary among terminal applications, but any
 ### Clipboard support
 
 See the Turbo Vision [documentation](https://github.com/magiblot/tvision#clipboard).
+
+### Lua scripting
+
+Turbo embeds a [Lua 5.4](https://www.lua.org/) interpreter so you can configure
+and extend the editor in Lua: run scripts on demand, and hook into editor events
+such as save and commit. The full Lua standard library (`string`, `table`,
+`math`, `io`, `os`, …) is available.
+
+#### Where scripts live
+
+Scripts live under a `.turbo` directory in two places:
+
+| Location | Path | Scope |
+| --- | --- | --- |
+| Project-local | `<project>/.turbo/` | only this project |
+| Global | `~/.turbo/` | shared across all projects |
+
+In each location, `init.lua` runs at startup (register your event hooks here),
+and `scripts/*.lua` are individual runnable scripts.
+
+#### Running scripts
+
+Run a script from the **Lua** menu (*Run Script…*) or the **Command Palette**
+(`Ctrl+B`) — every script appears there as `Lua Script: <name>`. *Lua → New
+Script…* creates one under the project's `.turbo/scripts`, and *Lua → Reload
+Config* re-runs the `init.lua` files. Script windows have a brown frame so they
+stand out. A script is just Lua — for example, `.turbo/scripts/hello.lua`:
+
+```lua
+-- hello.lua
+if turbo.active_file() ~= "" then
+  turbo.message("editing " .. turbo.active_file())
+else
+  turbo.message("no file open")
+end
+```
+
+#### Events
+
+In an `init.lua`, call `turbo.on(event, handler)` to react to what you do in the
+editor. Turbo calls the handler with a table of parameters; for `before*`
+events, returning `false` cancels the action.
+
+```lua
+-- ~/.turbo/init.lua  (global hooks)
+turbo.on("afterSave", function(p)
+  turbo.message("saved " .. p.path)
+end)
+
+turbo.on("beforeCommit", function(p)
+  if p.message == "" then return false end   -- veto commits with an empty message
+end)
+```
+
+| Event | Fires when | `params` |
+| --- | --- | --- |
+| `newFile` | a new empty buffer is created | — |
+| `openFile` | a file is opened in an editor | `path` |
+| `beforeSave` | just before a save writes to disk (cancellable) | `path` |
+| `afterSave` | after a save completes | `path` |
+| `closeFile` | an editor is closed | `path` |
+| `beforeCommit` | commit confirmed, before git runs (cancellable) | `message` |
+| `afterCommit` | a commit finishes | `ok`, `output` |
+
+Every handler also receives `params.event` (the event name).
+
+#### The `turbo` API
+
+A global `turbo` table is available to every script and hook:
+
+| Call | Effect |
+| --- | --- |
+| `turbo.message(s)` / `turbo.log(s)` | show a message box |
+| `turbo.version()` | Turbo / Lua version string |
+| `turbo.on(event, fn)` | register an event handler |
+| `turbo.register_command(name, [desc,] fn)` | add a command to the palette that runs `fn` |
+| `turbo.active_file()` | path of the focused editor, or `""` |
+| `turbo.file_text()` | full text of the focused editor |
+| `turbo.insert_text(s)` | insert text at the cursor |
+| `turbo.open_file(path)` | open (or focus) a file |
+| `turbo.save()` | save the focused editor |
+| `turbo.run_command(id)` | dispatch a Turbo command id |
+| `turbo.shell(cmd)` | run a shell command, return its stdout |
+| `turbo.project_root()` | the project directory |
+
+`turbo.register_command` adds your own entry to the Command Palette (`Ctrl+B`):
+
+```lua
+-- ~/.turbo/init.lua
+turbo.register_command("Insert date", "insert today's date", function()
+  turbo.insert_text(turbo.shell("date +%Y-%m-%d"))
+end)
+```
+
+For the full design and details, see
+[docs/plan_lua_scripting.md](docs/plan_lua_scripting.md).
 
 ## Acknowledgements
 

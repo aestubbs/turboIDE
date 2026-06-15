@@ -83,6 +83,16 @@ struct DocumentTreeView : public TOutline {
     // Build the tree by recursively scanning 'rootPath'.
     void scanDirectory(std::string_view rootPath) noexcept;
 
+    // --- Lua scripts section ----------------------------------------------
+    // Show (or refresh) a synthetic top-level section listing the project's and
+    // the user's global .turbo Lua scripts. Those live under .turbo, which the
+    // normal scan excludes, so they get injected as synthetic group nodes whose
+    // children carry the scripts' real paths (so they open and link to editors
+    // like any file). 'show' == false removes the section. The section is stored
+    // and re-applied after a tree rebuild (e.g. toggling hidden files).
+    void setLuaScripts(bool show, std::vector<std::string> projectScripts,
+                       std::vector<std::string> homeScripts) noexcept;
+
     // Whether to include hidden entries (dotfiles/dot-dirs) when scanning.
     // Changing it rebuilds the tree from the current root, preserving the links
     // to any open editors. No-op if unchanged or before scanDirectory().
@@ -137,6 +147,15 @@ struct DocumentTreeView : public TOutline {
 
     std::string rootPath;   // absolute path scanned by scanDirectory()
     bool showHidden {false}; // include dotfiles/dot-dirs when scanning
+
+    // Synthetic ".turbo Lua scripts" section (see setLuaScripts). The groups are
+    // owned by the tree's node lists; the pointers are nulled before a rebuild
+    // (which frees all nodes) and the section is rebuilt from the stored paths.
+    bool showLuaScripts {false};
+    std::vector<std::string> luaProjectScripts, luaHomeScripts;
+    Node *luaProjectGroup {nullptr};
+    Node *luaHomeGroup {nullptr};
+    void reinjectLuaNodes() noexcept; // rebuild the groups from the stored paths
     std::string filter;     // active filter query (lowercased; "" = no filter)
     // Recompute Node::visible for the whole tree from 'filter'. A file is
     // visible iff its name matches; a folder is visible iff its name matches

@@ -102,6 +102,11 @@ const PaletteCommand kCommands[] =
     { "Git: Push",                     cmGitPush,              "",             false },
     { "Git: New Branch...",            cmGitNewBranch,         "",             false },
     { "Git: Refresh Status",           cmGitRefresh,           "",             false },
+    // Lua
+    { "Lua: Run Script...",            cmLuaRunScript,         "",             false },
+    { "Lua: New Script...",            cmLuaNewScript,         "",             false },
+    { "Lua: Reload Config",            cmLuaReload,            "",             false },
+    { "Lua: Show Scripts in Tree",     cmLuaShowScripts,       "",             false },
     // Windows
     { "Zoom Window",                   cmZoom,                 "F5",           true  },
     { "Resize / Move Window",          cmResize,               "Ctrl-F5",      true  },
@@ -114,10 +119,13 @@ const PaletteCommand kCommands[] =
 
 } // namespace
 
-ushort runCommandPalette(bool hasEditor) noexcept
+ushort runCommandPalette(bool hasEditor,
+                         const std::vector<PaletteExtra> &extra) noexcept
 {
-    auto provider = [hasEditor] (const std::string &query) -> std::vector<FuzzyPicker::Row>
+    auto provider = [hasEditor, &extra] (const std::string &query) -> std::vector<FuzzyPicker::Row>
     {
+        // A scored entry references either a static command (idx >= 0) or a
+        // dynamic extra (idx < 0, encoding -(extraIndex + 1)).
         struct Scored { int idx; int score; bool avail; };
         std::vector<Scored> scored;
         int count = (int) (sizeof(kCommands) / sizeof(kCommands[0]));
@@ -130,15 +138,31 @@ ushort runCommandPalette(bool hasEditor) noexcept
             // Unavailable commands sink below every available one.
             scored.push_back({ i, avail ? s : s - 1000000, avail });
         }
+        for (int e = 0; e < (int) extra.size(); ++e)
+        {
+            int s = 0;
+            if (!fuzzy::fuzzyScore(query, extra[e].label.c_str(), &s))
+                continue;
+            scored.push_back({ -(e + 1), s, true });
+        }
         std::sort(scored.begin(), scored.end(),
                   [] (const Scored &a, const Scored &b) { return a.score > b.score; });
         std::vector<FuzzyPicker::Row> out;
         out.reserve(scored.size());
         for (auto &sc : scored)
         {
-            const PaletteCommand &c = kCommands[sc.idx];
-            out.push_back({ c.label, c.shortcut ? c.shortcut : "",
-                            (int) c.command, !sc.avail });
+            if (sc.idx >= 0)
+            {
+                const PaletteCommand &c = kCommands[sc.idx];
+                out.push_back({ c.label, c.shortcut ? c.shortcut : "",
+                                (int) c.command, !sc.avail });
+            }
+            else
+            {
+                const PaletteExtra &x = extra[-sc.idx - 1];
+                out.push_back({ x.label.c_str(), x.detail.c_str(),
+                                (int) x.command, false });
+            }
         }
         return out;
     };

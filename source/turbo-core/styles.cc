@@ -288,6 +288,45 @@ bool styleByName(TStringView name, TextStyle &out) noexcept
     return false;
 }
 
+constexpr LexerSettings::StyleMapping stylesLua[] =
+{
+    {SCE_LUA_DEFAULT,       sNormal},
+    {SCE_LUA_COMMENT,       sComment},
+    {SCE_LUA_COMMENTLINE,   sComment},
+    {SCE_LUA_COMMENTDOC,    sComment},
+    {SCE_LUA_NUMBER,        sNumberLiteral},
+    {SCE_LUA_WORD,          sKeyword1},
+    {SCE_LUA_STRING,        sStringLiteral},
+    {SCE_LUA_CHARACTER,     sCharLiteral},
+    {SCE_LUA_LITERALSTRING, sStringLiteral},
+    {SCE_LUA_PREPROCESSOR,  sPreprocessor},
+    {SCE_LUA_OPERATOR,      sOperator},
+    {SCE_LUA_IDENTIFIER,    sNormal},
+    {SCE_LUA_STRINGEOL,     sError},
+    {SCE_LUA_WORD2,         sKeyword2},
+    {SCE_LUA_WORD3,         sKeyword2},
+    {SCE_LUA_WORD4,         sKeyword2},
+    {SCE_LUA_WORD5,         sKeyword2},
+    {SCE_LUA_WORD6,         sKeyword2},
+    {SCE_LUA_WORD7,         sKeyword2},
+    {SCE_LUA_WORD8,         sKeyword2},
+    {SCE_LUA_LABEL,         sMisc},
+};
+
+constexpr LexerSettings::KeywordMapping keywordsLua[] =
+{
+    {0,
+"and break do else elseif end false for function goto if in local nil not or "
+"repeat return then true until while "
+    },
+    {1,
+"assert collectgarbage dofile error getmetatable ipairs load loadfile next pairs "
+"pcall print rawequal rawget rawlen rawset require select setmetatable tonumber "
+"tostring type xpcall coroutine debug io math os package string table utf8 "
+"_G _VERSION self "
+    },
+};
+
 constexpr LexerSettings::StyleMapping stylesC[] =
 {
     {SCE_C_DEFAULT,                 sNormal},
@@ -1136,6 +1175,7 @@ constexpr LexerSettings::KeywordMapping keywordsGo[] =
 constexpr struct { const Language *language; LexerSettings lexer; } builtInLexers[] =
 {
     {&Language::CPP, {SCLEX_CPP, stylesC, keywordsC, propertiesC}},
+    {&Language::Lua, {SCLEX_LUA, stylesLua, keywordsLua, nullptr}},
     {&Language::Makefile, {SCLEX_MAKEFILE, stylesMake, nullptr, nullptr}},
     {&Language::Asm, {SCLEX_ASM, stylesAsm, nullptr, nullptr}},
     {&Language::JavaScript, {SCLEX_CPP, stylesC, keywordsJavaScript, propertiesC}},

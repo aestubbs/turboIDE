@@ -24,8 +24,14 @@ static constexpr TStringView aboutDialogText =
 
 static constexpr TStringView helpParagraphs[] =
 {
-    "  Keyboard shortcuts ▄\n"
-    " ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+    // Contents. (Leading-space paragraphs are shown verbatim; the others wrap.)
+    "Turbo's built-in help, in three sections. Scroll with the Down arrow, PgDn "
+    "or the scrollbar to reach each one.\n\n",
+    "   1.  Keyboard & shortcuts\n"
+    "   2.  Features   (Git, multiple cursors, terminal, ...)\n"
+    "   3.  Lua scripting\n",
+    "  1 · Keyboard & shortcuts ▄\n"
+    " ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
     "This table shows Turbo's commands and their associated keyboard shortcuts."
     "\n\n",
     "Some commands can be triggered by more than one shortcut. Some keyboard "
@@ -143,6 +149,11 @@ static constexpr TStringView helpParagraphs[] =
     " │             │ Switch branch          │ Menu bar           │\n"
     " │             │ New branch...          │ Git menu/menu bar  │\n"
     " ├─────────────┼────────────────────────┼────────────────────┤\n"
+    " │ Lua         │ Run script             │ Lua menu / palette │\n"
+    " │ scripting   │ New script             │ Lua menu           │\n"
+    " │             │ Reload config          │ Lua menu           │\n"
+    " │             │ Show scripts in tree   │ Lua menu           │\n"
+    " ├─────────────┼────────────────────────┼────────────────────┤\n"
     " │ Tools       │ New terminal           │ File menu          │\n"
     " └─────────────┴────────────────────────┴────────────────────┘\n",
     // These trailing prose paragraphs are kept separate from the table above so
@@ -158,7 +169,11 @@ static constexpr TStringView helpParagraphs[] =
     "The Command Palette (Ctrl+B, or the File menu) lists every command by name "
     "so you can run it without hunting through the menus -- type to filter, then "
     "press Enter. Commands that need an open editor are shown dimmed when there "
-    "is none.\n\n",
+    "is none. It also lists your Lua scripts (\"Lua Script: <name>\") and any "
+    "commands a script has registered (see section 3), so those are launchable "
+    "the same way.\n\n",
+    "  2 · Features ▄\n"
+    " ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
     "Multiple cursors: press Ctrl+D to select the word at the caret, and again "
     "to add the next occurrence -- then type to edit every selection at once. "
     "Ctrl+Alt+Up and Ctrl+Alt+Down add a caret on the line above or below (also "
@@ -175,7 +190,83 @@ static constexpr TStringView helpParagraphs[] =
     "~/.turborc to choose which shell (the default is $SHELL). While a terminal "
     "is focused, keystrokes go to the shell -- including Ctrl+C, Ctrl+D, Ctrl+R "
     "and Ctrl+Z -- except the menu accelerators (F1, F12, Ctrl+Q and "
-    "Ctrl+N/O/S), which still drive the editor.",
+    "Ctrl+N/O/S), which still drive the editor.\n\n",
+
+    "  3 · Lua scripting ▄\n"
+    " ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+    "Turbo embeds a Lua 5.4 interpreter, so you can configure and extend the "
+    "editor in Lua: run scripts on demand, and hook into editor events such as "
+    "save and commit. The whole Lua standard library (string, table, math, io, "
+    "os, ...) is available.\n\n",
+    "Where scripts live: under a .turbo directory in two places -- a "
+    "project-local one and a global one in your home directory:\n\n",
+    "   <project>/.turbo/    project scripts -- only this project\n"
+    "   ~/.turbo/            global scripts  -- every project\n"
+    "\n"
+    "   In each: init.lua runs at startup (register hooks here);\n"
+    "   scripts/*.lua are individual runnable scripts.\n"
+    "\n",
+    "Running scripts: use the Lua menu (Run Script...) or the Command Palette "
+    "(Ctrl+B) -- each script appears as \"Lua Script: <name>\". Lua > New "
+    "Script... creates one under the project's .turbo/scripts. Script windows "
+    "have a brown frame so they stand out.\n\n",
+    "A script is just Lua. For example .turbo/scripts/hello.lua:\n\n",
+    "   -- hello.lua\n"
+    "   if turbo.active_file() ~= \"\" then\n"
+    "     turbo.message(\"editing \" .. turbo.active_file())\n"
+    "   else\n"
+    "     turbo.message(\"no file open\")\n"
+    "   end\n"
+    "\n",
+    "Events: in an init.lua, call turbo.on(event, handler) to react to what you "
+    "do in the editor. Turbo calls the handler with a table of parameters; for "
+    "\"before\" events, returning false cancels the action.\n\n",
+    "   -- ~/.turbo/init.lua   (global hooks)\n"
+    "   turbo.on(\"afterSave\", function(p)\n"
+    "     turbo.message(\"saved \" .. p.path)\n"
+    "   end)\n"
+    "\n"
+    "   turbo.on(\"beforeCommit\", function(p)\n"
+    "     if p.message == \"\" then return false end  -- veto empty msg\n"
+    "   end)\n"
+    "\n",
+    "   Events you can hook (turbo.on):\n"
+    "\n"
+    "     newFile        a new empty buffer was created      (none)\n"
+    "     openFile       a file was opened in an editor      path\n"
+    "     beforeSave*    about to write the file to disk     path\n"
+    "     afterSave      the file was saved                  path\n"
+    "     closeFile      an editor was closed                path\n"
+    "     beforeCommit*  commit confirmed, before git runs   message\n"
+    "     afterCommit    the commit finished                 ok, output\n"
+    "\n"
+    "   (*) returning false cancels the action. Handlers also get\n"
+    "   params.event (the event name).\n"
+    "\n",
+    "The turbo API -- the global 'turbo' table available to every script and "
+    "hook:\n\n",
+    "     turbo.message(s)            show a message box (alias: log)\n"
+    "     turbo.version()             Turbo / Lua version string\n"
+    "     turbo.on(event, fn)         register an event handler\n"
+    "     turbo.register_command(     add a palette command that runs\n"
+    "        name, [desc,] fn)        fn when chosen\n"
+    "     turbo.active_file()         path of the focused editor, or \"\"\n"
+    "     turbo.file_text()           full text of the focused editor\n"
+    "     turbo.insert_text(s)        insert text at the cursor\n"
+    "     turbo.open_file(path)       open (or focus) a file\n"
+    "     turbo.save()                save the focused editor\n"
+    "     turbo.run_command(id)       dispatch a Turbo command id\n"
+    "     turbo.shell(cmd)            run a shell command, return stdout\n"
+    "     turbo.project_root()        the project directory\n"
+    "\n",
+    "register_command adds your own entry to the Command Palette. For example, "
+    "in ~/.turbo/init.lua:\n\n",
+    "   turbo.register_command(\"Insert date\", \"today's date\",\n"
+    "     function()\n"
+    "       turbo.insert_text(turbo.shell(\"date +%Y-%m-%d\"))\n"
+    "     end)\n"
+    "\n"
+    "   Registered commands are searchable in the palette by name.",
 };
 
 void TurboHelp::executeAboutDialog(TGroup &owner) noexcept
