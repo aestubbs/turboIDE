@@ -96,9 +96,20 @@ enum : ushort
     cmTreeNewFolder,
     cmTreeGitAdd,
     cmTreeGitRevert,
+    // Lua scripting menu.
+    cmLuaRunScript,   // pop up the list of discovered scripts and run one
+    cmLuaNewScript,   // create + open a new script in the project's .turbo/scripts
+    cmLuaReload,      // re-run init.lua from the project + home .turbo dirs
+    cmLuaShowScripts, // toggle the .turbo Lua scripts section in the file tree
     // Recent-windows list in the Windows menu: cmWindowBase + i selects the
     // i-th most-recently-used editor window (i in [0, windowListMax)).
     cmWindowBase = 1100,
+    // Lua "Run Script" popup / palette: cmLuaScriptBase + i runs the i-th
+    // discovered script (i in [0, luaScriptListMax)).
+    cmLuaScriptBase = 1400,
+    // Lua-registered commands (turbo.register_command): cmLuaCommandBase + i
+    // invokes the i-th registered Lua function (i in [0, luaCommandListMax)).
+    cmLuaCommandBase = 1600,
     // Branch dropdown in the menu bar: cmBranchBase + i checks out the i-th
     // branch shown in the list (i in [0, branchListMax)).
     cmBranchBase = 1200,
@@ -109,5 +120,7 @@ enum : ushort
 
 enum { windowListMax = 10 };
 enum { branchListMax = 100 };
+enum { luaScriptListMax = 100 };
+enum { luaCommandListMax = 100 };
 
 #endif // TURBO_CMDS_H

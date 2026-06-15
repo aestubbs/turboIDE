@@ -28,6 +28,7 @@ struct EditorWindow;
 class TClockView;
 class LspManager;
 class GitManager;
+class LuaManager;
 struct BranchView;
 struct TerminalView;
 
@@ -70,6 +71,8 @@ struct TurboApp : public TApplication, EditorWindowParent
     std::unique_ptr<LspManager> lsp;
     std::unique_ptr<GitManager> git;
     std::unique_ptr<turbo::FileWatcher> watcher;
+    // Embedded Lua interpreter: editor scripting/configuration and event hooks.
+    std::unique_ptr<LuaManager> luaMgr;
 
     // Branch indicator at the right of the menu bar (clickable; opens a popup of
     // the other branches). 'branchTextShown' is the last text written to it, so
@@ -184,6 +187,39 @@ struct TurboApp : public TApplication, EditorWindowParent
     TRect newEditorBounds() const;
     turbo::TScintilla &createScintilla() noexcept;
     void addEditor(turbo::TScintilla &, const char *path);
+
+    // The currently focused editor window (front of the MRU list), or nullptr.
+    EditorWindow *focusedEditor() noexcept;
+
+    // --- Lua scripting ---------------------------------------------------
+    // Construct the LuaManager, wire its host hooks to this app, and load
+    // init.lua from the project and home .turbo dirs. Safe to call once the
+    // project root is known (it is a no-op on a second call).
+    void initLua() noexcept;
+    // Fire an editor lifecycle event to the registered Lua handlers. Returns
+    // false only when a "before*" handler cancelled the action.
+    bool fireLuaEvent(const char *event) noexcept;
+    bool fireLuaEvent(const char *event,
+                      const std::vector<std::pair<std::string, std::string>> &params) noexcept;
+    // Absolute paths of *.lua scripts under <projectRoot>/.turbo/scripts (first)
+    // and ~/.turbo/scripts. Used by the "Run Script" popup and the file tree.
+    std::vector<std::string> discoverLuaScripts() const noexcept;
+    // Pop up the discovered-scripts menu and run the chosen one (cmLuaRunScript).
+    void runLuaScriptPicker() noexcept;
+    // Run the i-th script from discoverLuaScripts() (the cmLuaScriptBase + i
+    // commands the command palette dispatches).
+    void runDiscoveredLuaScript(int index) noexcept;
+    // Prompt for a name and create+open a new script in <projectRoot>/.turbo/scripts.
+    void luaNewScript() noexcept;
+    // Re-run init.lua from the project + home .turbo dirs (cmLuaReload).
+    void reloadLuaConfig() noexcept;
+    // Toggle the .turbo Lua scripts section in the file tree (cmLuaShowScripts).
+    void toggleLuaScripts() noexcept;
+    // Push the current project/home script lists into the tree's Lua section
+    // (adds, removes, or refreshes it per showLuaScriptsInTree).
+    void refreshLuaScriptsInTree() noexcept;
+    // When true, the file tree shows a synthetic section listing the .turbo scripts.
+    bool showLuaScriptsInTree {false};
     void showEditorList(TEvent *ev);
     void toggleTreeView();
     void setTreeWidth(int w);     // resize the docked tree (from a left-border drag)
@@ -229,6 +265,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     const char *getFileDialogDir() noexcept override;
     bool autoSaveOnFocusLoss() noexcept override;
     void editorTextChanged(EditorWindow &w) noexcept override;
+    void editorWillSave(EditorWindow &w) noexcept override;
     void editorSaved(EditorWindow &w) noexcept override;
     void editorCharAdded(EditorWindow &w, int ch) noexcept override;
     void editorRequestCompletion(EditorWindow &w) noexcept override;

@@ -83,7 +83,10 @@ struct FieldInputLine : public TInputLine
 
 } // namespace
 
-bool executeGitCommitDialog(GitManager &git) noexcept
+bool executeGitCommitDialog(
+    GitManager &git,
+    std::function<bool(const std::string &message)> beforeCommit,
+    std::function<void(bool ok, const std::string &output)> afterCommit) noexcept
 {
     const GitRepoStatus &st = git.currentStatus();
 
@@ -169,6 +172,8 @@ bool executeGitCommitDialog(GitManager &git) noexcept
             messageBox("Commit message is empty.", mfError | mfOKButton);
         else if (chosen == 0)
             messageBox("No files selected to commit.", mfError | mfOKButton);
+        else if (beforeCommit && !beforeCommit(message))
+            ; // a beforeCommit hook vetoed the commit; leave committed = false
         else
         {
             // Reconcile the index to match the checkboxes, then commit. These
@@ -177,7 +182,7 @@ bool executeGitCommitDialog(GitManager &git) noexcept
                 git.unstage(toUnstage);
             if (!toStage.empty())
                 git.stage(toStage);
-            git.commit(message, [] (int code, const std::string &output) {
+            git.commit(message, [afterCommit] (int code, const std::string &output) {
                 if (code != 0)
                 {
                     std::string m = "git commit failed:\n" +
@@ -185,6 +190,8 @@ bool executeGitCommitDialog(GitManager &git) noexcept
                                         : output.substr(0, 400));
                     messageBox(m.c_str(), mfError | mfOKButton);
                 }
+                if (afterCommit)
+                    afterCommit(code == 0, output);
             });
             committed = true;
         }

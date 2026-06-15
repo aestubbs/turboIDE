@@ -139,6 +139,30 @@ target_include_directories(vterm PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/deps/libvterm/src"
 )
 
+# Target 'lua' (Lua 5.4 interpreter, MIT-licensed)
+#
+# Embedded so the editor can be scripted and configured in Lua. Pulled in as a
+# git submodule under deps/ (pinned to a release tag) and compiled like vterm:
+# glob its C sources into an object library, which is then folded into the
+# 'turbo' app (the LuaManager that drives it lives in source/turbo). The Lua
+# sources sit at the submodule root, not in a src/ subdir. We drop three .c
+# files: lua.c (the standalone interpreter's main()), onelua.c (the single-TU
+# amalgamation, which would duplicate every Lua symbol) and ltests.c (the
+# internal test harness, which only compiles under -DLUA_USER_H="ltests.h").
+file(GLOB LUA_SRC "${CMAKE_CURRENT_LIST_DIR}/deps/lua/*.c")
+list(FILTER LUA_SRC EXCLUDE REGEX "(lua|ltests)\\.c$")
+add_library(lua OBJECT ${LUA_SRC})
+set_target_properties(lua PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON)
+target_include_directories(lua PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/deps/lua>"
+)
+# Enable Lua's POSIX feature set (io.popen, os.* via mkstemp, isatty) on Unix.
+# We deliberately do NOT define LUA_USE_DLOPEN: scripts are pure Lua, so we skip
+# dynamic C-module loading and the -ldl link dependency it would pull in.
+if (UNIX)
+    target_compile_definitions(lua PRIVATE LUA_USE_POSIX)
+endif()
+
 # Dependencies
 
 include(deps/CMakeLists.txt)
@@ -250,22 +274,30 @@ endif()
 
 if (TURBO_BUILD_APP)
     file(GLOB_RECURSE TURBO_SRC "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}/*.cc")
-    # The terminal window (source/turbo/terminal.cc) drives libvterm; fold its
-    # object files into the app and expose its public header.
-    add_executable(${TURBO} ${TURBO_SRC} $<TARGET_OBJECTS:vterm>)
+    # The terminal window (source/turbo/terminal.cc) drives libvterm and the
+    # LuaManager (source/turbo/luamanager.cc) drives the embedded Lua; fold both
+    # sets of object files into the app and expose their public headers.
+    add_executable(${TURBO} ${TURBO_SRC} $<TARGET_OBJECTS:vterm> $<TARGET_OBJECTS:lua>)
     # buildconfig.cc pulls in the large nlohmann/json header; keep it out of the
     # unity batch so it compiles once on its own instead of slowing a whole batch.
     set_source_files_properties(
         "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}/buildconfig.cc"
+        PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+    # luamanager.cc includes the Lua C headers (macro-heavy luaconf.h); keep it
+    # out of the unity batch so those macros can't leak into batch-mates.
+    set_source_files_properties(
+        "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}/luamanager.cc"
         PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
     target_compile_features(${TURBO} PRIVATE cxx_std_17)
     turbo_set_warnings(${TURBO})
     target_link_libraries(${TURBO} PRIVATE
         ${TURBO}-core
     )
-    # terminal.cc includes <vterm.h>; objects are folded in above.
+    # terminal.cc includes <vterm.h> and luamanager.cc includes <lua.h>; the
+    # objects for both are folded in above.
     target_include_directories(${TURBO} PRIVATE
         "${CMAKE_CURRENT_LIST_DIR}/deps/libvterm/include"
+        "${CMAKE_CURRENT_LIST_DIR}/deps/lua"
     )
     install(TARGETS ${TURBO} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 

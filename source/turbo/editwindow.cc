@@ -410,6 +410,7 @@ void EditorWindow::handleEvent(TEvent &ev)
             switch (ev.message.command)
             {
                 case cmSave:
+                    parent.editorWillSave(*this);
                     editor.save(dlgs);
                     break;
                 case cmSaveAs:
@@ -570,6 +571,45 @@ void EditorWindow::handleEvent(TEvent &ev)
         super::handleEvent(ev);
 }
 
+// Warm-brown colours for Lua script windows: two shades (active / passive) shared
+// by the frame chrome and the editor's text background, so a script window reads
+// as one brown surface that brightens when focused. The active shade equals the
+// editor's active text background (mirroring how the blue frame matches the blue
+// editor background), and the passive shade is the dimmer inactive tone.
+namespace {
+constexpr TColorDesired
+    cLuaBgActive       = 0x553D1E, // active: editor text + active frame background
+    cLuaBgPassive      = 0x3A2A15, // passive: dimmer shade when the window is inactive
+    cLuaFrameFgActive  = 0xFFF0D8, // active frame text / box lines (warm white)
+    cLuaFrameFgPassive = 0xC9B393, // passive frame text (dim warm)
+    cLuaIcon           = 0xE8C07D, // frame icons (gold), on the active brown
+    cLuaBarTrough      = 0x2A1E12, // scrollbar trough
+    cLuaBarThumb       = 0x6E5230, // scrollbar slider
+    cLuaBarArrows      = 0xE8D4B0; // scrollbar arrows
+} // namespace
+
+// Window-chrome scheme for Lua script windows: the active chrome with the frame
+// and scrollbars recoloured brown. Rebuilt from windowSchemeActive each call so it
+// tracks theme edits for the entries it does not override.
+static const turbo::WindowColorScheme &luaBrownScheme() noexcept
+{
+    using namespace turbo;
+    static WindowColorScheme brown;
+    for (int i = 0; i < WindowPaletteItemCount; ++i)
+        brown[i] = windowSchemeActive[i];
+    ::setFore(brown[wndFramePassive], cLuaFrameFgPassive);
+    ::setBack(brown[wndFramePassive], cLuaBgPassive);
+    ::setFore(brown[wndFrameActive], cLuaFrameFgActive);
+    ::setBack(brown[wndFrameActive], cLuaBgActive);
+    ::setFore(brown[wndFrameIcon], cLuaIcon);
+    ::setBack(brown[wndFrameIcon], cLuaBgActive);
+    ::setFore(brown[wndScrollBarPageArea], cLuaBarThumb);
+    ::setBack(brown[wndScrollBarPageArea], cLuaBarTrough);
+    ::setFore(brown[wndScrollBarControls], cLuaBarArrows);
+    ::setBack(brown[wndScrollBarControls], cLuaBarTrough);
+    return brown;
+}
+
 void EditorWindow::applyActiveStateTheme() noexcept
 {
     using namespace turbo;
@@ -578,15 +618,24 @@ void EditorWindow::applyActiveStateTheme() noexcept
     // from a copy of the active scheme with only the normal-text background swapped
     // (other styles inherit it), so syntax colours are preserved.
     bool active = (state & sfActive) != 0;
-    TColorDesired bg = ::getBack(windowSchemeActive[active ? wndFrameActive
-                                                           : wndFramePassive]);
+    auto &ed = getEditor();
+    // Lua script buffers are a single warm-brown surface -- frame and text -- in
+    // two shades (brighter active, dimmer passive), so they read as "scripting /
+    // configuration" windows. The frame/chrome comes from a brown window scheme;
+    // the editor's text background is swapped to the matching shade.
+    bool isLuaScript = ed.language == &Language::Lua;
+    setScheme(isLuaScript ? &luaBrownScheme() : nullptr);
+    TColorDesired bg = isLuaScript
+        ? TColorDesired(active ? cLuaBgActive : cLuaBgPassive)
+        : ::getBack(windowSchemeActive[active ? wndFrameActive : wndFramePassive]);
     ColorScheme s;
     for (int i = 0; i < TextStyleCount; ++i)
         s[i] = schemeActive[i];
     ::setBack(s[sNormal], bg);
-    auto &ed = getEditor();
     applyTheming(ed.lexer, &s, ed.scintilla);
     ed.redraw();
+    if (frame)
+        frame->drawView(); // repaint the frame with the (possibly brown) scheme
 }
 
 void EditorWindow::setState(ushort aState, Boolean enable)
@@ -604,6 +653,7 @@ void EditorWindow::setState(ushort aState, Boolean enable)
             // Auto-save the file when the editor loses focus, if enabled.
             // A non-empty path means save() writes directly without prompting.
             TurboFileDialogs dlgs {parent};
+            parent.editorWillSave(*this);
             getEditor().save(dlgs);
         }
     }

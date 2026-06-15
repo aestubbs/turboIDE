@@ -74,6 +74,8 @@ struct EditorWindowParent
     virtual bool autoSaveOnFocusLoss() noexcept = 0;
     // The document's text changed / was saved (for language-server sync).
     virtual void editorTextChanged(EditorWindow &w) noexcept {}
+    // About to write the document to disk (explicit save or auto-save).
+    virtual void editorWillSave(EditorWindow &w) noexcept {}
     virtual void editorSaved(EditorWindow &w) noexcept {}
     // A character was typed (for completion trigger characters).
     virtual void editorCharAdded(EditorWindow &w, int ch) noexcept {}

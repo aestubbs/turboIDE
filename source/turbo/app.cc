@@ -32,6 +32,7 @@
 #include "lspdialog.h"
 #include "gitmanager.h"
 #include "gitdialog.h"
+#include "luamanager.h"
 #include "menucheck.h"
 #include "terminal.h"
 #include "themedialog.h"
@@ -42,11 +43,17 @@
 #include <turbo/fileeditor.h>
 #include <turbo/tpath.h>
 #include <tvision/internal/codepage.h>
+#include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 
 using namespace Scintilla;
+
+// Defined further down; forward-declared so the Lua helpers above it can trim
+// user-entered names too.
+static std::string trimmed(const char *s);
 
 // Branch indicator that lives at the right of the menu bar. It draws the current
 // branch (icon + name) like the clock used to, and a click opens a popup listing
@@ -503,6 +510,12 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             newLine() +
             *new TMenuItem( "~C~onfigure...", cmBuildConfig, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Show/Hide ~O~utput", cmToggleOutput, kbNoKey, hcNoContext ) +
+        *new TSubMenu( "L~u~a", kbAltU ) +
+            *new TMenuItem( "~R~un Script...", cmLuaRunScript, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~N~ew Script...", cmLuaNewScript, kbNoKey, hcNoContext ) +
+            newLine() +
+            *new TMenuItem( "Re~l~oad Config", cmLuaReload, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~S~how Scripts in Tree", cmLuaShowScripts, kbNoKey, hcNoContext ) +
         windows +
         *new TSubMenu( "~H~elp", kbAltH ) +
             *new TMenuItem( "~K~eyboard shortcuts", cmHelp, kbF1, hcNoContext, "F1" ) +
@@ -645,6 +658,10 @@ void TurboApp::handleEvent(TEvent &event)
             case cmStop: stopAll(); break;
             case cmBuildConfig: editBuildConfig(); break;
             case cmToggleOutput: toggleOutputView(); break;
+            case cmLuaRunScript: runLuaScriptPicker(); break;
+            case cmLuaNewScript: luaNewScript(); break;
+            case cmLuaReload: reloadLuaConfig(); break;
+            case cmLuaShowScripts: toggleLuaScripts(); break;
             case cmEditorNext:
             case cmEditorPrev:
                 showEditorList(&event);
@@ -701,6 +718,15 @@ void TurboApp::handleEvent(TEvent &event)
                 if (event.message.command >= cmWindowBase &&
                     event.message.command < cmWindowBase + windowListMax)
                     focusRecentWindow(event.message.command - cmWindowBase);
+                else if (event.message.command >= cmLuaScriptBase &&
+                         event.message.command < cmLuaScriptBase + luaScriptListMax)
+                    runDiscoveredLuaScript(event.message.command - cmLuaScriptBase);
+                else if (event.message.command >= cmLuaCommandBase &&
+                         event.message.command < cmLuaCommandBase + luaCommandListMax)
+                {
+                    if (luaMgr)
+                        luaMgr->runRegisteredCommand(event.message.command - cmLuaCommandBase);
+                }
                 else
                     handled = false;
                 break;
@@ -818,7 +844,27 @@ void TurboApp::gotoAnything()
 
 void TurboApp::commandPalette()
 {
-    ushort cmd = runCommandPalette(!MRUlist.empty());
+    // Offer every discovered Lua script as a palette entry ("Lua Script: <name>")
+    // alongside the static commands; selecting one dispatches cmLuaScriptBase + i.
+    std::vector<PaletteExtra> extra;
+    std::vector<std::string> scripts = discoverLuaScripts();
+    int n = std::min((int) scripts.size(), (int) luaScriptListMax);
+    for (int i = 0; i < n; ++i)
+    {
+        bool isProject = !projectRoot.empty() && scripts[i].rfind(projectRoot, 0) == 0;
+        std::string name = std::filesystem::path(scripts[i]).filename().string();
+        extra.push_back({ "Lua Script: " + name, isProject ? "project" : "global",
+                          (ushort) (cmLuaScriptBase + i) });
+    }
+    // Commands registered from Lua (turbo.register_command) appear too.
+    if (luaMgr)
+    {
+        int nc = std::min(luaMgr->commandCount(), (int) luaCommandListMax);
+        for (int i = 0; i < nc; ++i)
+            extra.push_back({ luaMgr->commandName(i), luaMgr->commandDescription(i),
+                              (ushort) (cmLuaCommandBase + i) });
+    }
+    ushort cmd = runCommandPalette(!MRUlist.empty(), extra);
     if (cmd)
     {
         // Dispatch through the normal event path so the command reaches the
@@ -848,8 +894,276 @@ void TurboApp::scanWorkspace()
             git->setWorkspace(cwd);
         if (watcher)
             watcher->start(cwd);
+        initLua(); // reads projectRoot; loads .turbo/init.lua hooks
         ::free(cwd);
     }
+}
+
+EditorWindow *TurboApp::focusedEditor() noexcept
+{
+    // handleFocus() keeps the focused window at the front of the MRU list.
+    return MRUlist.empty() ? nullptr : MRUlist.next->self;
+}
+
+// Capture the full text of an editor via Scintilla.
+static std::string luaEditorText(EditorWindow &w)
+{
+    auto &ed = w.getEditor();
+    sptr_t len = ed.callScintilla(SCI_GETLENGTH, 0U, 0U);
+    std::string s((size_t) len, '\0');
+    if (len > 0)
+        ed.callScintilla(SCI_GETTEXT, len + 1, (sptr_t) s.data());
+    return s;
+}
+
+// Run a shell command in the app's working directory (== projectRoot) and
+// return its stdout. Synchronous: scripts run on the UI thread for v1.
+static std::string luaShellCapture(const std::string &cmd)
+{
+    std::string out;
+    if (FILE *p = ::popen(cmd.c_str(), "r"))
+    {
+        char buf[4096];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof buf, p)) > 0)
+            out.append(buf, n);
+        ::pclose(p);
+    }
+    return out;
+}
+
+void TurboApp::initLua() noexcept
+{
+    if (luaMgr)
+        return; // already initialised
+
+    LuaHost host;
+    host.message = [] (const std::string &s) {
+        messageBox(s.c_str(), mfInformation | mfOKButton);
+    };
+    host.activeFilePath = [this] () -> std::string {
+        if (auto *w = focusedEditor())
+            return w->filePath();
+        return {};
+    };
+    host.activeFileText = [this] () -> std::string {
+        if (auto *w = focusedEditor())
+            return luaEditorText(*w);
+        return {};
+    };
+    host.insertText = [this] (const std::string &t) {
+        if (auto *w = focusedEditor())
+        {
+            auto &ed = w->getEditor();
+            ed.callScintilla(SCI_REPLACESEL, 0U, (sptr_t) t.c_str());
+            ed.redraw();
+        }
+    };
+    host.openFile = [this] (const std::string &p) {
+        openOrFocus(p);
+    };
+    host.saveFile = [this] () {
+        if (auto *w = focusedEditor())
+        {
+            TEvent ev {};
+            ev.what = evCommand;
+            ev.message.command = cmSave;
+            ev.message.infoPtr = nullptr;
+            w->putEvent(ev);
+        }
+    };
+    host.runCommand = [this] (int cmd) {
+        TEvent ev {};
+        ev.what = evCommand;
+        ev.message.command = (ushort) cmd;
+        ev.message.infoPtr = nullptr;
+        putEvent(ev);
+    };
+    host.shell = [] (const std::string &c) {
+        return luaShellCapture(c);
+    };
+    host.projectRoot = [this] () {
+        return projectRoot;
+    };
+
+    luaMgr = std::make_unique<LuaManager>(std::move(host));
+
+    // init.lua lives at the top of each .turbo dir (alongside config.json);
+    // runnable scripts live under .turbo/scripts. Project first, then home.
+    std::string homeTurbo;
+    if (const char *home = ::getenv("HOME"))
+        homeTurbo = std::string(home) + "/.turbo";
+    luaMgr->loadInitScripts(projectRoot.empty() ? std::string() : projectRoot + "/.turbo",
+                            homeTurbo);
+}
+
+bool TurboApp::fireLuaEvent(const char *event) noexcept
+{
+    return !luaMgr || luaMgr->fireEvent(event);
+}
+
+bool TurboApp::fireLuaEvent(const char *event,
+                            const std::vector<std::pair<std::string, std::string>> &params) noexcept
+{
+    return !luaMgr || luaMgr->fireEvent(event, params);
+}
+
+// Collect *.lua files directly inside 'dir' (non-recursive), sorted by name.
+static void scanLuaDir(const std::string &dir, std::vector<std::string> &out)
+{
+    if (dir.empty())
+        return;
+    std::error_code ec;
+    size_t start = out.size();
+    for (auto &e : std::filesystem::directory_iterator(dir, ec))
+    {
+        std::error_code fec;
+        if (e.is_regular_file(fec) && e.path().extension() == ".lua")
+            out.push_back(e.path().string());
+    }
+    std::sort(out.begin() + start, out.end());
+}
+
+std::vector<std::string> TurboApp::discoverLuaScripts() const noexcept
+{
+    std::vector<std::string> out;
+    // Project-local scripts first, then the user's global scripts.
+    if (!projectRoot.empty())
+        scanLuaDir(projectRoot + "/.turbo/scripts", out);
+    if (const char *home = ::getenv("HOME"))
+        scanLuaDir(std::string(home) + "/.turbo/scripts", out);
+    return out;
+}
+
+void TurboApp::runLuaScriptPicker() noexcept
+{
+    std::vector<std::string> scripts = discoverLuaScripts();
+    if (scripts.empty())
+    {
+        messageBox(mfInformation | mfOKButton,
+                   "No Lua scripts found. Create one with Lua > New Script... "
+                   "(scripts live in .turbo/scripts).");
+        return;
+    }
+    int n = (int) scripts.size();
+    if (n > luaScriptListMax)
+        n = luaScriptListMax;
+    // Keep the label strings alive until popupMenu returns (TMenuItem may not
+    // own them), so build them up front in a vector that outlives the popup.
+    std::vector<std::string> labels;
+    labels.reserve(n);
+    for (int i = 0; i < n; ++i)
+        labels.push_back(std::filesystem::path(scripts[i]).filename().string());
+
+    TMenuItem *head = nullptr, *tail = nullptr;
+    auto append = [&] (TMenuItem *it) {
+        if (!head) head = tail = it;
+        else { tail->next = it; tail = it; }
+    };
+    // Project scripts first, then a separator, then the global scripts. All items
+    // are selectable (no disabled headers, which would trap the menu cursor).
+    bool sepDone = false;
+    for (int i = 0; i < n; ++i)
+    {
+        bool isProject = !projectRoot.empty() && scripts[i].rfind(projectRoot, 0) == 0;
+        if (!isProject && !sepDone && head)
+        {
+            append(&newLine()); // divide project scripts from global ones
+            sepDone = true;
+        }
+        append(new TMenuItem(labels[i].c_str(), cmLuaScriptBase + i, kbNoKey, hcNoContext));
+    }
+    TPoint where = { max(0, deskTop->size.x / 2 - 12), 1 };
+    unsigned short cmd = popupMenu(where, *head, nullptr);
+    int idx = (int) cmd - cmLuaScriptBase;
+    if (idx >= 0 && idx < n && luaMgr)
+        luaMgr->runFile(scripts[idx]);
+}
+
+void TurboApp::runDiscoveredLuaScript(int index) noexcept
+{
+    if (!luaMgr || index < 0)
+        return;
+    std::vector<std::string> scripts = discoverLuaScripts();
+    if (index < (int) scripts.size())
+        luaMgr->runFile(scripts[index]);
+}
+
+void TurboApp::luaNewScript() noexcept
+{
+    if (projectRoot.empty())
+    {
+        messageBox("No project directory; cannot create a script.", mfError | mfOKButton);
+        return;
+    }
+    char name[256] = "";
+    if (inputBox("New Lua Script", "Script ~n~ame:", name, sizeof(name) - 1) != cmOK)
+        return;
+    std::string n = trimmed(name);
+    if (n.empty())
+        return;
+    if (n.size() < 4 || n.substr(n.size() - 4) != ".lua")
+        n += ".lua";
+    std::string dir = projectRoot + "/.turbo/scripts";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    std::string full = dir + "/" + n;
+    if (std::filesystem::exists(full, ec))
+    {
+        messageBox(mfError | mfOKButton, "'%s' already exists.", n.c_str());
+        return;
+    }
+    {
+        std::ofstream f(full, std::ios::out);
+        if (!f)
+        {
+            messageBox(mfError | mfOKButton, "Unable to create '%s'.", full.c_str());
+            return;
+        }
+        f << "-- " << n << "\n"
+             "-- A Turbo Lua script. Run it from the Lua menu (Run Script...).\n\n"
+             "turbo.message(\"Hello from \" .. tostring(turbo.version()))\n";
+    }
+    fileOpenOrNew(full.c_str());
+    refreshLuaScriptsInTree(); // show it in the tree if that section is enabled
+}
+
+void TurboApp::reloadLuaConfig() noexcept
+{
+    if (!luaMgr)
+    {
+        initLua();
+        messageBox("Lua initialised.", mfInformation | mfOKButton);
+        return;
+    }
+    std::string homeTurbo;
+    if (const char *home = ::getenv("HOME"))
+        homeTurbo = std::string(home) + "/.turbo";
+    int ran = luaMgr->loadInitScripts(
+        projectRoot.empty() ? std::string() : projectRoot + "/.turbo", homeTurbo);
+    messageBox(mfInformation | mfOKButton, "Reloaded %d Lua init script(s).", ran);
+}
+
+void TurboApp::refreshLuaScriptsInTree() noexcept
+{
+    if (!docTree)
+        return;
+    std::vector<std::string> project, home;
+    if (showLuaScriptsInTree)
+    {
+        if (!projectRoot.empty())
+            scanLuaDir(projectRoot + "/.turbo/scripts", project);
+        if (const char *h = ::getenv("HOME"))
+            scanLuaDir(std::string(h) + "/.turbo/scripts", home);
+    }
+    docTree->tree->setLuaScripts(showLuaScriptsInTree, std::move(project), std::move(home));
+}
+
+void TurboApp::toggleLuaScripts() noexcept
+{
+    showLuaScriptsInTree = !showLuaScriptsInTree;
+    refreshLuaScriptsInTree();
+    refreshMenuChecks();
 }
 
 void TurboApp::toggleAutoSave()
@@ -883,6 +1197,7 @@ void TurboApp::refreshMenuChecks() noexcept
     setMenuItemCheck(m, cmToggleTree, docTree && (docTree->state & sfVisible));
     setMenuItemCheck(m, cmToggleHidden, settings.showHidden);
     setMenuItemCheck(m, cmToggleAutoSave, settings.autoSaveOnFocusLoss);
+    setMenuItemCheck(m, cmLuaShowScripts, showLuaScriptsInTree);
 
     // Per-editor toggles reflect the active (most-recently-focused) editor.
     // With no editor open they all show unchecked.
@@ -1426,8 +1741,16 @@ void TurboApp::gitCommitDialog()
         messageBox("This folder is not a git repository.", mfInformation | mfOKButton);
         return;
     }
-    if (executeGitCommitDialog(*git))
-        ; // GitManager queues a status refresh after committing.
+    executeGitCommitDialog(*git,
+        [this] (const std::string &message) {
+            // A Lua beforeCommit handler may veto by returning false.
+            return fireLuaEvent("beforeCommit", {{"message", message}});
+        },
+        [this] (bool ok, const std::string &output) {
+            fireLuaEvent("afterCommit", {{"ok", ok ? "true" : "false"},
+                                         {"output", output}});
+        });
+    // GitManager queues a status refresh after committing.
 }
 
 void TurboApp::gitRemote(int which)
@@ -1622,6 +1945,12 @@ void TurboApp::addEditor(turbo::TScintilla &scintilla, const char *path)
     enableCommands(editorCmds);
     if (lsp)
         lsp->didOpen(w);
+    // Lua hooks: an unnamed scratch buffer (empty path) is a "newFile"; anything
+    // file-backed (including a freshly-created named file) is an "openFile".
+    if (path && path[0])
+        fireLuaEvent("openFile", {{"path", path}});
+    else
+        fireLuaEvent("newFile");
 }
 
 short TurboApp::lowestFreeWindowNumber() noexcept
@@ -2144,6 +2473,8 @@ void TurboApp::handleTitleChange(EditorWindow &w) noexcept
 
 void TurboApp::removeEditor(EditorWindow &w) noexcept
 {
+    // Fire while the window is still valid and linked.
+    fireLuaEvent("closeFile", {{"path", w.filePath()}});
     if (lsp)
         lsp->didClose(w);
     w.listHead.remove();
@@ -2175,12 +2506,18 @@ void TurboApp::editorTextChanged(EditorWindow &w) noexcept
         lsp->didChange(w);
 }
 
+void TurboApp::editorWillSave(EditorWindow &w) noexcept
+{
+    fireLuaEvent("beforeSave", {{"path", w.filePath()}});
+}
+
 void TurboApp::editorSaved(EditorWindow &w) noexcept
 {
     if (lsp)
         lsp->didSave(w);
     if (git)
         git->requestStatus(); // a save may change the file's git status
+    fireLuaEvent("afterSave", {{"path", w.filePath()}});
 }
 
 void TurboApp::editorCharAdded(EditorWindow &w, int ch) noexcept

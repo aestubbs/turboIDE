@@ -28,6 +28,11 @@ On top of Turbo's editor core, this fork adds the building blocks of an IDE:
   and watch their results in a dedicated, resizable output window.
 - **Language Server Protocol (LSP)** — diagnostics, completion and hover,
   configurable per language.
+- **Lua scripting** — an embedded [Lua 5.4](https://www.lua.org/) interpreter to
+  configure and extend the editor: run scripts from the **Lua** menu and hook
+  into editor events (commit, save, file open/close, …). Scripts live in a
+  project-local `.turbo/` and a global `~/.turbo/`. See
+  [docs/plan_lua_scripting.md](docs/plan_lua_scripting.md).
 - **Auto-save** — documents are saved automatically when their editor loses focus.
 - **Latest Scintilla** — upgraded to the current Scintilla 5.5 release for editing
   improvements and a wider set of language lexers.
@@ -48,7 +53,7 @@ signed in to GitHub). On Linux, build from source — see [Building](#building) 
 
 ## Building
 
-First of all, you should clone this repository along its submodules with the `--recursive` option of `git clone`. This is **required**: the build depends on the submodules in `deps/` — Turbo Vision (`deps/tvision`) and, for the LSP support, [nlohmann/json](https://github.com/nlohmann/json) (`deps/json`). A non-recursive clone will fail to build with missing headers such as `nlohmann/json.hpp`.
+First of all, you should clone this repository along its submodules with the `--recursive` option of `git clone`. This is **required**: the build depends on the submodules in `deps/` — Turbo Vision (`deps/tvision`), for the LSP support [nlohmann/json](https://github.com/nlohmann/json) (`deps/json`), and for scripting [Lua](https://www.lua.org/) (`deps/lua`). A non-recursive clone will fail to build with missing headers such as `nlohmann/json.hpp`.
 
 ```sh
 git clone --recursive https://github.com/aestubbs/turbo.git

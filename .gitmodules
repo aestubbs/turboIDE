@@ -17,3 +17,6 @@
 [submodule "deps/libvterm"]
 	path = deps/libvterm
 	url = https://github.com/neovim/libvterm
+[submodule "deps/lua"]
+	path = deps/lua
+	url = https://github.com/lua/lua

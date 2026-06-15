@@ -229,8 +229,56 @@ void DocumentTreeView::scanDirectory(std::string_view aRootPath) noexcept
 {
     rootPath = std::string {aRootPath};
     scanInto(nullptr, &root, rootPath, 0, showHidden);
+    reinjectLuaNodes(); // no-op unless the Lua scripts section is enabled
     update();
     drawView();
+}
+
+// Dispose a synthetic Lua group: its leaf children first, then the group node
+// itself. Only the group and its children are freed -- never its siblings.
+static void disposeLuaGroup(DocumentTreeView::Node *&group) noexcept
+{
+    if (!group)
+        return;
+    while (group->childList)
+        ((DocumentTreeView::Node *) group->childList)->dispose();
+    group->dispose();
+    group = nullptr;
+}
+
+void DocumentTreeView::reinjectLuaNodes() noexcept
+{
+    disposeLuaGroup(luaProjectGroup);
+    disposeLuaGroup(luaHomeGroup);
+    if (!showLuaScripts)
+        return;
+    auto build = [this] (const char *label,
+                         const std::vector<std::string> &paths) -> Node * {
+        if (paths.empty())
+            return nullptr;
+        // Synthetic directory node; its path is just the label (no real file).
+        auto *group = new Node(nullptr, label, true);
+        group->expanded = True; // open so the scripts are visible at a glance
+        putNode(&root, group);
+        for (const auto &p : paths)
+            putNode(&group->childList, new Node(group, p, false));
+        return group;
+    };
+    luaProjectGroup = build("Lua Scripts (project)", luaProjectScripts);
+    luaHomeGroup = build("Lua Scripts (global)", luaHomeScripts);
+    if (filtering())
+        recomputeVisibility();
+    update();
+    drawView();
+}
+
+void DocumentTreeView::setLuaScripts(bool show, std::vector<std::string> projectScripts,
+                                     std::vector<std::string> homeScripts) noexcept
+{
+    showLuaScripts = show;
+    luaProjectScripts = std::move(projectScripts);
+    luaHomeScripts = std::move(homeScripts);
+    reinjectLuaNodes();
 }
 
 void DocumentTreeView::setShowHidden(bool show) noexcept
@@ -248,12 +296,17 @@ void DocumentTreeView::setShowHidden(bool show) noexcept
             openEditors.push_back(node->editor);
         return false; // visit all
     });
+    // disposeNode(root) frees every node, including the synthetic Lua groups;
+    // null the pointers first (don't double-free) and rebuild them afterwards.
+    luaProjectGroup = nullptr;
+    luaHomeGroup = nullptr;
     disposeNode(root);
     root = nullptr;
     foc = 0;
     scanInto(nullptr, &root, rootPath, 0, showHidden);
     for (auto *w : openEditors)
         linkEditor(w);
+    reinjectLuaNodes(); // re-apply the Lua scripts section if it was enabled
     update();
     drawView();
 }

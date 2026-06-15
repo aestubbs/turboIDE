@@ -551,6 +551,7 @@ static const char *lexerNameForId(int id)
     switch (id)
     {
         case SCLEX_CPP:        return "cpp";
+        case SCLEX_LUA:        return "lua";
         case SCLEX_MAKEFILE:   return "makefile";
         case SCLEX_ASM:        return "asm";
         case SCLEX_RUST:       return "rust";
