@@ -2,10 +2,15 @@
 .SH NAME
 turbo \- An experimental text editor based on Scintilla and Turbo Vision.
 .SH SYNOPSIS
-\fBturbo\fR [\fIfile\fR...]
+\fBturbo\fR [\fIdirectory\fR] [\fIfile\fR...]
 .SH DESCRIPTION
 .PP
 Turbo is an experimental text editor for the terminal, based on the Scintilla code editing component and the Turbo Vision application framework.
+.PP
+If a \fIdirectory\fR argument is given, Turbo opens it as the project and shows it in the \fBFiles\fR tree; \fBturbo .\fR opens the current directory.
+Only one project is open at a time.
+With no directory argument the tree starts empty (showing only your global Lua scripts), and any \fIfile\fR arguments are opened as documents.
+A project can also be opened or closed at runtime from the \fBFile\fR menu (\fBOpen Directory\fR and \fBClose Project\fR).
 .PP
 It was created to demonstrate new features in Turbo Vision.
 In particular, it has served as testing ground for Turbo Vision's Unicode capabilities.

@@ -67,6 +67,18 @@ void GitManager::setWorkspace(const char *dir) noexcept
     });
 }
 
+void GitManager::clearWorkspace() noexcept
+{
+    // Clear the root on the worker thread (the only writer of 'root', mirroring
+    // setWorkspace) and queue an empty status for pump() to apply: that wipes the
+    // tree's git badges and resets the branch indicator to "no repo".
+    enqueue([this] {
+        root.clear();
+        std::lock_guard<std::mutex> lk(resMx);
+        pendingStatus = GitRepoStatus {}; // isRepo == false
+    });
+}
+
 void GitManager::requestStatus() noexcept
 {
     if (root.empty())

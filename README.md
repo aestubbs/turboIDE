@@ -106,16 +106,37 @@ sudo cp turbo /usr/local/bin/ # Install (optional).
 
 ### Opening a project
 
-Run `turbo` from the root of the project you want to work on:
+Pass the directory you want to work on. The most common form is `.` for the
+current directory:
 
 ```sh
 cd my-project
-turbo
+turbo .
 ```
 
 Turbo scans that directory and shows it in the **Files** tree on the right; open
 files by selecting them there. The integrated terminal, Git status and build
-commands all operate on this same directory.
+commands all operate on this same directory. You can also pass any other path
+(`turbo ~/code/my-project`) or one or more files to open (`turbo main.c`).
+
+Running `turbo` with no directory starts with no project: the **Files** tree is
+empty except for your global Lua scripts, and you can still open individual files
+with `Ctrl-O`.
+
+Once running, manage the project from the **File** menu:
+
+- **Open Directory…** — choose a folder to open as the project. Turbo only keeps
+  one project open at a time, so this replaces the current one.
+- **Close Project** — detach the workspace, empty the tree and close the editor
+  windows whose files live inside the project. (Files opened from outside the
+  project, and unsaved scratch buffers, stay open.)
+
+Turbo remembers a project's open windows. When you close a project (or quit with
+one open), the open files are written to `.turbo/session` along with each
+window's position and size and each file's scroll position, selection and which
+window had focus — so reopening the project puts you back exactly where you left
+off. This is local state, so you may want to add `.turbo/session` to your
+project's `.gitignore`.
 
 ### In-app
 

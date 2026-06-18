@@ -12,6 +12,7 @@
 #define Uses_TWindow
 #define Uses_TFrame
 #define Uses_TFileDialog
+#define Uses_TChDirDialog
 #define Uses_TIndicator
 #define Uses_TStaticText
 #define Uses_TParamText
@@ -46,6 +47,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 
@@ -424,7 +426,8 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
         *new TSubMenu( "~F~ile", kbAltF, hcNoContext ) +
             *new TMenuItem( "~N~ew", cmNew, kbCtrlN, hcNoContext, "Ctrl-N" ) +
             *new TMenuItem( "New ~F~ile...", cmNewNamedFile, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "~O~pen", cmOpen, kbCtrlO, hcNoContext, "Ctrl-O" ) +
+            *new TMenuItem( "~O~pen...", cmOpen, kbCtrlO, hcNoContext, "Ctrl-O" ) +
+            *new TMenuItem( "Open ~D~irectory...", cmOpenDir, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Go to ~A~nything...", cmGotoAnything, kbNoKey, hcNoContext, "Ctrl-P" ) +
             *new TMenuItem( "Command Pa~l~ette...", cmCommandPalette, kbNoKey, hcNoContext, "Ctrl-B" ) +
             newLine() +
@@ -434,6 +437,7 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             newLine() +
             *new TMenuItem( "~C~lose", cmCloseEditor, kbCtrlW, hcNoContext, "Ctrl-W" ) +
             *new TMenuItem( "Close All", cmCloseAll, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Close ~P~roject", cmCloseProject, kbNoKey, hcNoContext ) +
             newLine() +
             *new TMenuItem( "New ~T~erminal", cmNewTerminal, kbNoKey, hcNoContext ) +
             newLine() +
@@ -573,6 +577,9 @@ TurboApp::~TurboApp() = default;
 
 void TurboApp::shutDown()
 {
+    // Persist the open windows so the next open of this project restores them
+    // (no-op when no project is open). Editors are still valid at this point.
+    saveSession();
     if (lsp)
         lsp->shutdown();
     if (git)
@@ -634,7 +641,12 @@ void TurboApp::getEvent(TEvent &event)
 {
     if (!argsParsed) {
         argsParsed = true;
-        scanWorkspace();
+        // No project is opened automatically any more: the user opens one with
+        // `turbo <dir>` (e.g. `turbo .`) or File > Open Directory. Bring up the
+        // Lua interpreter so the global config/scripts work with no project, and
+        // surface those global scripts in the otherwise-empty tree.
+        initLua();
+        refreshLuaScriptsInTree();
         parseArgs();
     }
     TApplication::getEvent(event);
@@ -650,6 +662,8 @@ void TurboApp::handleEvent(TEvent &event)
             case cmNew: fileNew(); break;
             case cmNewNamedFile: fileNewNamedFile(); break;
             case cmOpen: fileOpen(); break;
+            case cmOpenDir: fileOpenDir(); break;
+            case cmCloseProject: closeProject(); break;
             case cmGotoAnything: gotoAnything(); break;
             case cmCommandPalette: commandPalette(); break;
             case cmBuild: runBuild(); break;
@@ -738,23 +752,42 @@ void TurboApp::handleEvent(TEvent &event)
 
 void TurboApp::parseArgs()
 {
-    if (argc && argv) {
-        auto *w = new TWindow(TRect(15, 8, 65, 19), "Please Wait...", wnNoNumber);
-        w->flags = 0;
-        w->options |= ofCentered;
-        w->palette = wpGrayWindow;
-        w->insert( new TStaticText(TRect(2, 2, 48, 3), "Opening file:"));
-        auto *current = new TParamText(TRect(2, 3, 48, 9));
-        w->insert(current);
-        insert(w);
-        for (int i = 1; i < argc; ++i) {
-            current->setText("%s", argv[i]);
-            TScreen::flushScreen();
-            fileOpenOrNew(argv[i]);
+    if (!(argc && argv))
+        return;
+    // A directory argument opens that directory as the project (so `turbo .`
+    // opens the current directory); the first one wins, since only one project
+    // runs at a time. Everything else is treated as a file to open.
+    std::vector<const char *> files;
+    bool projectOpened = false;
+    for (int i = 1; i < argc; ++i) {
+        std::error_code ec;
+        if (std::filesystem::is_directory(argv[i], ec)) {
+            if (!projectOpened) {
+                openProject(argv[i]);
+                projectOpened = true;
+            }
+            // Extra directory args are ignored: one project at a time.
+        } else {
+            files.push_back(argv[i]);
         }
-        remove(w);
-        TObject::destroy(w);
     }
+    if (files.empty())
+        return;
+    auto *w = new TWindow(TRect(15, 8, 65, 19), "Please Wait...", wnNoNumber);
+    w->flags = 0;
+    w->options |= ofCentered;
+    w->palette = wpGrayWindow;
+    w->insert( new TStaticText(TRect(2, 2, 48, 3), "Opening file:"));
+    auto *current = new TParamText(TRect(2, 3, 48, 9));
+    w->insert(current);
+    insert(w);
+    for (const char *path : files) {
+        current->setText("%s", path);
+        TScreen::flushScreen();
+        fileOpenOrNew(path);
+    }
+    remove(w);
+    TObject::destroy(w);
 }
 
 void TurboApp::fileNew()
@@ -877,26 +910,255 @@ void TurboApp::commandPalette()
     }
 }
 
-void TurboApp::scanWorkspace()
+void TurboApp::openProject(const std::string &dir) noexcept
 {
     if (!docTree)
         return;
-    char *cwd = ::getcwd(nullptr, 0);
-    if (cwd)
+    std::error_code ec;
+    std::filesystem::path abs = std::filesystem::absolute(dir, ec);
+    if (ec)
     {
-        projectRoot = cwd; // build/run commands run from here
-        buildConfig.load(projectRoot); // .turbo/config.json (no-op if absent)
-        docTree->tree->setShowHidden(settings.showHidden); // before the first scan
-        docTree->tree->scanDirectory(cwd);
-        if (lsp)
-            lsp->setRootPath(cwd);
-        if (git)
-            git->setWorkspace(cwd);
-        if (watcher)
-            watcher->start(cwd);
-        initLua(); // reads projectRoot; loads .turbo/init.lua hooks
-        ::free(cwd);
+        messageBox(mfError | mfOKButton, "Cannot open '%s' as a project.", dir.c_str());
+        return;
     }
+    std::string root = abs.lexically_normal().string();
+    // Drop a trailing separator so the root compares equal to a child entry's
+    // dirname() (the file tree relies on that, e.g. addNode's `dir == rootPath`).
+    while (root.size() > 1 && (root.back() == '/' || root.back() == '\\'))
+        root.pop_back();
+
+    // One project at a time: close any current one first (clears the tree, the
+    // watcher, git/LSP state) so the fresh scan starts from a clean slate.
+    if (!projectRoot.empty())
+        closeProject();
+
+    projectRoot = root; // build/run commands run from here
+    // Run as if launched from the project directory, so the integrated terminal,
+    // the Lua shell helper and any relative paths resolve against it -- matching
+    // the old `cd dir && turbo` behaviour.
+    std::filesystem::current_path(root, ec);
+
+    buildConfig.load(projectRoot); // .turbo/config.json (no-op if absent)
+    docTree->tree->setShowHidden(settings.showHidden); // before the first scan
+    docTree->tree->scanDirectory(root.c_str());
+    // Re-link any editors already open onto their freshly created tree nodes, so
+    // open files show bold / get git badges even when opened before the project.
+    MRUlist.forEach([&] (EditorWindow *w) {
+        if (w)
+            docTree->tree->linkEditor(w);
+    });
+    if (lsp)
+        lsp->setRootPath(root.c_str());
+    if (git)
+        git->setWorkspace(root.c_str());
+    if (watcher)
+        watcher->start(root.c_str());
+    // Load the project's .turbo/init.lua hooks. luaMgr already exists (created at
+    // startup with the global config); re-running resets the handler registry and
+    // loads project-then-home init.lua, so project hooks take effect.
+    if (luaMgr)
+    {
+        std::string homeTurbo;
+        if (const char *home = ::getenv("HOME"))
+            homeTurbo = std::string(home) + "/.turbo";
+        luaMgr->loadInitScripts(projectRoot + "/.turbo", homeTurbo);
+    }
+    refreshLuaScriptsInTree(); // now includes the project's own scripts
+    restoreSession(); // reopen the windows that were open last time, if any
+    refreshMenuChecks();
+}
+
+void TurboApp::closeProject() noexcept
+{
+    if (projectRoot.empty())
+        return; // nothing open
+    saveSession();         // remember the open windows for the next open
+    closeProjectEditors(); // close editors holding files inside the project
+    projectRoot.clear();
+    buildConfig = BuildConfig {}; // forget the project's build/run config
+    lastBuildCommand.clear();
+    if (watcher)
+        watcher->stop();
+    if (git)
+        git->clearWorkspace(); // clears badges + branch indicator via pump()
+    if (docTree)
+    {
+        docTree->tree->clear();      // empty the tree (keeps the Lua section)
+        docTree->setBranchInfo("");  // drop the branch from the tree title now
+    }
+    refreshLuaScriptsInTree(); // with no project, show the global scripts only
+    refreshMenuChecks();
+}
+
+void TurboApp::fileOpenDir()
+{
+    // TChDirDialog is a folder chooser; pressing its OK button chdir()s the
+    // process to the selected directory (in TChDirDialog::valid), so the chosen
+    // path is simply the new working directory.
+    auto *d = new TChDirDialog(cdNormal, 0);
+    ushort res = deskTop->execView(d);
+    TObject::destroy(d);
+    if (res == cmCancel)
+        return;
+    std::error_code ec;
+    std::string dir = std::filesystem::current_path(ec).string();
+    if (!ec && !dir.empty())
+        openProject(dir);
+}
+
+// The path of 'p' relative to project root 'root' if 'p' lives inside it, else
+// an empty string. Used both to decide whether an editor belongs to the project
+// and to compute the path stored in the session file.
+static std::string relInProject(const std::string &root, const std::string &p) noexcept
+{
+    if (root.empty() || p.empty())
+        return {};
+    std::error_code ec;
+    std::filesystem::path rel = std::filesystem::path(p).lexically_relative(root);
+    std::string s = rel.generic_string();
+    if (s.empty() || s == "." || s == ".." || s.rfind("../", 0) == 0)
+        return {}; // not inside the project root
+    return s;
+}
+
+void TurboApp::closeProjectEditors() noexcept
+{
+    if (projectRoot.empty())
+        return;
+    // Collect the in-project editors up front: closing one mutates the MRU list,
+    // but the other window pointers stay valid until we close them.
+    std::vector<EditorWindow *> victims;
+    MRUlist.forEach([&] (EditorWindow *w) {
+        if (w && !relInProject(projectRoot, w->filePath()).empty())
+            victims.push_back(w);
+    });
+    for (auto *w : victims)
+    {
+        // Standard window close: prompts to save a dirty buffer. If the user
+        // cancels, the window simply stays open (we move on to the next).
+        message(w, evCommand, cmClose, 0);
+        TScreen::flushScreen();
+    }
+}
+
+// The session file stores one line per in-project editor, in MRU order, so
+// reopening a project puts every window back exactly where it was. Fields are
+// tab-separated with the (possibly space-containing) relative path last:
+//   ax ay bx by  zax zay zbx zby  firstVisibleLine  anchorPos caretPos  active  relpath
+// ax,ay,bx,by are the window's desktop-relative bounds; zax..zby is its zoomRect
+// (the un-zoomed bounds Turbo Vision restores on the next F5, so a window saved
+// while zoomed comes back zoomed AND un-zooms to the right size); firstVisibleLine
+// is the scroll position; anchor/caret restore the selection; active flags the
+// window that had focus. SESSION_FIELDS counts the numeric columns before the path.
+enum { SESSION_FIELDS = 12 };
+
+void TurboApp::saveSession() noexcept
+{
+    if (projectRoot.empty())
+        return;
+    std::string activeRel;
+    if (auto *f = focusedEditor())
+        activeRel = relInProject(projectRoot, f->filePath());
+    std::vector<std::string> lines;
+    MRUlist.forEach([&] (EditorWindow *w) {
+        if (!w)
+            return;
+        std::string rel = relInProject(projectRoot, w->filePath());
+        if (rel.empty())
+            return; // unsaved scratch buffer or a file outside the project
+        TRect b = w->getBounds();
+        TRect z = w->zoomRect; // un-zoomed bounds (preserves the zoom toggle)
+        auto &ed = w->getEditor();
+        long anchor = (long) ed.callScintilla(SCI_GETANCHOR, 0U, 0U);
+        long caret = (long) ed.callScintilla(SCI_GETCURRENTPOS, 0U, 0U);
+        long fvl = (long) ed.callScintilla(SCI_GETFIRSTVISIBLELINE, 0U, 0U);
+        char buf[192];
+        std::snprintf(buf, sizeof buf,
+                      "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%ld\t%ld\t%ld\t%d\t",
+                      b.a.x, b.a.y, b.b.x, b.b.y, z.a.x, z.a.y, z.b.x, z.b.y,
+                      fvl, anchor, caret, rel == activeRel ? 1 : 0);
+        lines.push_back(std::string(buf) + rel);
+    });
+    std::string path = projectRoot + "/.turbo/session";
+    std::error_code ec;
+    if (lines.empty())
+    {
+        std::filesystem::remove(path, ec); // no project windows: forget the session
+        return;
+    }
+    std::filesystem::create_directories(projectRoot + "/.turbo", ec);
+    std::ofstream f(path, std::ios::out | std::ios::trunc);
+    if (!f)
+        return;
+    for (const auto &l : lines)
+        f << l << "\n";
+}
+
+void TurboApp::restoreSession() noexcept
+{
+    if (projectRoot.empty())
+        return;
+    std::ifstream f(projectRoot + "/.turbo/session");
+    if (!f)
+        return;
+    struct Entry { long v[SESSION_FIELDS]; std::string rel; };
+    std::vector<Entry> entries;
+    std::string raw;
+    while (std::getline(f, raw))
+    {
+        Entry e;
+        size_t pos = 0;
+        bool ok = true;
+        for (int k = 0; k < SESSION_FIELDS; ++k)
+        {
+            size_t t = raw.find('\t', pos);
+            if (t == std::string::npos) { ok = false; break; }
+            e.v[k] = std::strtol(raw.c_str() + pos, nullptr, 10);
+            pos = t + 1;
+        }
+        if (!ok)
+            continue; // malformed / truncated line
+        e.rel = raw.substr(pos);
+        if (!e.rel.empty())
+            entries.push_back(std::move(e));
+    }
+    // Open least-recently-used first so the most-recent ends up on top; then
+    // bring the previously-active editor to the front. Files that no longer exist
+    // are skipped, so a deleted file doesn't resurrect as an empty buffer.
+    std::string activeAbs;
+    for (auto it = entries.rbegin(); it != entries.rend(); ++it)
+    {
+        std::string abs = projectRoot + "/" + it->rel;
+        std::error_code ec;
+        if (!std::filesystem::exists(abs, ec))
+            continue;
+        // Open (or find) the window, then put it back where it was.
+        EditorWindow *w = nullptr;
+        MRUlist.forEach([&] (EditorWindow *e) {
+            if (e && e->filePath() == abs) w = e;
+        });
+        if (!w)
+        {
+            fileOpenOrNew(abs.c_str());
+            w = MRUlist.empty() ? nullptr : MRUlist.next->self;
+        }
+        if (!w)
+            continue;
+        TRect r {(int) it->v[0], (int) it->v[1], (int) it->v[2], (int) it->v[3]};
+        w->locate(r); // clamps to the window's size limits / the current screen
+        // Restore the zoom toggle: zoomRect is the bounds F5 will un-zoom to. A
+        // window saved while zoomed has r == the maximised size, so it stays
+        // zoomed and the next F5 collapses it back to this zoomRect.
+        w->zoomRect = TRect((int) it->v[4], (int) it->v[5], (int) it->v[6], (int) it->v[7]);
+        auto &ed = w->getEditor();
+        ed.callScintilla(SCI_SETSEL, it->v[9], it->v[10]);       // anchor, caret
+        ed.callScintilla(SCI_SETFIRSTVISIBLELINE, it->v[8], 0U); // scroll position
+        ed.redraw();
+        if (it->v[11])
+            activeAbs = abs;
+    }
+    if (!activeAbs.empty())
+        openOrFocus(activeAbs);
 }
 
 EditorWindow *TurboApp::focusedEditor() noexcept
@@ -1158,15 +1420,19 @@ void TurboApp::refreshLuaScriptsInTree() noexcept
 {
     if (!docTree)
         return;
+    // Surface the Lua scripts section when the user toggled it on, or whenever no
+    // project is open -- so the otherwise-empty tree still exposes the user's
+    // global scripts (there are no project scripts to list in that case).
+    bool show = showLuaScriptsInTree || projectRoot.empty();
     std::vector<std::string> project, home;
-    if (showLuaScriptsInTree)
+    if (show)
     {
         if (!projectRoot.empty())
             scanLuaDir(projectRoot + "/.turbo/scripts", project);
         if (const char *h = ::getenv("HOME"))
             scanLuaDir(std::string(h) + "/.turbo/scripts", home);
     }
-    docTree->tree->setLuaScripts(showLuaScriptsInTree, std::move(project), std::move(home));
+    docTree->tree->setLuaScripts(show, std::move(project), std::move(home));
 }
 
 void TurboApp::toggleLuaScripts() noexcept

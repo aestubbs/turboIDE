@@ -28,6 +28,10 @@ public:
     // Discover the repo root containing 'dir' (off-thread). If found, kicks off
     // an initial status. No-op if 'dir' is not in a git repo.
     void setWorkspace(const char *dir) noexcept;
+    // Forget the current repo: clears the root and pushes an empty (non-repo)
+    // status so pump() clears the tree badges and branch indicator. Used when a
+    // project is closed.
+    void clearWorkspace() noexcept;
     bool isRepo() const noexcept { return !root.empty(); }
     const std::string &repoRoot() const noexcept { return root; }
 

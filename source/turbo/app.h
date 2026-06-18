@@ -132,7 +132,26 @@ struct TurboApp : public TApplication, EditorWindowParent
     // Fuzzy navigation overlays (Ctrl-P / Ctrl-Shift-P).
     void gotoAnything();
     void commandPalette();
-    void scanWorkspace();
+    // --- Project (workspace) -------------------------------------------------
+    // Open 'dir' as the project: scan it into the file tree, point the build
+    // system, git, LSP and the filesystem watcher at it, and load its .turbo Lua
+    // hooks. Replaces any project already open (the IDE holds one at a time).
+    void openProject(const std::string &dir) noexcept;
+    // Close the current project: save its session, close every editor whose file
+    // lives inside the project directory, empty the file tree, stop the watcher
+    // and clear git/LSP/build state. Editors holding files outside the project
+    // (or unsaved scratch buffers) are left open. No-op when no project is open.
+    void closeProject() noexcept;
+    bool hasProject() const noexcept { return !projectRoot.empty(); }
+    // Pick a directory (folder chooser) and open it as the project.
+    void fileOpenDir();
+    // Close every open editor whose file lives inside the current project root.
+    void closeProjectEditors() noexcept;
+    // Persist / restore the set of open project editors (paths + cursor line +
+    // which was active) to <projectRoot>/.turbo/session, so reopening a project
+    // brings its windows back. Both are no-ops when no project is open.
+    void saveSession() noexcept;
+    void restoreSession() noexcept;
     void toggleAutoSave();
     void toggleHiddenFiles();
     // Rewrite the toggle menu items' labels so enabled ones show a check mark.

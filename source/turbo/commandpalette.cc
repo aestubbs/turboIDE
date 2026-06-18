@@ -35,6 +35,8 @@ const PaletteCommand kCommands[] =
     // File
     { "New File",                      cmNew,                  "Ctrl-N",       false },
     { "Open File...",                  cmOpen,                 "Ctrl-O",       false },
+    { "Open Directory...",             cmOpenDir,              "",             false },
+    { "Close Project",                 cmCloseProject,         "",             false },
     { "Save",                          cmSave,                 "Ctrl-S",       true  },
     { "Save As...",                    cmSaveAs,               "",             true  },
     { "Rename...",                     cmRename,               "F2",           true  },

@@ -281,6 +281,21 @@ void DocumentTreeView::setLuaScripts(bool show, std::vector<std::string> project
     reinjectLuaNodes();
 }
 
+void DocumentTreeView::clear() noexcept
+{
+    // disposeNode(root) frees every node, including the synthetic Lua groups;
+    // null those pointers first (don't double-free) and rebuild them afterwards.
+    luaProjectGroup = nullptr;
+    luaHomeGroup = nullptr;
+    disposeNode(root);
+    root = nullptr;
+    foc = 0;
+    rootPath.clear();
+    reinjectLuaNodes(); // re-show the Lua section if enabled (e.g. global scripts)
+    update();
+    drawView();
+}
+
 void DocumentTreeView::setShowHidden(bool show) noexcept
 {
     if (show == showHidden)
