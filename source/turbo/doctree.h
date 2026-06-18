@@ -83,6 +83,14 @@ struct DocumentTreeView : public TOutline {
     // Build the tree by recursively scanning 'rootPath'.
     void scanDirectory(std::string_view rootPath) noexcept;
 
+    // Empty the tree: dispose every scanned file/directory node and forget the
+    // root path, leaving only the synthetic Lua scripts section (re-applied per
+    // the current showLuaScripts setting). Used when a project is closed, so the
+    // tree shows nothing but the user's global scripts. Open editors keep their
+    // windows; they simply lose their (now-gone) tree links until a project that
+    // contains them is opened again.
+    void clear() noexcept;
+
     // --- Lua scripts section ----------------------------------------------
     // Show (or refresh) a synthetic top-level section listing the project's and
     // the user's global .turbo Lua scripts. Those live under .turbo, which the

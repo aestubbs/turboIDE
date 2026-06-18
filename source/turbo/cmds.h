@@ -101,6 +101,11 @@ enum : ushort
     cmLuaNewScript,   // create + open a new script in the project's .turbo/scripts
     cmLuaReload,      // re-run init.lua from the project + home .turbo dirs
     cmLuaShowScripts, // toggle the .turbo Lua scripts section in the file tree
+    // Project (workspace) open/close. The IDE holds at most one project at a
+    // time; opening another replaces it. With no project open the file tree is
+    // empty except for the user's global Lua scripts.
+    cmOpenDir,        // pick a directory and open it as the project
+    cmCloseProject,   // close the current project (empties the tree/workspace)
     // Recent-windows list in the Windows menu: cmWindowBase + i selects the
     // i-th most-recently-used editor window (i in [0, windowListMax)).
     cmWindowBase = 1100,
