@@ -191,7 +191,7 @@ static void putNode(TNode **indirect, Node *node) noexcept
 }
 
 static void scanInto(Node *parent, TNode **list, const std::string &dirPath,
-                     int depth, bool showHidden) noexcept
+                     int depth, bool showHidden, const std::string &projectRoot) noexcept
 {
     std::error_code ec;
     std::filesystem::directory_iterator it(dirPath, ec), end;
@@ -210,6 +210,12 @@ static void scanInto(Node *parent, TNode **list, const std::string &dirPath,
             continue;
         if (name[0] == '.' && (!showHidden || name == ".git" || name == ".turbo"))
             continue;
+        // The committed shared-scripts dir at the project root has its own home
+        // in the tree (the "Project Lua (Shared)" group), so don't also list it
+        // as a plain folder under the project node. Scoped to the root level so a
+        // nested folder of the same name elsewhere is unaffected.
+        if (name == "turbo-scripts" && dirPath == projectRoot)
+            continue;
         std::error_code ec2;
         bool isDir = entry.is_directory(ec2);
         std::string full = entry.path().string();
@@ -221,15 +227,55 @@ static void scanInto(Node *parent, TNode **list, const std::string &dirPath,
             node->expanded = False;
         putNode(list, node);
         if (isDir)
-            scanInto(node, &node->childList, full, depth + 1, showHidden);
+            scanInto(node, &node->childList, full, depth + 1, showHidden, projectRoot);
     }
+}
+
+void DocumentTreeView::assembleRoot() noexcept
+{
+    // Relink the top-level nodes into 'root' in fixed display order: the project
+    // folder first, then the Lua-script homes (in luaSections order). Each may be
+    // absent. The members already exist; this only (re)links the chain.
+    root = nullptr;
+    TNode **tail = &root;
+    auto append = [&tail] (Node *n) {
+        if (!n)
+            return;
+        n->next = nullptr;
+        *tail = n;
+        n->ptr = tail;
+        tail = &n->next;
+    };
+    append(projectNode);
+    for (Node *g : luaGroups)
+        append(g);
+}
+
+void DocumentTreeView::disposeProjectNode() noexcept
+{
+    if (!projectNode)
+        return;
+    disposeNode(projectNode->childList); // free the whole scanned file subtree
+    projectNode->childList = nullptr;
+    projectNode->dispose();              // unlink from root + delete the wrapper
+    projectNode = nullptr;
+}
+
+void DocumentTreeView::rebuildProjectNode() noexcept
+{
+    disposeProjectNode();
+    if (rootPath.empty())
+        return; // no project open: only the Lua homes occupy the tree
+    projectNode = new Node(nullptr, rootPath, true);
+    projectNode->expanded = True; // open so the project's files are visible
+    scanInto(projectNode, &projectNode->childList, rootPath, 1, showHidden, rootPath);
 }
 
 void DocumentTreeView::scanDirectory(std::string_view aRootPath) noexcept
 {
     rootPath = std::string {aRootPath};
-    scanInto(nullptr, &root, rootPath, 0, showHidden);
-    reinjectLuaNodes(); // no-op unless the Lua scripts section is enabled
+    rebuildProjectNode();
+    reinjectLuaNodes(); // rebuilds the Lua homes and reassembles root
     update();
     drawView();
 }
@@ -248,50 +294,47 @@ static void disposeLuaGroup(DocumentTreeView::Node *&group) noexcept
 
 void DocumentTreeView::reinjectLuaNodes() noexcept
 {
-    disposeLuaGroup(luaProjectGroup);
-    disposeLuaGroup(luaHomeGroup);
-    if (!showLuaScripts)
-        return;
-    auto build = [this] (const char *label,
-                         const std::vector<std::string> &paths) -> Node * {
-        if (paths.empty())
-            return nullptr;
-        // Synthetic directory node; its path is just the label (no real file).
-        auto *group = new Node(nullptr, label, true);
-        group->expanded = True; // open so the scripts are visible at a glance
-        putNode(&root, group);
-        for (const auto &p : paths)
-            putNode(&group->childList, new Node(group, p, false));
-        return group;
-    };
-    luaProjectGroup = build("Lua Scripts (project)", luaProjectScripts);
-    luaHomeGroup = build("Lua Scripts (global)", luaHomeScripts);
+    for (Node *&g : luaGroups)
+        disposeLuaGroup(g);
+    luaGroups.clear();
+    if (showLuaScripts)
+    {
+        for (const auto &sec : luaSections)
+        {
+            // Synthetic directory node: its path is the label (shown as the home
+            // title), with the real scripts dir carried in luaDir. Built even
+            // when empty, so the home is a clear place to drop scripts into.
+            auto *group = new Node(nullptr, sec.label, true);
+            group->expanded = True; // open so the scripts show at a glance
+            group->luaDir = sec.dir;
+            for (const auto &p : sec.scripts)
+                putNode(&group->childList, new Node(group, p, false));
+            luaGroups.push_back(group);
+        }
+    }
+    assembleRoot();
     if (filtering())
         recomputeVisibility();
     update();
     drawView();
 }
 
-void DocumentTreeView::setLuaScripts(bool show, std::vector<std::string> projectScripts,
-                                     std::vector<std::string> homeScripts) noexcept
+void DocumentTreeView::setLuaScripts(bool show, std::vector<LuaSection> sections) noexcept
 {
     showLuaScripts = show;
-    luaProjectScripts = std::move(projectScripts);
-    luaHomeScripts = std::move(homeScripts);
+    luaSections = std::move(sections);
     reinjectLuaNodes();
 }
 
 void DocumentTreeView::clear() noexcept
 {
-    // disposeNode(root) frees every node, including the synthetic Lua groups;
-    // null those pointers first (don't double-free) and rebuild them afterwards.
-    luaProjectGroup = nullptr;
-    luaHomeGroup = nullptr;
-    disposeNode(root);
-    root = nullptr;
+    // Free the project subtree (the Lua homes are freed and rebuilt by
+    // reinjectLuaNodes), forget the project path, then reassemble the root so the
+    // tree shows nothing but the Lua homes (e.g. the user's global scripts).
+    disposeProjectNode();
     foc = 0;
     rootPath.clear();
-    reinjectLuaNodes(); // re-show the Lua section if enabled (e.g. global scripts)
+    reinjectLuaNodes();
     update();
     drawView();
 }
@@ -304,24 +347,18 @@ void DocumentTreeView::setShowHidden(bool show) noexcept
     if (rootPath.empty())
         return; // not scanned yet; the flag will take effect on the first scan
     // Remember which editors are open so we can re-link them after the rebuild
-    // (disposeNode frees every node, dropping the old editor links).
+    // (rebuilding frees every node, dropping the old editor links).
     std::vector<EditorWindow *> openEditors;
     firstThat([&] (Node *node, int) {
         if (node->editor)
             openEditors.push_back(node->editor);
         return false; // visit all
     });
-    // disposeNode(root) frees every node, including the synthetic Lua groups;
-    // null the pointers first (don't double-free) and rebuild them afterwards.
-    luaProjectGroup = nullptr;
-    luaHomeGroup = nullptr;
-    disposeNode(root);
-    root = nullptr;
     foc = 0;
-    scanInto(nullptr, &root, rootPath, 0, showHidden);
+    rebuildProjectNode();
+    reinjectLuaNodes(); // reassembles root (project + Lua homes) before re-linking
     for (auto *w : openEditors)
         linkEditor(w);
-    reinjectLuaNodes(); // re-apply the Lua scripts section if it was enabled
     update();
     drawView();
 }
@@ -375,7 +412,12 @@ void DocumentTreeView::addNode(std::string_view path, bool isDir) noexcept
     TNode **list;
     Node *parent = nullptr;
     if (dir == TStringView(rootPath))
-        list = &root;
+    {
+        if (!projectNode)
+            return; // no project wrapper to attach a top-level entry to
+        parent = projectNode;
+        list = &projectNode->childList;
+    }
     else
     {
         parent = findDir(dir);
@@ -386,7 +428,7 @@ void DocumentTreeView::addNode(std::string_view path, bool isDir) noexcept
     auto *node = new Node(parent, std::string(path), isDir);
     putNode(list, node);
     if (isDir)
-        scanInto(node, &node->childList, std::string(path), 1, showHidden);
+        scanInto(node, &node->childList, std::string(path), 1, showHidden, rootPath);
     if (filtering())
         recomputeVisibility(); // a new node defaults to visible; reclassify it
     update();
@@ -697,21 +739,42 @@ void DocumentTreeView::showContextMenu(int row, TPoint where) noexcept
     std::string path = node->path;
     bool isDir = node->isDir;
     char gs = node->gitStatus;
+    std::string luaDir = node->luaDir;
 
-    // Build the item chain by hand so the optional Revert entry is easy to add.
+    // A synthetic Lua-script home: the only meaningful action is creating a new
+    // script in its directory. The file/git actions don't apply (its path is a
+    // label, not a real file), so give it a one-item menu of its own.
+    if (!luaDir.empty())
+    {
+        auto *only = new TMenuItem("~N~ew Lua Script...", cmTreeNewLuaScript,
+                                   kbNoKey, hcNoContext);
+        ushort cmd = popupMenu(where, *only, nullptr);
+        if (cmd == cmTreeNewLuaScript)
+            if (auto *app = (TurboApp *) TProgram::application)
+                app->treeNewLuaScript(luaDir);
+        return;
+    }
+
+    // Renaming the project root would rename the open project's own directory --
+    // surprising and risky -- so omit that entry on the project wrapper node.
+    bool isProjectRoot = isDir && path == rootPath;
+
+    // Build the item chain by hand so the optional entries are easy to add.
     auto *items  = new TMenuItem("~O~pen", cmTreeOpen, kbNoKey, hcNoContext);
-    auto *rename = new TMenuItem("~R~ename...", cmTreeRename, kbNoKey, hcNoContext);
+    TMenuItem *tail = items;
+    if (!isProjectRoot)
+    {
+        auto *rename = new TMenuItem("~R~ename...", cmTreeRename, kbNoKey, hcNoContext);
+        tail->append(rename); tail = rename;
+    }
     auto *newf   = new TMenuItem("~N~ew File...", cmTreeNewFile, kbNoKey, hcNoContext);
+    tail->append(newf); tail = newf;
     // Accelerator 'F' (not 'o') so it doesn't collide with "Open" in this menu.
     auto *newd   = new TMenuItem("New ~F~older...", cmTreeNewFolder, kbNoKey, hcNoContext);
-    auto *sep    = &newLine();
+    tail->append(newd); tail = newd;
+    tail->append(&newLine()); tail = tail->next;
     auto *add    = new TMenuItem("Git ~A~dd", cmTreeGitAdd, kbNoKey, hcNoContext);
-    items->append(rename);
-    rename->append(newf);
-    newf->append(newd);
-    newd->append(sep);
-    sep->append(add);
-    TMenuItem *tail = add;
+    tail->append(add); tail = add;
     // Offer Revert only for a tracked file with committed content to restore
     // from: modified ('M'), deleted ('D') or conflicted ('U'). Not for new/
     // untracked files (nothing at HEAD), renames, or directories.

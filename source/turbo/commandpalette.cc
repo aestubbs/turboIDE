@@ -108,7 +108,6 @@ const PaletteCommand kCommands[] =
     { "Lua: Run Script...",            cmLuaRunScript,         "",             false },
     { "Lua: New Script...",            cmLuaNewScript,         "",             false },
     { "Lua: Reload Config",            cmLuaReload,            "",             false },
-    { "Lua: Show Scripts in Tree",     cmLuaShowScripts,       "",             false },
     // Windows
     { "Zoom Window",                   cmZoom,                 "F5",           true  },
     { "Resize / Move Window",          cmResize,               "Ctrl-F5",      true  },

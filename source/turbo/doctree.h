@@ -38,6 +38,10 @@ struct DocumentTreeView : public TOutline {
         // Whether this node is shown under the current filter (see setFilter).
         // Only consulted while a filter is active; ignored otherwise.
         bool visible {true};
+        // For a synthetic Lua-home group node: the real scripts directory it
+        // stands for (so "New Lua Script..." knows where to create). Empty for
+        // every ordinary file/directory node.
+        std::string luaDir;
 
         Node(Node *parent, std::string_view path, bool isDir) noexcept;
         void setEditor(EditorWindow *w) noexcept;
@@ -45,6 +49,14 @@ struct DocumentTreeView : public TOutline {
         void remove() noexcept;
         void dispose() noexcept;
 
+    };
+
+    // A synthetic top-level "Lua scripts" home: a friendly label, the real
+    // directory it represents, and the .lua files to list beneath it.
+    struct LuaSection {
+        std::string label;
+        std::string dir;
+        std::vector<std::string> scripts;
     };
 
     DocumentTreeView(const TRect &bounds, TScrollBar *hsb, TScrollBar *vsb,
@@ -91,15 +103,16 @@ struct DocumentTreeView : public TOutline {
     // contains them is opened again.
     void clear() noexcept;
 
-    // --- Lua scripts section ----------------------------------------------
-    // Show (or refresh) a synthetic top-level section listing the project's and
-    // the user's global .turbo Lua scripts. Those live under .turbo, which the
-    // normal scan excludes, so they get injected as synthetic group nodes whose
-    // children carry the scripts' real paths (so they open and link to editors
-    // like any file). 'show' == false removes the section. The section is stored
-    // and re-applied after a tree rebuild (e.g. toggling hidden files).
-    void setLuaScripts(bool show, std::vector<std::string> projectScripts,
-                       std::vector<std::string> homeScripts) noexcept;
+    // --- Lua scripts homes ------------------------------------------------
+    // Show (or refresh) the synthetic top-level Lua-script "homes" (one group
+    // per tier: shared / local / system). Their scripts often live under .turbo
+    // or in a dir excluded from the normal scan, so they are injected as group
+    // nodes whose children carry the scripts' real paths (so they open and link
+    // to editors like any file). Each group is shown even when empty, so it acts
+    // as a clear home to drop scripts into. 'show' == false removes them. The
+    // sections are stored and re-applied after a tree rebuild (e.g. toggling
+    // hidden files).
+    void setLuaScripts(bool show, std::vector<LuaSection> sections) noexcept;
 
     // Whether to include hidden entries (dotfiles/dot-dirs) when scanning.
     // Changing it rebuilds the tree from the current root, preserving the links
@@ -156,14 +169,25 @@ struct DocumentTreeView : public TOutline {
     std::string rootPath;   // absolute path scanned by scanDirectory()
     bool showHidden {false}; // include dotfiles/dot-dirs when scanning
 
-    // Synthetic ".turbo Lua scripts" section (see setLuaScripts). The groups are
-    // owned by the tree's node lists; the pointers are nulled before a rebuild
-    // (which frees all nodes) and the section is rebuilt from the stored paths.
-    bool showLuaScripts {false};
-    std::vector<std::string> luaProjectScripts, luaHomeScripts;
-    Node *luaProjectGroup {nullptr};
-    Node *luaHomeGroup {nullptr};
-    void reinjectLuaNodes() noexcept; // rebuild the groups from the stored paths
+    // The project's files are nested under this wrapper node (named for the
+    // project folder), so the tree has a clear top-level parent for the project,
+    // sitting beside the Lua-script homes. Null when no project is open.
+    Node *projectNode {nullptr};
+    // Link the top-level nodes into 'root' in fixed display order: the project
+    // folder first, then the Lua-script homes (in luaSections order). Each may
+    // be absent. Called after the members are (re)built.
+    void assembleRoot() noexcept;
+    // (Re)build the project wrapper node, scanning the project's files into it.
+    void rebuildProjectNode() noexcept;
+    void disposeProjectNode() noexcept; // free the project subtree + the wrapper
+
+    // Synthetic Lua-script homes (see setLuaScripts). The group nodes are owned
+    // by the tree's node lists; they are freed and rebuilt from luaSections on
+    // any tree rebuild (which frees all nodes).
+    bool showLuaScripts {true};
+    std::vector<LuaSection> luaSections;
+    std::vector<Node *> luaGroups; // live group nodes, parallel to luaSections
+    void reinjectLuaNodes() noexcept; // rebuild the groups from luaSections
     std::string filter;     // active filter query (lowercased; "" = no filter)
     // Recompute Node::visible for the whole tree from 'filter'. A file is
     // visible iff its name matches; a folder is visible iff its name matches

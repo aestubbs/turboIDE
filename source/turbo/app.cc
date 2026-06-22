@@ -519,7 +519,6 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             *new TMenuItem( "~N~ew Script...", cmLuaNewScript, kbNoKey, hcNoContext ) +
             newLine() +
             *new TMenuItem( "Re~l~oad Config", cmLuaReload, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "~S~how Scripts in Tree", cmLuaShowScripts, kbNoKey, hcNoContext ) +
         windows +
         *new TSubMenu( "~H~elp", kbAltH ) +
             *new TMenuItem( "~K~eyboard shortcuts", cmHelp, kbF1, hcNoContext, "F1" ) +
@@ -675,7 +674,6 @@ void TurboApp::handleEvent(TEvent &event)
             case cmLuaRunScript: runLuaScriptPicker(); break;
             case cmLuaNewScript: luaNewScript(); break;
             case cmLuaReload: reloadLuaConfig(); break;
-            case cmLuaShowScripts: toggleLuaScripts(); break;
             case cmEditorNext:
             case cmEditorPrev:
                 showEditorList(&event);
@@ -910,6 +908,27 @@ void TurboApp::commandPalette()
     }
 }
 
+// Treat <projectRoot>/.turbo as a disposable, per-user cache: ensure it carries a
+// .gitignore that ignores its entire contents (session, logs, local scripts), so
+// none of it gets committed -- while committed/shared things (turbo-scripts/) live
+// outside .turbo. Non-destructive: writes only when .turbo already exists and has
+// no .gitignore yet, so it never clobbers a user's own.
+static void ensureTurboCacheIgnored(const std::string &projectRoot) noexcept
+{
+    if (projectRoot.empty())
+        return;
+    std::error_code ec;
+    std::string turbo = projectRoot + "/.turbo";
+    if (!std::filesystem::is_directory(turbo, ec))
+        return;
+    std::string gi = turbo + "/.gitignore";
+    if (std::filesystem::exists(gi, ec))
+        return;
+    std::ofstream f(gi, std::ios::out);
+    if (f)
+        f << "*\n";
+}
+
 void TurboApp::openProject(const std::string &dir) noexcept
 {
     if (!docTree)
@@ -939,6 +958,7 @@ void TurboApp::openProject(const std::string &dir) noexcept
     std::filesystem::current_path(root, ec);
 
     buildConfig.load(projectRoot); // .turbo/config.json (no-op if absent)
+    ensureTurboCacheIgnored(projectRoot); // retrofit .gitignore on existing .turbo
     docTree->tree->setShowHidden(settings.showHidden); // before the first scan
     docTree->tree->scanDirectory(root.c_str());
     // Re-link any editors already open onto their freshly created tree nodes, so
@@ -964,6 +984,12 @@ void TurboApp::openProject(const std::string &dir) noexcept
         luaMgr->loadInitScripts(projectRoot + "/.turbo", homeTurbo);
     }
     refreshLuaScriptsInTree(); // now includes the project's own scripts
+    // Opening a project is an explicit "work on this" action, so surface the file
+    // tree straight away -- even on smaller terminals, where it starts hidden.
+    // Done before restoreSession so the restored editors lay out beside the tree
+    // (showing it afterwards would re-shift their already-placed bounds).
+    if (!(docTree->state & sfVisible))
+        toggleTreeView();
     restoreSession(); // reopen the windows that were open last time, if any
     refreshMenuChecks();
 }
@@ -1087,6 +1113,7 @@ void TurboApp::saveSession() noexcept
         return;
     }
     std::filesystem::create_directories(projectRoot + "/.turbo", ec);
+    ensureTurboCacheIgnored(projectRoot); // .turbo just (maybe) created: ignore it
     std::ofstream f(path, std::ios::out | std::ios::trunc);
     if (!f)
         return;
@@ -1299,9 +1326,15 @@ static void scanLuaDir(const std::string &dir, std::vector<std::string> &out)
 std::vector<std::string> TurboApp::discoverLuaScripts() const noexcept
 {
     std::vector<std::string> out;
-    // Project-local scripts first, then the user's global scripts.
+    // Project tiers first -- shared (committed turbo-scripts/) then local
+    // (.turbo/scripts) -- so the picker groups them ahead of the user's system
+    // scripts. Both project tiers sit under projectRoot, so the picker's
+    // project-vs-global split (rfind(projectRoot,0)==0) still holds.
     if (!projectRoot.empty())
+    {
+        scanLuaDir(projectRoot + "/turbo-scripts", out);
         scanLuaDir(projectRoot + "/.turbo/scripts", out);
+    }
     if (const char *home = ::getenv("HOME"))
         scanLuaDir(std::string(home) + "/.turbo/scripts", out);
     return out;
@@ -1361,11 +1394,11 @@ void TurboApp::runDiscoveredLuaScript(int index) noexcept
         luaMgr->runFile(scripts[index]);
 }
 
-void TurboApp::luaNewScript() noexcept
+void TurboApp::treeNewLuaScript(const std::string &dir) noexcept
 {
-    if (projectRoot.empty())
+    if (dir.empty())
     {
-        messageBox("No project directory; cannot create a script.", mfError | mfOKButton);
+        messageBox("No scripts directory; cannot create a script.", mfError | mfOKButton);
         return;
     }
     char name[256] = "";
@@ -1376,9 +1409,10 @@ void TurboApp::luaNewScript() noexcept
         return;
     if (n.size() < 4 || n.substr(n.size() - 4) != ".lua")
         n += ".lua";
-    std::string dir = projectRoot + "/.turbo/scripts";
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
+    // Creating a local script may have just created .turbo; keep it out of git.
+    ensureTurboCacheIgnored(projectRoot);
     std::string full = dir + "/" + n;
     if (std::filesystem::exists(full, ec))
     {
@@ -1397,7 +1431,18 @@ void TurboApp::luaNewScript() noexcept
              "turbo.message(\"Hello from \" .. tostring(turbo.version()))\n";
     }
     fileOpenOrNew(full.c_str());
-    refreshLuaScriptsInTree(); // show it in the tree if that section is enabled
+    refreshLuaScriptsInTree(); // show the new script under its home
+}
+
+void TurboApp::luaNewScript() noexcept
+{
+    if (projectRoot.empty())
+    {
+        messageBox("No project directory; cannot create a script.", mfError | mfOKButton);
+        return;
+    }
+    // The Lua menu's "New Script..." defaults to the project-local home.
+    treeNewLuaScript(projectRoot + "/.turbo/scripts");
 }
 
 void TurboApp::reloadLuaConfig() noexcept
@@ -1420,26 +1465,28 @@ void TurboApp::refreshLuaScriptsInTree() noexcept
 {
     if (!docTree)
         return;
-    // Surface the Lua scripts section when the user toggled it on, or whenever no
-    // project is open -- so the otherwise-empty tree still exposes the user's
-    // global scripts (there are no project scripts to list in that case).
-    bool show = showLuaScriptsInTree || projectRoot.empty();
-    std::vector<std::string> project, home;
-    if (show)
+    // The Lua homes are permanent fixtures (always shown), so each tier is a
+    // clear place to keep scripts -- even when empty. Order: project shared,
+    // project local, then the user's system scripts.
+    std::vector<DocumentTreeView::LuaSection> sections;
+    if (!projectRoot.empty())
     {
-        if (!projectRoot.empty())
-            scanLuaDir(projectRoot + "/.turbo/scripts", project);
-        if (const char *h = ::getenv("HOME"))
-            scanLuaDir(std::string(h) + "/.turbo/scripts", home);
+        std::string sharedDir = projectRoot + "/turbo-scripts";
+        std::string localDir = projectRoot + "/.turbo/scripts";
+        std::vector<std::string> shared, local;
+        scanLuaDir(sharedDir, shared);
+        scanLuaDir(localDir, local);
+        sections.push_back({"Project Lua (Shared)", std::move(sharedDir), std::move(shared)});
+        sections.push_back({"Project Lua (Local)", std::move(localDir), std::move(local)});
     }
-    docTree->tree->setLuaScripts(show, std::move(project), std::move(home));
-}
-
-void TurboApp::toggleLuaScripts() noexcept
-{
-    showLuaScriptsInTree = !showLuaScriptsInTree;
-    refreshLuaScriptsInTree();
-    refreshMenuChecks();
+    if (const char *h = ::getenv("HOME"))
+    {
+        std::string homeDir = std::string(h) + "/.turbo/scripts";
+        std::vector<std::string> home;
+        scanLuaDir(homeDir, home);
+        sections.push_back({"System Lua", std::move(homeDir), std::move(home)});
+    }
+    docTree->tree->setLuaScripts(true, std::move(sections));
 }
 
 void TurboApp::toggleAutoSave()
@@ -1473,7 +1520,6 @@ void TurboApp::refreshMenuChecks() noexcept
     setMenuItemCheck(m, cmToggleTree, docTree && (docTree->state & sfVisible));
     setMenuItemCheck(m, cmToggleHidden, settings.showHidden);
     setMenuItemCheck(m, cmToggleAutoSave, settings.autoSaveOnFocusLoss);
-    setMenuItemCheck(m, cmLuaShowScripts, showLuaScriptsInTree);
 
     // Per-editor toggles reflect the active (most-recently-focused) editor.
     // With no editor open they all show unchecked.
