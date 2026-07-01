@@ -1427,7 +1427,7 @@ void TurboApp::treeNewLuaScript(const std::string &dir) noexcept
             return;
         }
         f << "-- " << n << "\n"
-             "-- A Turbo Lua script. Run it from the Lua menu (Run Script...).\n\n"
+             "-- A turboIDE Lua script. Run it from the Lua menu (Run Script...).\n\n"
              "turbo.message(\"Hello from \" .. tostring(turbo.version()))\n";
     }
     fileOpenOrNew(full.c_str());

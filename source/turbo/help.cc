@@ -11,13 +11,13 @@
 #include <sstream>
 
 static constexpr TStringView aboutDialogText =
-    "\003Turbo"
+    "\003turboIDE"
 #ifdef TURBO_VERSION_STRING
     " (build " TURBO_VERSION_STRING ")"
 #endif
     "\n\n"
-    "\003A text editor based on Scintilla and Turbo Vision\n\n"
-    "\003https://github.com/magiblot/turbo";
+    "\003A lightweight terminal IDE based on Scintilla and Turbo Vision\n\n"
+    "\003https://github.com/aestubbs/turboIDE";
 
 // Since we do not need cross-references, we can easily create a THelpFile
 // on-the-fly and define topics manually instead of using TVHC.
@@ -25,14 +25,14 @@ static constexpr TStringView aboutDialogText =
 static constexpr TStringView helpParagraphs[] =
 {
     // Contents. (Leading-space paragraphs are shown verbatim; the others wrap.)
-    "Turbo's built-in help, in three sections. Scroll with the Down arrow, PgDn "
+    "turboIDE's built-in help, in three sections. Scroll with the Down arrow, PgDn "
     "or the scrollbar to reach each one.\n\n",
     "   1.  Keyboard & shortcuts\n"
     "   2.  Features   (Git, multiple cursors, terminal, ...)\n"
     "   3.  Lua scripting\n",
     "  1 · Keyboard & shortcuts ▄\n"
     " ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
-    "This table shows Turbo's commands and their associated keyboard shortcuts."
+    "This table shows turboIDE's commands and their associated keyboard shortcuts."
     "\n\n",
     "Some commands can be triggered by more than one shortcut. Some keyboard "
     "shortcuts may not be supported by the console.\n\n",
@@ -194,7 +194,7 @@ static constexpr TStringView helpParagraphs[] =
 
     "  3 · Lua scripting ▄\n"
     " ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
-    "Turbo embeds a Lua 5.4 interpreter, so you can configure and extend the "
+    "turboIDE embeds a Lua 5.4 interpreter, so you can configure and extend the "
     "editor in Lua: run scripts on demand, and hook into editor events such as "
     "save and commit. The whole Lua standard library (string, table, math, io, "
     "os, ...) is available.\n\n",
@@ -219,7 +219,7 @@ static constexpr TStringView helpParagraphs[] =
     "   end\n"
     "\n",
     "Events: in an init.lua, call turbo.on(event, handler) to react to what you "
-    "do in the editor. Turbo calls the handler with a table of parameters; for "
+    "do in the editor. turboIDE calls the handler with a table of parameters; for "
     "\"before\" events, returning false cancels the action.\n\n",
     "   -- ~/.turbo/init.lua   (global hooks)\n"
     "   turbo.on(\"afterSave\", function(p)\n"
@@ -246,7 +246,7 @@ static constexpr TStringView helpParagraphs[] =
     "The turbo API -- the global 'turbo' table available to every script and "
     "hook:\n\n",
     "     turbo.message(s)            show a message box (alias: log)\n"
-    "     turbo.version()             Turbo / Lua version string\n"
+    "     turbo.version()             turboIDE / Lua version string\n"
     "     turbo.on(event, fn)         register an event handler\n"
     "     turbo.register_command(     add a palette command that runs\n"
     "        name, [desc,] fn)        fn when chosen\n"
@@ -255,7 +255,7 @@ static constexpr TStringView helpParagraphs[] =
     "     turbo.insert_text(s)        insert text at the cursor\n"
     "     turbo.open_file(path)       open (or focus) a file\n"
     "     turbo.save()                save the focused editor\n"
-    "     turbo.run_command(id)       dispatch a Turbo command id\n"
+    "     turbo.run_command(id)       dispatch a turboIDE command id\n"
     "     turbo.shell(cmd)            run a shell command, return stdout\n"
     "     turbo.project_root()        the project directory\n"
     "\n",
@@ -271,14 +271,14 @@ static constexpr TStringView helpParagraphs[] =
 
 void TurboHelp::executeAboutDialog(TGroup &owner) noexcept
 {
-    TDialog *aboutBox = new TDialog(TRect(0, 0, 39, 12), "About");
+    TDialog *aboutBox = new TDialog(TRect(0, 0, 46, 13), "About");
 
     aboutBox->insert(
-        new TStaticText(TRect(2, 2, 37, 8), aboutDialogText)
+        new TStaticText(TRect(2, 2, 44, 9), aboutDialogText)
     );
 
     aboutBox->insert(
-        new TButton(TRect(14, 9, 26, 11), "OK", cmOK, bfDefault)
+        new TButton(TRect(17, 10, 29, 12), "OK", cmOK, bfDefault)
     );
 
     aboutBox->options |= ofCentered;

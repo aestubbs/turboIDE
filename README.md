@@ -1,4 +1,4 @@
-# Turbo — a lightweight terminal IDE
+# turboIDE — a lightweight terminal IDE
 
 A small, fast, keyboard-driven IDE that runs entirely in your terminal.
 
@@ -10,7 +10,7 @@ A small, fast, keyboard-driven IDE that runs entirely in your terminal.
 > IDE, while preserving the upstream editor's behaviour. For the canonical editor,
 > see the [original repository](https://github.com/magiblot/turbo).
 
-![Turbo editing its own source, with the project file tree and Git status pane](docs/screenshot.png)
+![turboIDE editing its own source, with the project file tree and Git status pane](docs/screenshot.png)
 
 ## What this fork adds
 
@@ -41,13 +41,13 @@ On top of Turbo's editor core, this fork adds the building blocks of an IDE:
 
 ## Downloads
 
-Prebuilt binaries are attached to every [release](https://github.com/aestubbs/turbo/releases):
+Prebuilt binaries are attached to every [release](https://github.com/aestubbs/turboIDE/releases):
 
-* `turbo-x64.exe` — 64-bit Windows (Intel/AMD).
-* `turbo-x86.exe` — 32-bit Windows.
-* `turbo-macos-arm64` — macOS (Apple Silicon).
+* `turboIDE-x64.exe` — 64-bit Windows (Intel/AMD).
+* `turboIDE-x86.exe` — 32-bit Windows.
+* `turboIDE-macos-arm64` — macOS (Apple Silicon).
 
-For the newest per-commit builds, see the [Actions](https://github.com/aestubbs/turbo/actions)
+For the newest per-commit builds, see the [Actions](https://github.com/aestubbs/turboIDE/actions)
 page and download the artifacts at the bottom of a successful run (you must be
 signed in to GitHub). On Linux, build from source — see [Building](#building) below.
 
@@ -56,7 +56,7 @@ signed in to GitHub). On Linux, build from source — see [Building](#building) 
 First of all, you should clone this repository along its submodules with the `--recursive` option of `git clone`. This is **required**: the build depends on the submodules in `deps/` — Turbo Vision (`deps/tvision`), for the LSP support [nlohmann/json](https://github.com/nlohmann/json) (`deps/json`), and for scripting [Lua](https://www.lua.org/) (`deps/lua`). A non-recursive clone will fail to build with missing headers such as `nlohmann/json.hpp`.
 
 ```sh
-git clone --recursive https://github.com/aestubbs/turbo.git
+git clone --recursive https://github.com/aestubbs/turboIDE.git
 ```
 
 If you have already cloned the repository without `--recursive`, initialise the submodules afterwards:
@@ -79,14 +79,14 @@ Additionally, you may also want to install these optional dependencies:
 * `libgpm` for mouse support on the linux console (Linux only).
 * `xsel`, `xclip` and/or `wl-clipboard` for system clipboard integration (Unix only, except macOS).
 
-Turbo can be built with the following commands:
+turboIDE can be built with the following commands:
 
 ```sh
 cmake . -DCMAKE_BUILD_TYPE=Release && # Or 'RelWithDebInfo', or 'MinSizeRel', or 'Debug'.
 cmake --build .
 ```
 
-The above will generate the `turbo` binary.
+The above will generate the `turboIDE` binary.
 
 <details>
 <summary><b>Detailed build instructions for Ubuntu 20.04</b></summary>
@@ -94,11 +94,11 @@ The above will generate the `turbo` binary.
 ```sh
 sudo apt update && sudo apt upgrade
 sudo apt install build-essential cmake gettext-base git libgpm-dev libmagic-dev libncursesw5-dev xsel
-git clone --recursive https://github.com/aestubbs/turbo.git
-cd turbo
+git clone --recursive https://github.com/aestubbs/turboIDE.git
+cd turboIDE
 cmake . -DCMAKE_BUILD_TYPE=Release
-cmake --build . -- -j$(nproc) # Build Turbo.
-sudo cp turbo /usr/local/bin/ # Install (optional).
+cmake --build . -- -j$(nproc) # Build turboIDE.
+sudo cp turboIDE /usr/local/bin/ # Install (optional).
 ```
 </details>
 
@@ -111,27 +111,27 @@ current directory:
 
 ```sh
 cd my-project
-turbo .
+turboIDE .
 ```
 
-Turbo scans that directory and shows it in the **Files** tree on the right; open
+turboIDE scans that directory and shows it in the **Files** tree on the right; open
 files by selecting them there. The integrated terminal, Git status and build
 commands all operate on this same directory. You can also pass any other path
-(`turbo ~/code/my-project`) or one or more files to open (`turbo main.c`).
+(`turboIDE ~/code/my-project`) or one or more files to open (`turboIDE main.c`).
 
-Running `turbo` with no directory starts with no project: the **Files** tree is
+Running `turboIDE` with no directory starts with no project: the **Files** tree is
 empty except for your global Lua scripts, and you can still open individual files
 with `Ctrl-O`.
 
 Once running, manage the project from the **File** menu:
 
-- **Open Directory…** — choose a folder to open as the project. Turbo only keeps
+- **Open Directory…** — choose a folder to open as the project. turboIDE only keeps
   one project open at a time, so this replaces the current one.
 - **Close Project** — detach the workspace, empty the tree and close the editor
   windows whose files live inside the project. (Files opened from outside the
   project, and unsaved scratch buffers, stay open.)
 
-Turbo remembers a project's open windows. When you close a project (or quit with
+turboIDE remembers a project's open windows. When you close a project (or quit with
 one open), the open files are written to `.turbo/session` along with each
 window's position and size and each file's scroll position, selection and which
 window had focus — so reopening the project puts you back exactly where you left
@@ -140,7 +140,7 @@ project's `.gitignore`.
 
 ### In-app
 
-As said earlier, Turbo has been designed to be intuitive. So you probably already know how to use it!
+As said earlier, turboIDE has been designed to be intuitive. So you probably already know how to use it!
 
 Some keybindings are:
 
@@ -180,7 +180,7 @@ See the Turbo Vision [documentation](https://github.com/magiblot/tvision#clipboa
 
 ### Lua scripting
 
-Turbo embeds a [Lua 5.4](https://www.lua.org/) interpreter so you can configure
+turboIDE embeds a [Lua 5.4](https://www.lua.org/) interpreter so you can configure
 and extend the editor in Lua: run scripts on demand, and hook into editor events
 such as save and commit. The full Lua standard library (`string`, `table`,
 `math`, `io`, `os`, …) is available.
@@ -217,7 +217,7 @@ end
 #### Events
 
 In an `init.lua`, call `turbo.on(event, handler)` to react to what you do in the
-editor. Turbo calls the handler with a table of parameters; for `before*`
+editor. turboIDE calls the handler with a table of parameters; for `before*`
 events, returning `false` cancels the action.
 
 ```lua
@@ -250,7 +250,7 @@ A global `turbo` table is available to every script and hook:
 | Call | Effect |
 | --- | --- |
 | `turbo.message(s)` / `turbo.log(s)` | show a message box |
-| `turbo.version()` | Turbo / Lua version string |
+| `turbo.version()` | turboIDE / Lua version string |
 | `turbo.on(event, fn)` | register an event handler |
 | `turbo.register_command(name, [desc,] fn)` | add a command to the palette that runs `fn` |
 | `turbo.active_file()` | path of the focused editor, or `""` |

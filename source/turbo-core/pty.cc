@@ -301,7 +301,7 @@ bool PtyProcess::start(const std::string &command,
             envStrings.emplace_back(*e);
     envStrings.emplace_back("TERM=xterm-256color");
     envStrings.emplace_back("COLORTERM=truecolor");
-    envStrings.emplace_back("TERM_PROGRAM=turbo");
+    envStrings.emplace_back("TERM_PROGRAM=turboIDE");
     std::vector<char *> envp;
     envp.reserve(envStrings.size() + 1);
     for (auto &s : envStrings)
