@@ -71,7 +71,7 @@ bool Client::start(const std::string &rootUri) noexcept
 
     Json params = {
         {"processId", currentProcessId()},
-        {"clientInfo", {{"name", "Turbo"}, {"version", "0.1"}}},
+        {"clientInfo", {{"name", "turboIDE"}, {"version", "0.1"}}},
         {"rootUri", rootUri.empty() ? Json(nullptr) : Json(rootUri)},
         {"capabilities", caps},
     };

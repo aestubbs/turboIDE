@@ -220,25 +220,26 @@ struct TurboApp : public TApplication, EditorWindowParent
     bool fireLuaEvent(const char *event) noexcept;
     bool fireLuaEvent(const char *event,
                       const std::vector<std::pair<std::string, std::string>> &params) noexcept;
-    // Absolute paths of *.lua scripts under <projectRoot>/.turbo/scripts (first)
-    // and ~/.turbo/scripts. Used by the "Run Script" popup and the file tree.
+    // Absolute paths of *.lua scripts across the three tiers, project first:
+    // <projectRoot>/turbo-scripts (shared), <projectRoot>/.turbo/scripts (local),
+    // then ~/.turbo/scripts (system). Used by the "Run Script" popup.
     std::vector<std::string> discoverLuaScripts() const noexcept;
     // Pop up the discovered-scripts menu and run the chosen one (cmLuaRunScript).
     void runLuaScriptPicker() noexcept;
     // Run the i-th script from discoverLuaScripts() (the cmLuaScriptBase + i
     // commands the command palette dispatches).
     void runDiscoveredLuaScript(int index) noexcept;
-    // Prompt for a name and create+open a new script in <projectRoot>/.turbo/scripts.
+    // Prompt for a name and create+open a new script in the given scripts dir
+    // (one of the Lua-home tiers: turbo-scripts, .turbo/scripts, ~/.turbo/scripts).
+    void treeNewLuaScript(const std::string &dir) noexcept;
+    // Prompt for a name and create+open a new script in the project-local tier
+    // (<projectRoot>/.turbo/scripts). Thin wrapper over treeNewLuaScript.
     void luaNewScript() noexcept;
     // Re-run init.lua from the project + home .turbo dirs (cmLuaReload).
     void reloadLuaConfig() noexcept;
-    // Toggle the .turbo Lua scripts section in the file tree (cmLuaShowScripts).
-    void toggleLuaScripts() noexcept;
-    // Push the current project/home script lists into the tree's Lua section
-    // (adds, removes, or refreshes it per showLuaScriptsInTree).
+    // Rescan the three Lua-script tiers (shared / local / system) and push them
+    // into the tree as the always-shown Lua "homes".
     void refreshLuaScriptsInTree() noexcept;
-    // When true, the file tree shows a synthetic section listing the .turbo scripts.
-    bool showLuaScriptsInTree {false};
     void showEditorList(TEvent *ev);
     void toggleTreeView();
     void setTreeWidth(int w);     // resize the docked tree (from a left-border drag)

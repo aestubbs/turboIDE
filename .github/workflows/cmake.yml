@@ -47,9 +47,9 @@ jobs:
     - name: Upload Artifacts
       uses: actions/upload-artifact@v7
       with:
-        name: turbo-x86
+        name: turboIDE-x86
         path: |
-          ${{env.BUILD_TYPE}}/turbo.exe
+          ${{env.BUILD_TYPE}}/turboIDE.exe
 
   build-windows-msvc64:
     name: Windows (MSVC) (x64)
@@ -70,9 +70,9 @@ jobs:
     - name: Upload Artifacts
       uses: actions/upload-artifact@v7
       with:
-        name: turbo-x64
+        name: turboIDE-x64
         path: |
-          ${{env.BUILD_TYPE}}/turbo.exe
+          ${{env.BUILD_TYPE}}/turboIDE.exe
 
   build-macos-clang:
     name: MacOS (Clang)
@@ -93,8 +93,8 @@ jobs:
     - name: Upload Artifacts
       uses: actions/upload-artifact@v7
       with:
-        name: turbo-macos
-        path: turbo
+        name: turboIDE-macos
+        path: turboIDE
 
   # Publish the built binaries to a GitHub Release. Runs only for tag pushes
   # (e.g. `git tag v1.0.0 && git push origin v1.0.0`); regular pushes still build
@@ -115,9 +115,9 @@ jobs:
     - name: Stage release assets
       run: |
         mkdir -p dist
-        cp turbo-x64/turbo.exe dist/turbo-x64.exe
-        cp turbo-x86/turbo.exe dist/turbo-x86.exe
-        cp turbo-macos/turbo   dist/turbo-macos-arm64
+        cp turboIDE-x64/turboIDE.exe dist/turboIDE-x64.exe
+        cp turboIDE-x86/turboIDE.exe dist/turboIDE-x86.exe
+        cp turboIDE-macos/turboIDE   dist/turboIDE-macos-arm64
 
     - name: Publish GitHub Release
       env:

@@ -1172,6 +1172,40 @@ constexpr LexerSettings::KeywordMapping keywordsGo[] =
 };
 
 
+constexpr LexerSettings::StyleMapping stylesMarkdown[] =
+{
+    {SCE_MARKDOWN_DEFAULT,          sNormal},
+    {SCE_MARKDOWN_LINE_BEGIN,       sNormal},
+    {SCE_MARKDOWN_STRONG1,          sMisc},
+    {SCE_MARKDOWN_STRONG2,          sMisc},
+    {SCE_MARKDOWN_EM1,              sKeyword2},
+    {SCE_MARKDOWN_EM2,              sKeyword2},
+    {SCE_MARKDOWN_HEADER1,          sKeyword1,      slBold},
+    {SCE_MARKDOWN_HEADER2,          sKeyword1,      slBold},
+    {SCE_MARKDOWN_HEADER3,          sKeyword1,      slBold},
+    {SCE_MARKDOWN_HEADER4,          sKeyword1,      slBold},
+    {SCE_MARKDOWN_HEADER5,          sKeyword1,      slBold},
+    {SCE_MARKDOWN_HEADER6,          sKeyword1,      slBold},
+    {SCE_MARKDOWN_PRECHAR,          sOperator},
+    {SCE_MARKDOWN_ULIST_ITEM,       sKeyword2},
+    {SCE_MARKDOWN_OLIST_ITEM,       sKeyword2},
+    {SCE_MARKDOWN_BLOCKQUOTE,       sComment},
+    {SCE_MARKDOWN_STRIKEOUT,        sComment},
+    {SCE_MARKDOWN_HRULE,            sOperator},
+    {SCE_MARKDOWN_LINK,             sStringLiteral},
+    {SCE_MARKDOWN_CODE,             sNumberLiteral},
+    {SCE_MARKDOWN_CODE2,            sNumberLiteral},
+    {SCE_MARKDOWN_CODEBK,           sNumberLiteral},
+};
+
+constexpr LexerSettings::PropertyMapping propertiesMarkdown[] =
+{
+    // Style the whole ATX header line (the '#' marks *and* the text), not just
+    // the '#' marks. Needed for the header styling (e.g. bold) to cover the text.
+    {"lexer.markdown.header.eolfill", "1"},
+};
+
+
 constexpr struct { const Language *language; LexerSettings lexer; } builtInLexers[] =
 {
     {&Language::CPP, {SCLEX_CPP, stylesC, keywordsC, propertiesC}},
@@ -1195,6 +1229,7 @@ constexpr struct { const Language *language; LexerSettings lexer; } builtInLexer
     {&Language::SQL, {SCLEX_SQL, stylesSQL, keywordsSQL, propertiesSQL}},
     {&Language::Go, {SCLEX_CPP, stylesC, keywordsGo, propertiesC}},
     {&Language::PHP, {SCLEX_HTML, stylesHTML, keywordsHTML, propertiesHTML}},
+    {&Language::Markdown, {SCLEX_MARKDOWN, stylesMarkdown, nullptr, propertiesMarkdown}},
 };
 
 TColorAttr coalesce(TColorAttr from, TColorAttr into)

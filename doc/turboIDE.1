@@ -1,13 +1,13 @@
-.TH TURBO 1 "4 January 2023"
+.TH TURBOIDE 1 "1 July 2026"
 .SH NAME
-turbo \- An experimental text editor based on Scintilla and Turbo Vision.
+turboIDE \- A lightweight terminal IDE based on Scintilla and Turbo Vision.
 .SH SYNOPSIS
-\fBturbo\fR [\fIdirectory\fR] [\fIfile\fR...]
+\fBturboIDE\fR [\fIdirectory\fR] [\fIfile\fR...]
 .SH DESCRIPTION
 .PP
-Turbo is an experimental text editor for the terminal, based on the Scintilla code editing component and the Turbo Vision application framework.
+turboIDE is a lightweight, keyboard-driven IDE for the terminal, based on the Scintilla code editing component and the Turbo Vision application framework.
 .PP
-If a \fIdirectory\fR argument is given, Turbo opens it as the project and shows it in the \fBFiles\fR tree; \fBturbo .\fR opens the current directory.
+If a \fIdirectory\fR argument is given, turboIDE opens it as the project and shows it in the \fBFiles\fR tree; \fBturboIDE .\fR opens the current directory.
 Only one project is open at a time.
 With no directory argument the tree starts empty (showing only your global Lua scripts), and any \fIfile\fR arguments are opened as documents.
 A project can also be opened or closed at runtime from the \fBFile\fR menu (\fBOpen Directory\fR and \fBClose Project\fR).
@@ -15,12 +15,12 @@ A project can also be opened or closed at runtime from the \fBFile\fR menu (\fBO
 It was created to demonstrate new features in Turbo Vision.
 In particular, it has served as testing ground for Turbo Vision's Unicode capabilities.
 .PP
-As a text editor, Turbo aims at being intuitive and easy to use.
+As an editor, turboIDE aims at being intuitive and easy to use.
 And simply because it is a Turbo Vision application, it offers a vintage look and feel.
 .SS User interface shortcuts
 .TP
 \fBCtrl+Q\fR, \fBAlt+X\fR
-Exit Turbo.
+Exit turboIDE.
 .TP
 \fBAlt+\fIletter\fR
 Open menu with shortcut key \fIletter\fR.
@@ -117,13 +117,13 @@ Find next match.
 Find previous match.
 .SH ENVIRONMENT
 .PP
-The following environment variables affect the behaviour of Turbo:
+The following environment variables affect the behaviour of turboIDE:
 .TP
 \fBCOLUMNS\fR, \fBLINES\fR
 Overrides the system-supplied number of terminal columns and columns.
 .TP
 \fBDISPLAY\fR, \fBWAYLAND_DISPLAY\fR
-Turbo will interact with the X11 or Wayland clipboard if available.
+turboIDE will interact with the X11 or Wayland clipboard if available.
 This requires \fIwl-clipboard\fR and \fIxsel\fR or \fIxclip\fR to be installed.
 .TP
 \fBLANG\fR, \fBLC_ALL\fR, \fBLC_CTYPE\fR
@@ -132,4 +132,4 @@ UTF-8 support is only enabled if a UTF-8 locale is in use.
 Not all keyboard shortcuts are supported by all terminals.
 For this reason, some commands can be triggered by more than one shortcut.
 .SH BUGS
-You can report bugs in Turbo's issue tracker (https://github.com/magiblot/turbo/issues).
+You can report bugs in turboIDE's issue tracker (https://github.com/aestubbs/turboIDE/issues).

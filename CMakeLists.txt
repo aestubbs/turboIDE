@@ -242,7 +242,7 @@ if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.13.0")
         COMPONENT library
     )
     install(DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/include/turbo" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-    install(FILES "${CMAKE_CURRENT_LIST_DIR}/doc/turbo.1" DESTINATION share/man/man1)
+    install(FILES "${CMAKE_CURRENT_LIST_DIR}/doc/turboIDE.1" DESTINATION share/man/man1)
 endif()
 
 # Optional dependencies
@@ -278,6 +278,11 @@ if (TURBO_BUILD_APP)
     # LuaManager (source/turbo/luamanager.cc) drives the embedded Lua; fold both
     # sets of object files into the app and expose their public headers.
     add_executable(${TURBO} ${TURBO_SRC} $<TARGET_OBJECTS:vterm> $<TARGET_OBJECTS:lua>)
+    # The internal target/source names stay 'turbo' (source/turbo, turbo-core,
+    # install exports), but the shipped binary is 'turboIDE'. $<TARGET_FILE>,
+    # install, strip, RC and the macOS icon step all resolve the real output
+    # path, so they follow this rename automatically.
+    set_target_properties(${TURBO} PROPERTIES OUTPUT_NAME turboIDE)
     # buildconfig.cc pulls in the large nlohmann/json header; keep it out of the
     # unity batch so it compiles once on its own instead of slowing a whole batch.
     set_source_files_properties(

@@ -96,11 +96,12 @@ enum : ushort
     cmTreeNewFolder,
     cmTreeGitAdd,
     cmTreeGitRevert,
+    cmTreeNewLuaScript, // create a new .lua script in a Lua-home group's dir
     // Lua scripting menu.
     cmLuaRunScript,   // pop up the list of discovered scripts and run one
     cmLuaNewScript,   // create + open a new script in the project's .turbo/scripts
     cmLuaReload,      // re-run init.lua from the project + home .turbo dirs
-    cmLuaShowScripts, // toggle the .turbo Lua scripts section in the file tree
+    cmLuaShowScripts, // retired: Lua homes are now always shown (kept: enum slot)
     // Project (workspace) open/close. The IDE holds at most one project at a
     // time; opening another replaces it. With no project open the file tree is
     // empty except for the user's global Lua scripts.

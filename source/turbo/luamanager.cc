@@ -43,7 +43,7 @@ int l_log(lua_State *L)
 
 int l_version(lua_State *L)
 {
-    lua_pushstring(L, "Turbo (" LUA_RELEASE ")");
+    lua_pushstring(L, "turboIDE (" LUA_RELEASE ")");
     return 1;
 }
 

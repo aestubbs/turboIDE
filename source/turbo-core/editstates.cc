@@ -566,6 +566,7 @@ static const char *lexerNameForId(int id)
         case SCLEX_PASCAL:     return "pascal";
         case SCLEX_LATEX:      return "latex";
         case SCLEX_SQL:        return "sql";
+        case SCLEX_MARKDOWN:   return "markdown";
         default:               return nullptr;
     }
 }
@@ -609,7 +610,13 @@ void applyTheming(const LexerSettings *lexer, const ColorScheme *aScheme, TScint
             ilexer = CreateLexer(name);
         call(scintilla, SCI_SETILEXER, 0, (sptr_t) ilexer);
         for (const auto &s : lexer->styles)
-            setStyleColor(scintilla, s.id, normalize(scheme, s.style));
+        {
+            TColorAttr attr = normalize(scheme, s.style);
+            if (s.styleAdd)
+                attr = {::getFore(attr), ::getBack(attr),
+                        uchar(::getStyle(attr) | s.styleAdd)};
+            setStyleColor(scintilla, s.id, attr);
+        }
         for (const auto &k : lexer->keywords)
             call(scintilla, SCI_SETKEYWORDS, k.id, (sptr_t) k.keywords);
         for (const auto &p : lexer->properties)

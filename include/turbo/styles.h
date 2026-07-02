@@ -119,7 +119,10 @@ bool styleByName(TStringView name, TextStyle &out) noexcept;
 
 struct LexerSettings
 {
-    struct StyleMapping { uchar id; TextStyle style; };
+    // 'styleAdd' OR-s extra tvision style flags (e.g. slBold) onto the colour
+    // resolved from 'style', for when a colour role isn't bold/italic globally
+    // but should be for this token (e.g. Markdown headings). 0 = no change.
+    struct StyleMapping { uchar id; TextStyle style; uchar styleAdd; };
     struct KeywordMapping { uchar id; const char *keywords; };
     struct PropertyMapping { const char *name, *value; };
 
