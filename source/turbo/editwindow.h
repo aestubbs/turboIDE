@@ -12,6 +12,9 @@
 #include "editor.h"
 #include "search.h"
 
+#include <cstdint>
+#include <filesystem>
+
 struct FileNumberState
 {
     active_counter *counter;
@@ -100,6 +103,15 @@ struct EditorWindow : public turbo::BasicEditorWindow
     TView *bottomView {nullptr};
     EditorConflictBar *conflictBar {nullptr};
     SearchState searchState;
+
+    // External-change detection: the modification time and size of filePath() on
+    // disk the last time we read or wrote it. TurboApp::onFilesChanged() compares
+    // the current on-disk values against these to tell a change made by another
+    // process apart from our own save. 'diskSigValid' stays false until a
+    // signature is first captured (e.g. an unsaved scratch buffer has no file).
+    std::filesystem::file_time_type diskModTime {};
+    std::uintmax_t diskSize {0};
+    bool diskSigValid {false};
 
     EditorWindow( const TRect &bounds, TurboEditor &aEditor, active_counter &fileCounter,
                   turbo::SearchSettings &searchSettings, EditorWindowParent &aParent ) noexcept;

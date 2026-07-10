@@ -1679,6 +1679,9 @@ void TurboApp::onFilesChanged()
     for (auto &p : changed)
     {
         gitTouched = true; // any change under the worktree may affect git status
+        // If this file is open in an editor, reconcile the buffer with the new
+        // on-disk contents (silent reload when clean, prompt when dirty).
+        handleExternalFileChange(p);
         // Skip git's own internals for tree structure (they are hidden anyway);
         // they only matter for the status refresh below. Check both separators
         // so the Windows watcher's backslash paths match too.
@@ -1873,7 +1876,9 @@ void TurboApp::treeRevertPath(const std::string &path)
                    base.c_str()) != cmYes)
         return;
     std::string p = path;
+    ++suppressExternalReload; // this reload is ours; keep the watcher out of it
     git->revert({p}, [this, p] (int code, const std::string &output) {
+        --suppressExternalReload;
         if (code != 0)
         {
             std::string m = "git revert failed:\n" +
@@ -1886,6 +1891,73 @@ void TurboApp::treeRevertPath(const std::string &path)
         reloadEditorFromDisk(p);
     });
     // GitManager queues a status refresh after the checkout, clearing the badge.
+}
+
+// Read 'path's current modification time and size. Returns false -- leaving the
+// outputs untouched -- if it can't be stat'd (e.g. the file was removed).
+static bool statFileSig( const std::string &path,
+                         std::filesystem::file_time_type &mtime,
+                         std::uintmax_t &size ) noexcept
+{
+    std::error_code ec;
+    auto t = std::filesystem::last_write_time(path, ec);
+    if (ec)
+        return false;
+    auto s = std::filesystem::file_size(path, ec);
+    if (ec)
+        return false;
+    mtime = t;
+    size = s;
+    return true;
+}
+
+void TurboApp::rememberDiskSignature(EditorWindow &w) noexcept
+{
+    if (w.filePath().empty())
+    {
+        w.diskSigValid = false;
+        return;
+    }
+    w.diskSigValid = statFileSig(w.filePath(), w.diskModTime, w.diskSize);
+}
+
+void TurboApp::handleExternalFileChange(const std::string &path) noexcept
+{
+    // A git operation that rewrites the tree reloads its own editors from its
+    // callback; don't second-guess it (avoids a double reload / redundant prompt).
+    if (suppressExternalReload > 0)
+        return;
+    EditorWindow *target = nullptr;
+    MRUlist.forEach([&] (EditorWindow *w) {
+        if (w && w->filePath() == path)
+            target = w;
+    });
+    if (!target)
+        return;
+    std::filesystem::file_time_type mtime;
+    std::uintmax_t size;
+    if (!statFileSig(path, mtime, size))
+        return; // removed or unreadable: keep the buffer as-is
+    if (target->diskSigValid &&
+        mtime == target->diskModTime && size == target->diskSize)
+        return; // unchanged since we last read/wrote it (e.g. our own save)
+    auto &ed = target->getEditor();
+    if (ed.inSavePoint())
+    {
+        // No unsaved edits: silently pull in the new contents.
+        reloadEditorFromDisk(path); // also refreshes the stored signature
+        return;
+    }
+    // Unsaved edits would be lost by a reload, so ask first.
+    ushort reply = messageBox( mfWarning | mfYesButton | mfNoButton,
+        "'%s' has been changed on disk by another program.\n"
+        "Reload it and discard your unsaved changes?", path.c_str() );
+    if (reply == cmYes)
+        reloadEditorFromDisk(path);
+    else
+        // Keep the user's version, but adopt the current file as the new
+        // baseline so we don't ask again for this same change.
+        rememberDiskSignature(*target);
 }
 
 void TurboApp::reloadEditorFromDisk(const std::string &path) noexcept
@@ -1903,6 +1975,7 @@ void TurboApp::reloadEditorFromDisk(const std::string &path) noexcept
     ed.callScintilla(SCI_EMPTYUNDOBUFFER, 0U, 0U);
     ed.callScintilla(SCI_SETSAVEPOINT, 0U, 0U); // mark the buffer clean (= on disk)
     ed.redraw();
+    rememberDiskSignature(*target); // buffer now matches disk; re-baseline
 }
 
 void TurboApp::reloadCleanEditorsFromDisk() noexcept
@@ -1921,6 +1994,7 @@ void TurboApp::reloadCleanEditorsFromDisk() noexcept
         ed.callScintilla(SCI_EMPTYUNDOBUFFER, 0U, 0U);
         ed.callScintilla(SCI_SETSAVEPOINT, 0U, 0U);
         ed.redraw();
+        rememberDiskSignature(*w); // buffer now matches disk; re-baseline
     });
 }
 
@@ -2010,6 +2084,7 @@ void TurboApp::switchToBranch(const std::string &branch) noexcept
         }
 
     auto onDone = [this, branch] (int code, const std::string &output) {
+        --suppressExternalReload;
         if (code != 0)
         {
             std::string m = "Could not switch to '" + branch + "':\n" +
@@ -2020,17 +2095,23 @@ void TurboApp::switchToBranch(const std::string &branch) noexcept
         // Working tree now matches the new branch; refresh editors to suit.
         reloadCleanEditorsFromDisk();
     };
+    // The checkout rewrites the tree and onDone reloads the editors; keep the
+    // watcher-driven handler out of it for the duration.
+    auto startSwitch = [&] (GitManager::SwitchMode mode) {
+        ++suppressExternalReload;
+        git->switchBranch(branch, mode, onDone);
+    };
 
     if (!dirty)
     {
-        git->switchBranch(branch, GitManager::SwitchMode::Plain, onDone);
+        startSwitch(GitManager::SwitchMode::Plain);
         return;
     }
     unsigned short choice = executeBranchSwitchDialog(branch.c_str());
     if (choice == cmYes)
-        git->switchBranch(branch, GitManager::SwitchMode::Stash, onDone);
+        startSwitch(GitManager::SwitchMode::Stash);
     else if (choice == cmNo)
-        git->switchBranch(branch, GitManager::SwitchMode::Force, onDone);
+        startSwitch(GitManager::SwitchMode::Force);
     // cmCancel (or closing the dialog): stay on the current branch.
 }
 
@@ -2120,7 +2201,9 @@ void TurboApp::gitMerge()
     GitManager::MergeFavor f = favor == 1 ? GitManager::MergeFavor::Ours
                              : favor == 2 ? GitManager::MergeFavor::Theirs
                                           : GitManager::MergeFavor::None;
+    ++suppressExternalReload; // our own reload; keep the watcher handler out of it
     git->merge(branch, f, [this, branch] (int code, const std::string &output) {
+        --suppressExternalReload;
         // The working tree changed either way (a merge commit, or conflict
         // markers written into the files), so reload clean editors from disk.
         reloadCleanEditorsFromDisk();
@@ -2147,7 +2230,9 @@ void TurboApp::gitMergeAbort()
         messageBox("This folder is not a git repository.", mfInformation | mfOKButton);
         return;
     }
+    ++suppressExternalReload; // our own reload; keep the watcher handler out of it
     git->mergeAbort([this] (int code, const std::string &output) {
+        --suppressExternalReload;
         reloadCleanEditorsFromDisk();
         if (code != 0)
         {
@@ -2165,7 +2250,9 @@ void TurboApp::gitMergeContinue()
         messageBox("This folder is not a git repository.", mfInformation | mfOKButton);
         return;
     }
+    ++suppressExternalReload; // our own reload; keep the watcher handler out of it
     git->mergeContinue([this] (int code, const std::string &output) {
+        --suppressExternalReload;
         reloadCleanEditorsFromDisk();
         if (code != 0)
         {
@@ -2263,6 +2350,8 @@ void TurboApp::addEditor(turbo::TScintilla &scintilla, const char *path)
     if (docTree)
         docTree->tree->linkEditor(&w);
     w.listHead.insert_after(&MRUlist);
+    // Baseline for external-change detection: the file as it is on disk right now.
+    rememberDiskSignature(w);
     deskTop->insert(&w);
     enableCommands(editorCmds);
     if (lsp)
@@ -2835,6 +2924,9 @@ void TurboApp::editorWillSave(EditorWindow &w) noexcept
 
 void TurboApp::editorSaved(EditorWindow &w) noexcept
 {
+    // Re-baseline before the watcher can report our own write, so this save
+    // isn't mistaken for an external change.
+    rememberDiskSignature(w);
     if (lsp)
         lsp->didSave(w);
     if (git)

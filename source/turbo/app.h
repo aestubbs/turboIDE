@@ -181,6 +181,22 @@ struct TurboApp : public TApplication, EditorWindowParent
     // left untouched, so no in-progress work is lost.
     void reloadCleanEditorsFromDisk() noexcept;
 
+    // --- External-change detection -------------------------------------------
+    // Capture 'w's file's current on-disk modification time + size as the
+    // baseline for external-change detection. Called after opening, saving or
+    // reloading the file; records no signature for a path-less scratch buffer.
+    void rememberDiskSignature(EditorWindow &w) noexcept;
+    // Reconcile an open editor with an external (non-git) change to 'path'
+    // reported by the file watcher: silently reload a clean buffer, or ask
+    // before discarding a buffer with unsaved edits. No-op when 'path' isn't
+    // open, or its on-disk mod-time/size still match what we last recorded.
+    void handleExternalFileChange(const std::string &path) noexcept;
+    // >0 while an in-app git operation that rewrites the working tree is in
+    // flight. Such an operation reloads its own editors from its completion
+    // callback, so the watcher-driven external-change handler steps aside to
+    // avoid a double reload or a redundant "changed on disk" prompt.
+    int suppressExternalReload {0};
+
     // Menu-bar branch indicator (top-right view + on-demand popup).
     void refreshBranchView() noexcept;        // idle: update the indicator's text
     void showBranchMenu(TPoint where) noexcept; // build & run the branch popup
