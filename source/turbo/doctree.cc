@@ -216,10 +216,10 @@ static void scanInto(Node *parent, TNode **list, const std::string &dirPath,
             continue;
         if (name[0] == '.' && (!showHidden || name == ".git" || name == ".turbo"))
             continue;
-        // The committed shared-scripts dir at the project root has its own home
-        // in the tree (the "Project Lua (Shared)" group), so don't also list it
-        // as a plain folder under the project node. Scoped to the root level so a
-        // nested folder of the same name elsewhere is unaffected.
+        // The committed scripts dir at the project root has its own home in the
+        // tree (the "Project Lua" group), so don't also list it as a plain folder
+        // under the project node. Scoped to the root level so a nested folder of
+        // the same name elsewhere is unaffected.
         if (name == "turbo-scripts" && dirPath == projectRoot)
             continue;
         std::error_code ec2;

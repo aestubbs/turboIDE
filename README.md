@@ -31,7 +31,7 @@ On top of Turbo's editor core, this fork adds the building blocks of an IDE:
 - **Lua scripting** — an embedded [Lua 5.4](https://www.lua.org/) interpreter to
   configure and extend the editor: run scripts from the **Lua** menu and hook
   into editor events (commit, save, file open/close, …). Scripts live in a
-  project-local `.turbo/` and a global `~/.turbo/`. See
+  committed, per-project `turbo-scripts/` and a global `~/.turbo/`. See
   [docs/plan_lua_scripting.md](docs/plan_lua_scripting.md).
 - **Auto-save** — documents are saved automatically when their editor loses focus.
 - **Latest Scintilla** — upgraded to the current Scintilla 5.5 release for editing
@@ -187,23 +187,29 @@ such as save and commit. The full Lua standard library (`string`, `table`,
 
 #### Where scripts live
 
-Scripts live under a `.turbo` directory in two places:
+Scripts live in two homes — the same project/global split as agent skills
+(`.claude/skills`, `~/.claude/skills`):
 
-| Location | Path | Scope |
+| Home | Path | Scope |
 | --- | --- | --- |
-| Project-local | `<project>/.turbo/` | only this project |
-| Global | `~/.turbo/` | shared across all projects |
+| Project Lua | `<project>/turbo-scripts/` | this project; checked in with the repository, so the team shares it |
+| Global Lua | `~/.turbo/` | yours alone, across every project |
 
-In each location, `init.lua` runs at startup (register your event hooks here),
-and `scripts/*.lua` are individual runnable scripts.
+In each home, `init.lua` runs at startup (register your event hooks here). The
+runnable scripts sit beside it in `turbo-scripts/*.lua`, and under `scripts/` in
+the global home (`~/.turbo/scripts/*.lua`). Both homes are always shown in the
+**Files** tree, so each is a clear place to add a script.
+
+`<project>/.turbo/` is *not* a script location: it is a disposable per-user cache
+(session, sockets, `config.json`) that turboIDE keeps out of git.
 
 #### Running scripts
 
 Run a script from the **Lua** menu (*Run Script…*) or the **Command Palette**
 (`Ctrl+B`) — every script appears there as `Lua Script: <name>`. *Lua → New
-Script…* creates one under the project's `.turbo/scripts`, and *Lua → Reload
+Script…* creates one under the project's `turbo-scripts`, and *Lua → Reload
 Config* re-runs the `init.lua` files. Script windows have a brown frame so they
-stand out. A script is just Lua — for example, `.turbo/scripts/hello.lua`:
+stand out. A script is just Lua — for example, `turbo-scripts/hello.lua`:
 
 ```lua
 -- hello.lua
