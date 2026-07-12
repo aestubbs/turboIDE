@@ -105,8 +105,8 @@ enum : ushort
     cmTreeNewSkill,     // create a new skill (dir + SKILL.md) in a Skills-home dir
     // Lua scripting menu.
     cmLuaRunScript,   // pop up the list of discovered scripts and run one
-    cmLuaNewScript,   // create + open a new script in the project's .turbo/scripts
-    cmLuaReload,      // re-run init.lua from the project + home .turbo dirs
+    cmLuaNewScript,   // create + open a new script in the project's turbo-scripts
+    cmLuaReload,      // re-run init.lua from the project + global Lua homes
     cmLuaShowScripts, // retired: Lua homes are now always shown (kept: enum slot)
     // Project (workspace) open/close. The IDE holds at most one project at a
     // time; opening another replaces it. With no project open the file tree is

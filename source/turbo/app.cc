@@ -959,11 +959,36 @@ void TurboApp::commandPalette()
     }
 }
 
+// The two Lua homes, mirroring the two Skills homes (.claude/skills, ~/.claude/
+// skills). Project Lua is committed with the repository: <projectRoot>/turbo-scripts
+// holds init.lua at its top and the runnable scripts beside it. Global Lua is the
+// user's own, shared across every project: ~/.turbo holds init.lua, with the
+// runnable scripts under ~/.turbo/scripts.
+static std::string projectLuaHome(const std::string &projectRoot)
+{
+    return projectRoot.empty() ? std::string() : projectRoot + "/turbo-scripts";
+}
+
+static std::string globalLuaHome()
+{
+    if (const char *home = ::getenv("HOME"))
+        return std::string(home) + "/.turbo";
+    return {};
+}
+
+// Where a home keeps its runnable scripts: beside init.lua in the project home,
+// under scripts/ in the global one.
+static std::string globalLuaScriptsDir()
+{
+    std::string home = globalLuaHome();
+    return home.empty() ? home : home + "/scripts";
+}
+
 // Treat <projectRoot>/.turbo as a disposable, per-user cache: ensure it carries a
-// .gitignore that ignores its entire contents (session, logs, local scripts), so
-// none of it gets committed -- while committed/shared things (turbo-scripts/) live
-// outside .turbo. Non-destructive: writes only when .turbo already exists and has
-// no .gitignore yet, so it never clobbers a user's own.
+// .gitignore that ignores its entire contents (session, socket, config.json), so
+// none of it gets committed -- while everything meant to be shared with the repo
+// (turbo-scripts/) lives outside .turbo. Non-destructive: writes only when .turbo
+// already exists and has no .gitignore yet, so it never clobbers a user's own.
 static void ensureTurboCacheIgnored(const std::string &projectRoot) noexcept
 {
     if (projectRoot.empty())
@@ -1025,16 +1050,11 @@ void TurboApp::openProject(const std::string &dir) noexcept
         git->setWorkspace(root.c_str());
     if (watcher)
         watcher->start(root.c_str());
-    // Load the project's .turbo/init.lua hooks. luaMgr already exists (created at
-    // startup with the global config); re-running resets the handler registry and
-    // loads project-then-home init.lua, so project hooks take effect.
+    // Load the project's turbo-scripts/init.lua hooks. luaMgr already exists (created
+    // at startup with the global config); re-running resets the handler registry and
+    // loads project-then-global init.lua, so project hooks take effect.
     if (luaMgr)
-    {
-        std::string homeTurbo;
-        if (const char *home = ::getenv("HOME"))
-            homeTurbo = std::string(home) + "/.turbo";
-        luaMgr->loadInitScripts(projectRoot + "/.turbo", homeTurbo);
-    }
+        luaMgr->loadInitScripts(projectLuaHome(projectRoot), globalLuaHome());
     // Start the MCP server for this project and point the agent at it. The Lua
     // tools are (re)registered by loadInitScripts just above, so tools/list is
     // ready before any agent connects.
@@ -1368,13 +1388,8 @@ void TurboApp::initLua() noexcept
     mcp = std::make_unique<McpServer>(*luaMgr);
     mcp->setWake([] { TEventQueue::wakeUp(); });
 
-    // init.lua lives at the top of each .turbo dir (alongside config.json);
-    // runnable scripts live under .turbo/scripts. Project first, then home.
-    std::string homeTurbo;
-    if (const char *home = ::getenv("HOME"))
-        homeTurbo = std::string(home) + "/.turbo";
-    luaMgr->loadInitScripts(projectRoot.empty() ? std::string() : projectRoot + "/.turbo",
-                            homeTurbo);
+    // init.lua lives at the top of each Lua home: project first, then global.
+    luaMgr->loadInitScripts(projectLuaHome(projectRoot), globalLuaHome());
 }
 
 bool TurboApp::fireLuaEvent(const char *event) noexcept
@@ -1388,7 +1403,9 @@ bool TurboApp::fireLuaEvent(const char *event,
     return !luaMgr || luaMgr->fireEvent(event, params);
 }
 
-// Collect *.lua files directly inside 'dir' (non-recursive), sorted by name.
+// Collect the runnable *.lua scripts directly inside 'dir' (non-recursive), sorted
+// by name. init.lua is not one of them: it is the home's startup/hooks file, run by
+// loadInitScripts, so it never shows up as a script to run.
 static void scanLuaDir(const std::string &dir, std::vector<std::string> &out)
 {
     if (dir.empty())
@@ -1398,10 +1415,25 @@ static void scanLuaDir(const std::string &dir, std::vector<std::string> &out)
     for (auto &e : std::filesystem::directory_iterator(dir, ec))
     {
         std::error_code fec;
-        if (e.is_regular_file(fec) && e.path().extension() == ".lua")
+        if (e.is_regular_file(fec) && e.path().extension() == ".lua" &&
+            e.path().filename() != "init.lua")
             out.push_back(e.path().string());
     }
     std::sort(out.begin() + start, out.end());
+}
+
+// The .lua files listed under a Lua home in the tree: the home's own init.lua first
+// (the hooks file, worth seeing at the top), then its runnable scripts.
+static std::vector<std::string> luaHomeFiles(const std::string &home,
+                                             const std::string &scriptsDir)
+{
+    std::vector<std::string> out;
+    std::error_code ec;
+    std::string init = home + "/init.lua";
+    if (!home.empty() && std::filesystem::is_regular_file(init, ec))
+        out.push_back(std::move(init));
+    scanLuaDir(scriptsDir, out);
+    return out;
 }
 
 // Collect the skills under 'dir': each immediate sub-directory that contains a
@@ -1430,17 +1462,11 @@ static void scanSkillDir(const std::string &dir,
 std::vector<std::string> TurboApp::discoverLuaScripts() const noexcept
 {
     std::vector<std::string> out;
-    // Project tiers first -- shared (committed turbo-scripts/) then local
-    // (.turbo/scripts) -- so the picker groups them ahead of the user's system
-    // scripts. Both project tiers sit under projectRoot, so the picker's
-    // project-vs-global split (rfind(projectRoot,0)==0) still holds.
-    if (!projectRoot.empty())
-    {
-        scanLuaDir(projectRoot + "/turbo-scripts", out);
-        scanLuaDir(projectRoot + "/.turbo/scripts", out);
-    }
-    if (const char *home = ::getenv("HOME"))
-        scanLuaDir(std::string(home) + "/.turbo/scripts", out);
+    // Project scripts first, so the picker groups them ahead of the global ones.
+    // The project home sits under projectRoot, so the picker's project-vs-global
+    // split (rfind(projectRoot,0)==0) still holds.
+    scanLuaDir(projectLuaHome(projectRoot), out);
+    scanLuaDir(globalLuaScriptsDir(), out);
     return out;
 }
 
@@ -1451,7 +1477,7 @@ void TurboApp::runLuaScriptPicker() noexcept
     {
         messageBox(mfInformation | mfOKButton,
                    "No Lua scripts found. Create one with Lua > New Script... "
-                   "(scripts live in .turbo/scripts).");
+                   "(project scripts live in turbo-scripts/).");
         return;
     }
     int n = (int) scripts.size();
@@ -1515,8 +1541,6 @@ void TurboApp::treeNewLuaScript(const std::string &dir) noexcept
         n += ".lua";
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
-    // Creating a local script may have just created .turbo; keep it out of git.
-    ensureTurboCacheIgnored(projectRoot);
     std::string full = dir + "/" + n;
     if (std::filesystem::exists(full, ec))
     {
@@ -1590,8 +1614,8 @@ void TurboApp::luaNewScript() noexcept
         messageBox("No project directory; cannot create a script.", mfError | mfOKButton);
         return;
     }
-    // The Lua menu's "New Script..." defaults to the project-local home.
-    treeNewLuaScript(projectRoot + "/.turbo/scripts");
+    // The Lua menu's "New Script..." defaults to the project home.
+    treeNewLuaScript(projectLuaHome(projectRoot));
 }
 
 void TurboApp::reloadLuaConfig() noexcept
@@ -1602,11 +1626,7 @@ void TurboApp::reloadLuaConfig() noexcept
         messageBox("Lua initialised.", mfInformation | mfOKButton);
         return;
     }
-    std::string homeTurbo;
-    if (const char *home = ::getenv("HOME"))
-        homeTurbo = std::string(home) + "/.turbo";
-    int ran = luaMgr->loadInitScripts(
-        projectRoot.empty() ? std::string() : projectRoot + "/.turbo", homeTurbo);
+    int ran = luaMgr->loadInitScripts(projectLuaHome(projectRoot), globalLuaHome());
     messageBox(mfInformation | mfOKButton, "Reloaded %d Lua init script(s).", ran);
 }
 
@@ -1614,26 +1634,24 @@ void TurboApp::refreshLuaScriptsInTree() noexcept
 {
     if (!docTree)
         return;
-    // The Lua homes are permanent fixtures (always shown), so each tier is a
-    // clear place to keep scripts -- even when empty. Order: project shared,
-    // project local, then the user's system scripts.
+    // The Lua homes are permanent fixtures (always shown), so each is a clear place
+    // to keep scripts -- even when empty. Two of them, laid out like the two Skills
+    // homes: the project's (committed with the repo), then the user's global one.
     std::vector<DocumentTreeView::LuaSection> sections;
     if (!projectRoot.empty())
     {
-        std::string sharedDir = projectRoot + "/turbo-scripts";
-        std::string localDir = projectRoot + "/.turbo/scripts";
-        std::vector<std::string> shared, local;
-        scanLuaDir(sharedDir, shared);
-        scanLuaDir(localDir, local);
-        sections.push_back({"Project Lua (Shared)", std::move(sharedDir), std::move(shared)});
-        sections.push_back({"Project Lua (Local)", std::move(localDir), std::move(local)});
+        std::string dir = projectLuaHome(projectRoot);
+        std::vector<std::string> files = luaHomeFiles(dir, dir);
+        sections.push_back({"Project Lua", std::move(dir), std::move(files)});
     }
-    if (const char *h = ::getenv("HOME"))
+    std::string globalHome = globalLuaHome();
+    if (!globalHome.empty())
     {
-        std::string homeDir = std::string(h) + "/.turbo/scripts";
-        std::vector<std::string> home;
-        scanLuaDir(homeDir, home);
-        sections.push_back({"System Lua", std::move(homeDir), std::move(home)});
+        // "New Script..." on this home creates under ~/.turbo/scripts, where its
+        // runnable scripts live -- not beside init.lua at the top of ~/.turbo.
+        std::string scriptsDir = globalLuaScriptsDir();
+        std::vector<std::string> files = luaHomeFiles(globalHome, scriptsDir);
+        sections.push_back({"Global Lua", std::move(scriptsDir), std::move(files)});
     }
     docTree->tree->setLuaScripts(true, std::move(sections));
 }

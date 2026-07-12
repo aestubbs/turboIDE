@@ -368,8 +368,8 @@ bool LuaManager::runFile(const std::string &path) noexcept
     return !reportIfError(status);
 }
 
-int LuaManager::loadInitScripts(const std::string &projectTurboDir,
-                                const std::string &homeTurboDir) noexcept
+int LuaManager::loadInitScripts(const std::string &projectLuaHome,
+                                const std::string &globalLuaHome) noexcept
 {
     if (!L)
         return 0;
@@ -380,7 +380,7 @@ int LuaManager::loadInitScripts(const std::string &projectTurboDir,
     clearRegisteredCommands();
 
     int ran = 0;
-    for (const std::string &dir : {projectTurboDir, homeTurboDir})
+    for (const std::string &dir : {projectLuaHome, globalLuaHome})
     {
         if (dir.empty())
             continue;

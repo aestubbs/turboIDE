@@ -125,14 +125,13 @@ struct DocumentTreeView : public TOutline {
     void clear() noexcept;
 
     // --- Lua scripts homes ------------------------------------------------
-    // Show (or refresh) the synthetic top-level Lua-script "homes" (one group
-    // per tier: shared / local / system). Their scripts often live under .turbo
-    // or in a dir excluded from the normal scan, so they are injected as group
-    // nodes whose children carry the scripts' real paths (so they open and link
-    // to editors like any file). Each group is shown even when empty, so it acts
-    // as a clear home to drop scripts into. 'show' == false removes them. The
-    // sections are stored and re-applied after a tree rebuild (e.g. toggling
-    // hidden files).
+    // Show (or refresh) the synthetic top-level Lua-script "homes" (one group per
+    // home: project / global). Their scripts live outside the project or in a dir
+    // excluded from the normal scan, so they are injected as group nodes whose
+    // children carry the scripts' real paths (so they open and link to editors like
+    // any file). Each group is shown even when empty, so it acts as a clear home to
+    // drop scripts into. 'show' == false removes them. The sections are stored and
+    // re-applied after a tree rebuild (e.g. toggling hidden files).
     void setLuaScripts(bool show, std::vector<LuaSection> sections) noexcept;
 
     // Inject synthetic top-level "Skills" homes, laid out exactly like the Lua

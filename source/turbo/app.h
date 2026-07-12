@@ -242,34 +242,34 @@ struct TurboApp : public TApplication, EditorWindowParent
     EditorWindow *focusedEditor() noexcept;
 
     // --- Lua scripting ---------------------------------------------------
-    // Construct the LuaManager, wire its host hooks to this app, and load
-    // init.lua from the project and home .turbo dirs. Safe to call once the
-    // project root is known (it is a no-op on a second call).
+    // Construct the LuaManager, wire its host hooks to this app, and load init.lua
+    // from the project and global Lua homes. Safe to call once the project root is
+    // known (it is a no-op on a second call).
     void initLua() noexcept;
     // Fire an editor lifecycle event to the registered Lua handlers. Returns
     // false only when a "before*" handler cancelled the action.
     bool fireLuaEvent(const char *event) noexcept;
     bool fireLuaEvent(const char *event,
                       const std::vector<std::pair<std::string, std::string>> &params) noexcept;
-    // Absolute paths of *.lua scripts across the three tiers, project first:
-    // <projectRoot>/turbo-scripts (shared), <projectRoot>/.turbo/scripts (local),
-    // then ~/.turbo/scripts (system). Used by the "Run Script" popup.
+    // Absolute paths of the runnable *.lua scripts in both Lua homes, project first:
+    // <projectRoot>/turbo-scripts, then ~/.turbo/scripts. init.lua is excluded (it is
+    // the hooks file, not a script to run). Used by the "Run Script" popup.
     std::vector<std::string> discoverLuaScripts() const noexcept;
     // Pop up the discovered-scripts menu and run the chosen one (cmLuaRunScript).
     void runLuaScriptPicker() noexcept;
     // Run the i-th script from discoverLuaScripts() (the cmLuaScriptBase + i
     // commands the command palette dispatches).
     void runDiscoveredLuaScript(int index) noexcept;
-    // Prompt for a name and create+open a new script in the given scripts dir
-    // (one of the Lua-home tiers: turbo-scripts, .turbo/scripts, ~/.turbo/scripts).
+    // Prompt for a name and create+open a new script in the given scripts dir (a Lua
+    // home's: <projectRoot>/turbo-scripts or ~/.turbo/scripts).
     void treeNewLuaScript(const std::string &dir) noexcept;
-    // Prompt for a name and create+open a new script in the project-local tier
-    // (<projectRoot>/.turbo/scripts). Thin wrapper over treeNewLuaScript.
+    // Prompt for a name and create+open a new script in the project Lua home
+    // (<projectRoot>/turbo-scripts). Thin wrapper over treeNewLuaScript.
     void luaNewScript() noexcept;
-    // Re-run init.lua from the project + home .turbo dirs (cmLuaReload).
+    // Re-run init.lua from the project + global Lua homes (cmLuaReload).
     void reloadLuaConfig() noexcept;
-    // Rescan the three Lua-script tiers (shared / local / system) and push them
-    // into the tree as the always-shown Lua "homes".
+    // Rescan both Lua homes (project / global) and push them into the tree as the
+    // always-shown Lua "homes".
     void refreshLuaScriptsInTree() noexcept;
     // Prompt for a name and create+open a new skill (a <name>/SKILL.md folder,
     // pre-filled with a template) in the given skills dir.

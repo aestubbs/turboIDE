@@ -198,19 +198,25 @@ static constexpr TStringView helpParagraphs[] =
     "editor in Lua: run scripts on demand, and hook into editor events such as "
     "save and commit. The whole Lua standard library (string, table, math, io, "
     "os, ...) is available.\n\n",
-    "Where scripts live: under a .turbo directory in two places -- a "
-    "project-local one and a global one in your home directory:\n\n",
-    "   <project>/.turbo/    project scripts -- only this project\n"
-    "   ~/.turbo/            global scripts  -- every project\n"
+    "Where scripts live: in two homes, the same split as agent skills -- a "
+    "project one, checked in with the repository, and a global one in your home "
+    "directory:\n\n",
+    "   <project>/turbo-scripts/   project Lua -- only this project,\n"
+    "                              committed, shared with the team\n"
+    "   ~/.turbo/                  global Lua  -- yours, every project\n"
     "\n"
-    "   In each: init.lua runs at startup (register hooks here);\n"
-    "   scripts/*.lua are individual runnable scripts.\n"
+    "   In each: init.lua runs at startup (register hooks here).\n"
+    "   Runnable scripts sit beside it in turbo-scripts/, and under\n"
+    "   scripts/ in the global home (~/.turbo/scripts/*.lua).\n"
+    "\n"
+    "   (<project>/.turbo/ is a per-user cache -- session, sockets,\n"
+    "   config -- and holds no scripts.)\n"
     "\n",
     "Running scripts: use the Lua menu (Run Script...) or the Command Palette "
     "(Ctrl+B) -- each script appears as \"Lua Script: <name>\". Lua > New "
-    "Script... creates one under the project's .turbo/scripts. Script windows "
+    "Script... creates one under the project's turbo-scripts. Script windows "
     "have a brown frame so they stand out.\n\n",
-    "A script is just Lua. For example .turbo/scripts/hello.lua:\n\n",
+    "A script is just Lua. For example turbo-scripts/hello.lua:\n\n",
     "   -- hello.lua\n"
     "   if turbo.active_file() ~= \"\" then\n"
     "     turbo.message(\"editing \" .. turbo.active_file())\n"

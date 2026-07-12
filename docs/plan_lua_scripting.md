@@ -6,23 +6,30 @@ into editor events (commit, save, file open/close, …).
 
 ## Where scripts live
 
-Two locations, both under a `.turbo` directory:
+Two homes — the same project/global split as agent skills (`.claude/skills`,
+`~/.claude/skills`):
 
-| Location | Path | Purpose |
+| Home | Path | Purpose |
 | --- | --- | --- |
-| **Project-local** | `<project>/.turbo/` | scripts and hooks for this project only |
-| **Global** | `~/.turbo/` | scripts and hooks shared across all projects |
+| **Project Lua** | `<project>/turbo-scripts/` | scripts and hooks for this project, checked in with the repository |
+| **Global Lua** | `~/.turbo/` | scripts and hooks of your own, across all projects |
 
-In each location:
+In each home:
 
 * `init.lua` — run at startup (project first, then global). Use it to register
   event hooks with `turbo.on(...)`. Re-run from **Lua → Reload Config**.
-* `scripts/*.lua` — individual runnable scripts, listed in **Lua → Run
-  Script...** and (optionally) in the file tree.
+* the runnable scripts — listed in **Lua → Run Script...**, in the command
+  palette, and in the file tree. They sit beside `init.lua` in the project home
+  (`turbo-scripts/*.lua`) and under `scripts/` in the global one
+  (`~/.turbo/scripts/*.lua`).
 
 `<project>` is the directory Turbo was started in (`TurboApp::projectRoot`).
-The file tree hides `.turbo`, so scripts there are surfaced two other ways:
-the **Run Script** popup and the **Show Scripts in Tree** toggle.
+Both homes are injected into the file tree as always-shown synthetic groups
+("Project Lua", "Global Lua"), so each is a clear place to add a script even
+when empty; `turbo-scripts/` is therefore not also listed as a plain folder.
+
+`<project>/.turbo/` holds no scripts: it is a disposable per-user cache (session,
+MCP socket, `config.json`) that Turbo keeps out of git with its own `.gitignore`.
 
 ## The `turbo` API
 

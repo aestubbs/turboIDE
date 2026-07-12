@@ -71,11 +71,12 @@ public:
     // True once the interpreter is up (it always should be).
     bool ok() const noexcept { return L != nullptr; }
 
-    // Load init.lua from the project's .turbo dir and the user's ~/.turbo dir
-    // (in that order). These typically register event hooks. Missing files are
-    // not an error. Returns the number of init scripts that ran successfully.
-    int loadInitScripts(const std::string &projectTurboDir,
-                        const std::string &homeTurboDir) noexcept;
+    // Load init.lua from the project Lua home (<projectRoot>/turbo-scripts) and the
+    // global one (~/.turbo), in that order. These typically register event hooks.
+    // Missing files are not an error (an empty dir is skipped). Returns the number
+    // of init scripts that ran successfully.
+    int loadInitScripts(const std::string &projectLuaHome,
+                        const std::string &globalLuaHome) noexcept;
 
     // Run a Lua chunk. On failure the error is reported via host.message and
     // false is returned (lastError() holds the message).
