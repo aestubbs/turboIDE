@@ -43,6 +43,9 @@ const PaletteCommand kCommands[] =
     { "Close Editor",                  cmCloseEditor,          "Ctrl-W",       true  },
     { "Close All",                     cmCloseAll,             "",             true  },
     { "New Terminal",                  cmNewTerminal,          "",             false },
+    { "Toggle Agent",                  cmToggleAgent,          "Alt-0",        false },
+    { "Restart Agent",                 cmRestartAgent,         "",             false },
+    { "Select Agent...",               cmSelectAgent,          "",             false },
     { "Suspend",                       cmDosShell,             "",             false },
     { "Exit",                          cmQuit,                 "Ctrl-Q",       false },
     // Navigation (new)

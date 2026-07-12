@@ -72,6 +72,12 @@ void loadSettings(AppSettings &s) noexcept
             chomp(cmd);
             s.terminalShell = cmd;
         }
+        else if (strncmp(line, "agent.default=", 14) == 0)
+        {
+            char *cmd = line + 14;
+            chomp(cmd);
+            s.defaultAgent = cmd;
+        }
         else if (strncmp(line, themePrefix, sizeof themePrefix - 1) == 0)
         {
             // theme.<item>.<fg|bg|style>=<value>
@@ -115,6 +121,8 @@ void saveSettings(const AppSettings &s) noexcept
     fprintf(f, "autosave=%d\n", s.autoSaveOnFocusLoss ? 1 : 0);
     fprintf(f, "lsp.enabled=%d\n", s.lspEnabled ? 1 : 0);
     fprintf(f, "showhidden=%d\n", s.showHidden ? 1 : 0);
+    if (!s.defaultAgent.empty())
+        fprintf(f, "agent.default=%s\n", s.defaultAgent.c_str());
     for (auto &srv : s.lspServers)
         if (!srv.language.empty() && !srv.command.empty())
             fprintf(f, "lsp.server.%s=%s\n", srv.language.c_str(), srv.command.c_str());

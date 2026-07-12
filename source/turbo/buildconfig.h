@@ -20,6 +20,7 @@ struct BuildConfig
     std::string artifact;         // file Run depends on (optional, for staleness)
     std::string runMode {"auto"}; // "auto" (build if stale) | "build" | "run"
     std::vector<BuildCommand> extra; // started in the background with Run
+    std::string agent;            // coding-agent override: preset name or command
 
     bool empty() const noexcept
     {

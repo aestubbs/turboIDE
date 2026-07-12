@@ -29,8 +29,10 @@ class TClockView;
 class LspManager;
 class GitManager;
 class LuaManager;
+class McpServer;
 struct BranchView;
 struct TerminalView;
+struct TerminalWindow;
 
 // A background command started alongside Run (e.g. a queue runner). Its output
 // is logged to .turbo/logs/<name>.log rather than shown in the output pane.
@@ -73,6 +75,8 @@ struct TurboApp : public TApplication, EditorWindowParent
     std::unique_ptr<turbo::FileWatcher> watcher;
     // Embedded Lua interpreter: editor scripting/configuration and event hooks.
     std::unique_ptr<LuaManager> luaMgr;
+    // MCP server: exposes editor actions + Lua commands to the agent as tools.
+    std::unique_ptr<McpServer> mcp;
 
     // Branch indicator at the right of the menu bar (clickable; opens a popup of
     // the other branches). 'branchTextShown' is the last text written to it, so
@@ -82,6 +86,10 @@ struct TurboApp : public TApplication, EditorWindowParent
 
     // Open terminal views, pumped each idle tick (see newTerminal()).
     std::vector<TerminalView *> terminals;
+
+    // The dedicated coding-agent window (a normal, freely-placeable terminal
+    // window running the configured agent). Single instance; nulled on close.
+    TerminalWindow *agentWin {nullptr};
 
     // Build/Run: a bordered output pane docked at the bottom of the editor area,
     // and the command runner streaming the current build into it.
@@ -256,6 +264,12 @@ struct TurboApp : public TApplication, EditorWindowParent
     // Rescan the three Lua-script tiers (shared / local / system) and push them
     // into the tree as the always-shown Lua "homes".
     void refreshLuaScriptsInTree() noexcept;
+    // Prompt for a name and create+open a new skill (a <name>/SKILL.md folder,
+    // pre-filled with a template) in the given skills dir.
+    void treeNewSkill(const std::string &dir) noexcept;
+    // Rescan the project + global agent skill dirs (.claude/skills, ~/.claude/
+    // skills) and push them into the tree as the always-shown Skills "homes".
+    void refreshSkillsInTree() noexcept;
     void showEditorList(TEvent *ev);
     void toggleTreeView();
     void setTreeWidth(int w);     // resize the docked tree (from a left-border drag)
@@ -294,6 +308,13 @@ struct TurboApp : public TApplication, EditorWindowParent
     void newTerminal();
     void registerTerminal(TerminalView *t) noexcept;
     void unregisterTerminal(TerminalView *t) noexcept;
+
+    // The dedicated coding-agent window. toggleAgent() opens it (running the
+    // resolved agent command in the project dir) or focuses the existing one;
+    // selectAgent() picks the per-project agent; restartAgent() reopens it.
+    void toggleAgent();
+    void selectAgent();
+    void restartAgent();
 
     void handleFocus(EditorWindow &w) noexcept override;
     void handleTitleChange(EditorWindow &w) noexcept override;

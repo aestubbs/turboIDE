@@ -23,6 +23,10 @@ struct AppSettings
     // Command line for the terminal window's shell (e.g. "bash", "zsh -l").
     // Empty = use $SHELL, falling back to /bin/sh.
     std::string terminalShell;
+    // Global default coding agent for the agent window, as a preset name
+    // ("claude", "codex", "opencode") or a raw command line. A project may
+    // override this in its .turbo/config.json. Empty = built-in default.
+    std::string defaultAgent;
     // Language-server command overrides. Empty by default; the LSP manager
     // falls back to built-in defaults for languages not listed here.
     std::vector<LspServerConfig> lspServers;

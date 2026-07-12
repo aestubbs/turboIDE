@@ -23,13 +23,30 @@
 
 #include <vterm.h>
 
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <regex>
 #include <vector>
 
 namespace {
 
 // ---- small helpers ---------------------------------------------------------
+
+// Resolve 'file' (absolute, or relative to 'root') to an existing file's
+// absolute, normalised path, or "" if it is missing or a directory. (Same rule
+// the output pane uses for clickable build errors.)
+std::string resolveExistingPath(const std::string &file, const std::string &root) noexcept
+{
+    if (file.empty())
+        return {};
+    std::error_code ec;
+    std::filesystem::path p = std::filesystem::path(root) / file; // abs 'file' wins
+    p = p.lexically_normal();
+    if (std::filesystem::exists(p, ec) && !std::filesystem::is_directory(p, ec))
+        return p.string();
+    return {};
+}
 
 void appendUtf8(std::string &s, uint32_t cp) noexcept
 {
@@ -194,6 +211,8 @@ int cbSetTermProp(VTermProp prop, VTermValue *val, void *user) noexcept
     auto *v = (TerminalView *) user;
     if (prop == VTERM_PROP_CURSORVISIBLE)
         v->onCursorVisible(val->boolean != 0);
+    else if (prop == VTERM_PROP_MOUSE)
+        v->onMouseMode(val->number);
     else if (prop == VTERM_PROP_TITLE)
     {
         VTermStringFragment f = val->string;
@@ -293,12 +312,15 @@ void emitRow(TDrawBuffer &b, int w, const TColorAttr &defAttr, Fetch fetch) noex
 // TerminalView
 // ---------------------------------------------------------------------------
 
-TerminalView::TerminalView(const TRect &bounds) noexcept :
-    TView(bounds)
+TerminalView::TerminalView(const TRect &bounds, std::string command) noexcept :
+    TView(bounds),
+    launchCommand(std::move(command))
 {
     growMode = gfGrowHiX | gfGrowHiY;
     options |= ofSelectable | ofFirstClick;
-    eventMask |= evKeyboard | evCommand | evBroadcast | evMouseWheel;
+    // evMouse covers down/up/move/wheel: the extra up/move events are needed to
+    // forward clicks and drags to a child that has enabled mouse reporting.
+    eventMask |= evKeyboard | evCommand | evBroadcast | evMouse;
     cols = max(1, (int) size.x);
     rows = max(1, (int) size.y);
     startShell();
@@ -329,10 +351,12 @@ void TerminalView::startShell() noexcept
     if (VTermState *st = vterm_obtain_state(vt))
         vterm_state_set_bold_highbright(st, 1);
 
-    // Resolve the shell: configured override, else $SHELL, else a sane default.
-    std::string shellCmd;
-    if (auto *app = (TurboApp *) TProgram::application)
-        shellCmd = app->settings.terminalShell;
+    // Resolve what to run: an explicit launch command (e.g. a coding agent),
+    // else the configured shell override, else $SHELL, else a sane default.
+    std::string shellCmd = launchCommand;
+    if (shellCmd.empty())
+        if (auto *app = (TurboApp *) TProgram::application)
+            shellCmd = app->settings.terminalShell;
     if (shellCmd.empty())
     {
 #ifdef _WIN32
@@ -413,6 +437,170 @@ void TerminalView::onMoveCursor(int row, int col, bool visible) noexcept
 void TerminalView::onCursorVisible(bool visible) noexcept
 {
     curVisible = visible;
+}
+
+void TerminalView::onMouseMode(int mode) noexcept
+{
+    mouseMode = mode;
+    if (mode == VTERM_PROP_MOUSE_NONE)
+        mousePressedButton = 0;
+}
+
+// Translate tvision's control-key state into libvterm modifier flags.
+static VTermModifier vtermMouseMod(ushort cks) noexcept
+{
+    int m = VTERM_MOD_NONE;
+    if (cks & kbShift)      m |= VTERM_MOD_SHIFT;
+    if (cks & kbCtrlShift)  m |= VTERM_MOD_CTRL; // kbCtrlShift == both Ctrl bits
+    if (cks & kbAltShift)   m |= VTERM_MOD_ALT;  // kbAltShift  == both Alt bits
+    return (VTermModifier) m;
+}
+
+bool TerminalView::forwardMouseEvent(TEvent &ev) noexcept
+{
+    if (mouseMode == VTERM_PROP_MOUSE_NONE || !vt)
+        return false;
+    TPoint p = makeLocal(ev.mouse.where);
+    int col = max(0, min((int) p.x, cols - 1));
+    int row = max(0, min((int) p.y, rows - 1));
+    VTermModifier mod = vtermMouseMod(ev.mouse.controlKeyState);
+
+    switch (ev.what)
+    {
+        case evMouseWheel:
+        {
+            // Wheel is reported as a momentary press of buttons 4-7 (xterm).
+            int button = (ev.mouse.wheel & mwUp)   ? 4
+                       : (ev.mouse.wheel & mwDown) ? 5
+                       : (ev.mouse.wheel & mwLeft) ? 6
+                       : (ev.mouse.wheel & mwRight)? 7 : 0;
+            if (!button)
+                return false;
+            vterm_mouse_move(vt, row, col, mod);
+            vterm_mouse_button(vt, button, true, mod);
+            return true;
+        }
+        case evMouseDown:
+        {
+            int button = (ev.mouse.buttons & mbRightButton)  ? 3
+                       : (ev.mouse.buttons & mbMiddleButton) ? 2 : 1;
+            mousePressedButton = button;
+            vterm_mouse_move(vt, row, col, mod);
+            vterm_mouse_button(vt, button, true, mod);
+            return true;
+        }
+        case evMouseUp:
+        {
+            int button = mousePressedButton ? mousePressedButton : 1;
+            vterm_mouse_move(vt, row, col, mod);
+            vterm_mouse_button(vt, button, false, mod);
+            mousePressedButton = 0;
+            return true;
+        }
+        case evMouseMove:
+            // libvterm gates motion on the child's mode (drag vs any-motion).
+            vterm_mouse_move(vt, row, col, mod);
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool TerminalView::openPathAt(TPoint where) noexcept
+{
+    auto *app = (TurboApp *) TProgram::application;
+    if (!app)
+        return false;
+    TPoint p = makeLocal(where);
+    int y = p.y, clickCol = p.x;
+    if (y < 0 || clickCol < 0 || clickCol >= cols)
+        return false;
+
+    // Reconstruct the clicked row's code points by column, from scrollback or the
+    // live screen (same virtual-row mapping the renderer uses in draw()).
+    int S = (int) scrollback.size();
+    int vi = (S - scrollOffset) + y;
+    std::vector<uint32_t> cps(cols, 0);
+    if (vi >= 0 && vi < S)
+    {
+        const std::vector<SbCell> &line = scrollback[vi];
+        for (int x = 0; x < cols && x < (int) line.size(); ++x)
+        {
+            uint32_t ch = line[x].ch;
+            cps[x] = (ch == (uint32_t) -1) ? 0 : ch;
+        }
+    }
+    else if (screen)
+    {
+        int liveRow = vi - S;
+        if (liveRow < 0 || liveRow >= rows)
+            return false;
+        for (int x = 0; x < cols; ++x)
+        {
+            VTermScreenCell cell;
+            VTermPos pos { liveRow, x };
+            if (vterm_screen_get_cell(screen, pos, &cell))
+            {
+                uint32_t ch = cell.chars[0];
+                cps[x] = (ch == (uint32_t) -1) ? 0 : ch;
+            }
+        }
+    }
+    else
+        return false;
+
+    // A path token is a maximal run of non-space characters, excluding the
+    // punctuation that usually bounds a path in prose (quotes/brackets/commas).
+    auto isPathChar = [](uint32_t c) -> bool {
+        if (c < 33)
+            return false; // control chars and space
+        switch (c)
+        {
+            case '"': case '\'': case '`':
+            case '(': case ')': case '[': case ']': case '{': case '}':
+            case '<': case '>': case ',': case ';':
+                return false;
+        }
+        return true;
+    };
+    if (!isPathChar(cps[clickCol]))
+        return false;
+    int lo = clickCol, hi = clickCol;
+    while (lo > 0 && isPathChar(cps[lo - 1]))
+        --lo;
+    while (hi + 1 < cols && isPathChar(cps[hi + 1]))
+        ++hi;
+
+    std::string token;
+    for (int x = lo; x <= hi; ++x)
+        appendUtf8(token, cps[x] ? cps[x] : (uint32_t) ' ');
+    // Trailing sentence punctuation is not part of the path.
+    while (!token.empty() && (token.back() == '.' || token.back() == ':'))
+        token.pop_back();
+    if (token.empty())
+        return false;
+
+    const std::string &root = app->projectRoot;
+    // Prefer a "path:line[:col]" reference, else the bare path.
+    static const std::regex reSuffix(R"(^(.+?):(\d+)(?::\d+)?$)");
+    std::smatch m;
+    if (std::regex_match(token, m, reSuffix))
+    {
+        std::string abs = resolveExistingPath(m[1].str(), root);
+        if (!abs.empty())
+        {
+            long ln = std::atol(m[2].str().c_str());
+            app->openOrFocus(abs, ln > 0 ? ln - 1 : 0); // 0-based for SCI_GOTOLINE
+            return true;
+        }
+    }
+    std::string abs = resolveExistingPath(token, root);
+    if (!abs.empty())
+    {
+        app->openOrFocus(abs); // no line: open at the top
+        return true;
+    }
+    return false;
 }
 
 void TerminalView::onTitleFragment(std::string_view frag, bool initial, bool final) noexcept
@@ -749,6 +937,13 @@ void TerminalView::handleEvent(TEvent &ev)
             break;
         }
         case evMouseWheel:
+            // A child in mouse mode (e.g. an agent, vim, less) gets the wheel;
+            // otherwise it scrolls this terminal's own scrollback.
+            if (mouseMode != VTERM_PROP_MOUSE_NONE && forwardMouseEvent(ev))
+            {
+                clearEvent(ev);
+                break;
+            }
             if (ev.mouse.wheel & mwUp)
                 scrollLines(3);
             else if (ev.mouse.wheel & mwDown)
@@ -777,9 +972,17 @@ void TerminalView::handleEvent(TEvent &ev)
             }
             break;
         case evMouseDown:
-            // Clicking focuses the terminal (in-view text selection is not yet
-            // supported); swallow so the base view doesn't start a drag-select.
+            // Clicking focuses the terminal. Ctrl+click opens a file path under
+            // the cursor (kept out of the child); a plain click is forwarded to
+            // the child when it has enabled mouse reporting.
             select();
+            if (!((ev.mouse.controlKeyState & kbCtrlShift) && openPathAt(ev.mouse.where)))
+                forwardMouseEvent(ev);
+            clearEvent(ev);
+            break;
+        case evMouseMove:
+        case evMouseUp:
+            forwardMouseEvent(ev); // no-op unless the child is in mouse mode
             clearEvent(ev);
             break;
     }
@@ -789,9 +992,13 @@ void TerminalView::handleEvent(TEvent &ev)
 // TerminalWindow
 // ---------------------------------------------------------------------------
 
-TerminalWindow::TerminalWindow(const TRect &bounds) noexcept :
+TerminalWindow::TerminalWindow(const TRect &bounds, std::string command,
+                               std::string title, TerminalWindow **aBackPtr) noexcept :
     TWindowInit(&TWindow::initFrame),
-    TWindow(bounds, "Terminal", wnNoNumber)
+    TWindow(bounds, title.c_str(), wnNoNumber),
+    baseTitle(title),
+    titleBuf(std::move(title)),
+    backPtr(aBackPtr)
 {
     options |= ofTileable;
     // Drop the drop-shadow: the terminal is normally docked flush against the
@@ -804,9 +1011,17 @@ TerminalWindow::TerminalWindow(const TRect &bounds) noexcept :
     auto *vsb = new TScrollBar(TRect(size.x - 1, 1, size.x, size.y - 1));
     vsb->growMode = gfGrowLoX | gfGrowHiX | gfGrowHiY;
     insert(vsb);
-    view = new TerminalView(getExtent().grow(-1, -1));
+    view = new TerminalView(getExtent().grow(-1, -1), std::move(command));
     insert(view);
     view->setScrollBar(vsb);
+}
+
+void TerminalWindow::shutDown()
+{
+    if (backPtr)
+        *backPtr = nullptr;
+    view = nullptr;
+    TWindow::shutDown();
 }
 
 const char *TerminalWindow::getTitle(short)
@@ -832,8 +1047,8 @@ void TerminalWindow::sizeLimits(TPoint &min, TPoint &max)
 
 void TerminalWindow::setTermTitle(std::string_view text) noexcept
 {
-    titleBuf = text.empty() ? "Terminal"
-                            : "Terminal: " + std::string(text);
+    titleBuf = text.empty() ? baseTitle
+                            : baseTitle + ": " + std::string(text);
     if (frame)
         frame->drawView();
 }

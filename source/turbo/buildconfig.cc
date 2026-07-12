@@ -37,6 +37,7 @@ bool BuildConfig::load(const std::string &root) noexcept
         run      = j.value("run", std::string());
         artifact = j.value("artifact", std::string());
         runMode  = j.value("runMode", std::string("auto"));
+        agent    = j.value("agent", std::string());
         extra.clear();
         if (j.contains("extra") && j["extra"].is_array())
             for (auto &e : j["extra"])
@@ -64,6 +65,7 @@ void BuildConfig::save(const std::string &root) const noexcept
         j["run"]      = run;
         j["artifact"] = artifact;
         j["runMode"]  = runMode;
+        j["agent"]    = agent;
         Json arr = Json::array();
         for (auto &c : extra)
             arr.push_back({ {"name", c.name}, {"command", c.command} });

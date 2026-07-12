@@ -71,6 +71,10 @@ enum : ushort
     cmGitNewBranch,   // prompt for a name, then create + switch (checkout -b)
     cmToggleHidden,
     cmNewTerminal,
+    // Coding-agent window (Alt-0 opens or focuses it).
+    cmToggleAgent,
+    cmSelectAgent,   // choose the per-project agent (Claude Code / Codex / ...)
+    cmRestartAgent,  // close and reopen the agent window
     // Guided "New File...": prompt for a name+location up front (via the Save As
     // dialog) so the buffer is created on disk with the right lexer from the
     // start. Distinct from cmNew, which opens an unnamed scratch buffer.
@@ -97,6 +101,7 @@ enum : ushort
     cmTreeGitAdd,
     cmTreeGitRevert,
     cmTreeNewLuaScript, // create a new .lua script in a Lua-home group's dir
+    cmTreeNewSkill,     // create a new skill (dir + SKILL.md) in a Skills-home dir
     // Lua scripting menu.
     cmLuaRunScript,   // pop up the list of discovered scripts and run one
     cmLuaNewScript,   // create + open a new script in the project's .turbo/scripts

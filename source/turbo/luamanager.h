@@ -23,6 +23,18 @@ struct lua_State;
 // land in the `params` table the handler receives (e.g. params.path, params.message).
 using LuaEventParams = std::vector<std::pair<std::string, std::string>>;
 
+// One declared input parameter of a Lua-registered command (the table form of
+// turbo.register_command). Used to build the tool's JSON Schema for the MCP
+// server. 'type' is a JSON-schema type name ("string", "number", "integer",
+// "boolean"); it defaults to "string" when unspecified.
+struct LuaParam
+{
+    std::string name;
+    std::string type {"string"};
+    std::string description;
+    bool required {false};
+};
+
 // Host hooks the Lua API calls into. Every field is optional; a script calling
 // an API whose host hook is unset gets a graceful no-op / empty result.
 struct LuaHost
@@ -88,10 +100,23 @@ public:
     int commandCount() const noexcept { return (int) commands.size(); }
     const std::string &commandName(int i) const noexcept { return commands[i].name; }
     const std::string &commandDescription(int i) const noexcept { return commands[i].description; }
+    // Declared input parameters of the i-th command (empty for legacy no-arg
+    // commands). Used by the MCP server to build the tool's input schema.
+    const std::vector<LuaParam> &commandParams(int i) const noexcept { return commands[i].params; }
     void runRegisteredCommand(int i) noexcept; // call the i-th command's function
+    // Invoke the i-th command with JSON arguments (an object string keyed by
+    // param name; "" or "{}" = none) and capture its return value into 'out':
+    // a string return is passed through verbatim, any other value is JSON-
+    // encoded, nil/no-return yields "". Returns false on a Lua error or bad
+    // arguments (message in lastError()); unlike runRegisteredCommand it does
+    // NOT pop a modal message box, so it is safe to call from the MCP server.
+    bool runRegisteredCommandJson(int i, const std::string &argsJson,
+                                  std::string &out) noexcept;
     // Append a command (called by the turbo.register_command API callback). 'ref'
-    // is a luaL_ref into the registry holding the handler function.
-    void addRegisteredCommand(std::string name, std::string description, int ref) noexcept;
+    // is a luaL_ref into the registry holding the handler function; 'params' are
+    // the command's declared input parameters (empty for the legacy no-arg form).
+    void addRegisteredCommand(std::string name, std::string description, int ref,
+                              std::vector<LuaParam> params = {}) noexcept;
 
     const std::string &lastError() const noexcept { return errorMessage; }
     const LuaHost &hostHooks() const noexcept { return host; }
@@ -107,6 +132,7 @@ private:
         std::string name;
         std::string description;
         int ref; // luaL_ref into LUA_REGISTRYINDEX
+        std::vector<LuaParam> params; // declared input schema (empty = legacy no-arg)
     };
     // Drops registered commands (and frees their refs) when init scripts reload.
     void clearRegisteredCommands() noexcept;

@@ -20,6 +20,7 @@
 #define Uses_TButton
 #define Uses_TDrawBuffer
 #define Uses_TMenu
+#define Uses_TEventQueue
 #include <tvision/tv.h>
 
 #include "app.h"
@@ -36,6 +37,8 @@
 #include "luamanager.h"
 #include "menucheck.h"
 #include "terminal.h"
+#include "agentconfig.h"
+#include "mcpserver.h"
 #include "themedialog.h"
 #include "theme.h"
 #include "commandpalette.h"
@@ -519,6 +522,11 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             *new TMenuItem( "~N~ew Script...", cmLuaNewScript, kbNoKey, hcNoContext ) +
             newLine() +
             *new TMenuItem( "Re~l~oad Config", cmLuaReload, kbNoKey, hcNoContext ) +
+        *new TSubMenu( "~A~gent", kbAltA ) +
+            *new TMenuItem( "~T~oggle Agent", cmToggleAgent, kbAlt0, hcNoContext, "Alt-0" ) +
+            *new TMenuItem( "~R~estart Agent", cmRestartAgent, kbNoKey, hcNoContext ) +
+            newLine() +
+            *new TMenuItem( "~S~elect Agent...", cmSelectAgent, kbNoKey, hcNoContext ) +
         windows +
         *new TSubMenu( "~H~elp", kbAltH ) +
             *new TMenuItem( "~K~eyboard shortcuts", cmHelp, kbF1, hcNoContext, "F1" ) +
@@ -562,6 +570,9 @@ TStatusLine *TurboApp::initStatusLine( TRect r )
             // is avoided because terminals can't distinguish it from Ctrl-P.
             *new TStatusItem( 0, kbCtrlP, cmGotoAnything ) +
             *new TStatusItem( 0, kbCtrlB, cmCommandPalette ) +
+            // Alt-0 opens/focuses the coding-agent window (Alt-1..9 are reserved
+            // by tvision for window selection; Alt-0 is free and terminal-safe).
+            *new TStatusItem( 0, kbAlt0, cmToggleAgent ) +
             // Undo-selection on Ctrl+U (only fires with an editor focused, as the
             // command is disabled otherwise; converted before the editor sees the
             // key, like the navigation overlays above). Split-into-lines is NOT
@@ -579,6 +590,8 @@ void TurboApp::shutDown()
     // Persist the open windows so the next open of this project restores them
     // (no-op when no project is open). Editors are still valid at this point.
     saveSession();
+    if (mcp)
+        mcp->stop(); // join the socket threads before luaMgr/editors tear down
     if (lsp)
         lsp->shutdown();
     if (git)
@@ -603,6 +616,8 @@ void TurboApp::idle()
         clock->update();
     if (lsp)
         lsp->pump();
+    if (mcp)
+        mcp->pump();
     if (watcher)
         onFilesChanged();
     if (git)
@@ -646,6 +661,7 @@ void TurboApp::getEvent(TEvent &event)
         // surface those global scripts in the otherwise-empty tree.
         initLua();
         refreshLuaScriptsInTree();
+        refreshSkillsInTree();
         parseArgs();
     }
     TApplication::getEvent(event);
@@ -681,6 +697,9 @@ void TurboApp::handleEvent(TEvent &event)
             case cmCloseAll: closeAll(); break;
             case cmToggleTree: toggleTreeView(); break;
             case cmNewTerminal: newTerminal(); break;
+            case cmToggleAgent: toggleAgent(); break;
+            case cmSelectAgent: selectAgent(); break;
+            case cmRestartAgent: restartAgent(); break;
             case cmToggleHidden: toggleHiddenFiles(); break;
             case cmToggleAutoSave: toggleAutoSave(); break;
             case cmLspSettings: editLspSettings(); break;
@@ -983,7 +1002,25 @@ void TurboApp::openProject(const std::string &dir) noexcept
             homeTurbo = std::string(home) + "/.turbo";
         luaMgr->loadInitScripts(projectRoot + "/.turbo", homeTurbo);
     }
+    // Start the MCP server for this project and point the agent at it. The Lua
+    // tools are (re)registered by loadInitScripts just above, so tools/list is
+    // ready before any agent connects.
+    if (mcp)
+    {
+        std::string sock = mcpSocketPath(projectRoot);
+        if (mcp->start(sock))
+        {
+            // .mcp.json makes the server discoverable to any agent; for Claude
+            // Code we also register it at local scope (auto-approved, no trust
+            // prompt), which shadows the .mcp.json entry.
+            writeAgentMcpConfig(projectRoot, sock);
+            if (resolveAgentCommand(buildConfig.agent, settings.defaultAgent)
+                    .find("claude") != std::string::npos)
+                registerClaudeMcpServerAsync(projectRoot, sock);
+        }
+    }
     refreshLuaScriptsInTree(); // now includes the project's own scripts
+    refreshSkillsInTree();     // and the project's .claude/skills
     // Opening a project is an explicit "work on this" action, so surface the file
     // tree straight away -- even on smaller terminals, where it starts hidden.
     // Done before restoreSession so the restored editors lay out beside the tree
@@ -1000,6 +1037,8 @@ void TurboApp::closeProject() noexcept
         return; // nothing open
     saveSession();         // remember the open windows for the next open
     closeProjectEditors(); // close editors holding files inside the project
+    if (mcp)
+        mcp->stop();       // drop the project's MCP server (restarts on next open)
     projectRoot.clear();
     buildConfig = BuildConfig {}; // forget the project's build/run config
     lastBuildCommand.clear();
@@ -1013,6 +1052,7 @@ void TurboApp::closeProject() noexcept
         docTree->setBranchInfo("");  // drop the branch from the tree title now
     }
     refreshLuaScriptsInTree(); // with no project, show the global scripts only
+    refreshSkillsInTree();     // ... and only the global skills
     refreshMenuChecks();
 }
 
@@ -1287,6 +1327,12 @@ void TurboApp::initLua() noexcept
 
     luaMgr = std::make_unique<LuaManager>(std::move(host));
 
+    // The MCP server exposes the same LuaHost hooks + registered commands to the
+    // agent. It starts when a project opens (openProject), since its tools are
+    // project-scoped. A socket message on the reader thread nudges the idle loop.
+    mcp = std::make_unique<McpServer>(*luaMgr);
+    mcp->setWake([] { TEventQueue::wakeUp(); });
+
     // init.lua lives at the top of each .turbo dir (alongside config.json);
     // runnable scripts live under .turbo/scripts. Project first, then home.
     std::string homeTurbo;
@@ -1321,6 +1367,29 @@ static void scanLuaDir(const std::string &dir, std::vector<std::string> &out)
             out.push_back(e.path().string());
     }
     std::sort(out.begin() + start, out.end());
+}
+
+// Collect the skills under 'dir': each immediate sub-directory that contains a
+// SKILL.md becomes an entry {name = folder name, path = the SKILL.md}.
+static void scanSkillDir(const std::string &dir,
+                         std::vector<DocumentTreeView::SkillEntry> &out)
+{
+    if (dir.empty())
+        return;
+    std::error_code ec;
+    size_t start = out.size();
+    for (auto &e : std::filesystem::directory_iterator(dir, ec))
+    {
+        std::error_code fec;
+        if (!e.is_directory(fec))
+            continue;
+        std::string md = e.path().string() + "/SKILL.md";
+        if (std::filesystem::is_regular_file(md, fec))
+            out.push_back({ e.path().filename().string(), std::move(md) });
+    }
+    std::sort(out.begin() + start, out.end(),
+              [](const DocumentTreeView::SkillEntry &a,
+                 const DocumentTreeView::SkillEntry &b) { return a.name < b.name; });
 }
 
 std::vector<std::string> TurboApp::discoverLuaScripts() const noexcept
@@ -1434,6 +1503,51 @@ void TurboApp::treeNewLuaScript(const std::string &dir) noexcept
     refreshLuaScriptsInTree(); // show the new script under its home
 }
 
+void TurboApp::treeNewSkill(const std::string &dir) noexcept
+{
+    if (dir.empty())
+    {
+        messageBox("No skills directory; cannot create a skill.", mfError | mfOKButton);
+        return;
+    }
+    char name[256] = "";
+    if (inputBox("New Skill", "Skill ~n~ame:", name, sizeof(name) - 1) != cmOK)
+        return;
+    std::string n = trimmed(name);
+    if (n.empty())
+        return;
+    std::error_code ec;
+    std::string skillDir = dir + "/" + n;
+    if (std::filesystem::exists(skillDir, ec))
+    {
+        messageBox(mfError | mfOKButton, "'%s' already exists.", n.c_str());
+        return;
+    }
+    std::filesystem::create_directories(skillDir, ec);
+    std::string full = skillDir + "/SKILL.md";
+    {
+        std::ofstream f(full, std::ios::out);
+        if (!f)
+        {
+            messageBox(mfError | mfOKButton, "Unable to create '%s'.", full.c_str());
+            return;
+        }
+        // A Claude-Code-style skill: YAML frontmatter + body. The body points at
+        // the turboIDE MCP tools so a skill can drive the editor / run Lua.
+        f << "---\n"
+             "name: " << n << "\n"
+             "description: <one line: what this skill does and when to use it>\n"
+             "---\n\n"
+             "# " << n << "\n\n"
+             "Describe the steps here.\n\n"
+             "This agent can drive turboIDE and run project Lua scripts through the\n"
+             "turboIDE MCP tools (e.g. `open_file`, `insert_text`, `run_command`, or\n"
+             "a `lua_<name>` tool registered via `turbo.register_command`).\n";
+    }
+    fileOpenOrNew(full.c_str());
+    refreshSkillsInTree(); // show the new skill under its home
+}
+
 void TurboApp::luaNewScript() noexcept
 {
     if (projectRoot.empty())
@@ -1487,6 +1601,32 @@ void TurboApp::refreshLuaScriptsInTree() noexcept
         sections.push_back({"System Lua", std::move(homeDir), std::move(home)});
     }
     docTree->tree->setLuaScripts(true, std::move(sections));
+}
+
+void TurboApp::refreshSkillsInTree() noexcept
+{
+    if (!docTree)
+        return;
+    // Agent-native skills. For v1 this is the Claude Code convention:
+    // <project>/.claude/skills (project) and ~/.claude/skills (global). Kept as
+    // separate labelled homes, mirroring how the Lua tiers are shown. (When
+    // other agents are supported, resolve these dirs from the configured agent.)
+    std::vector<DocumentTreeView::SkillSection> sections;
+    if (!projectRoot.empty())
+    {
+        std::string dir = projectRoot + "/.claude/skills";
+        std::vector<DocumentTreeView::SkillEntry> skills;
+        scanSkillDir(dir, skills);
+        sections.push_back({"Project Skills", std::move(dir), std::move(skills)});
+    }
+    if (const char *h = ::getenv("HOME"))
+    {
+        std::string dir = std::string(h) + "/.claude/skills";
+        std::vector<DocumentTreeView::SkillEntry> skills;
+        scanSkillDir(dir, skills);
+        sections.push_back({"Global Skills", std::move(dir), std::move(skills)});
+    }
+    docTree->tree->setSkills(true, std::move(sections));
 }
 
 void TurboApp::toggleAutoSave()
@@ -2828,6 +2968,69 @@ void TurboApp::newTerminal()
     }
     auto *win = new TerminalWindow(r);
     deskTop->insert(win);
+}
+
+void TurboApp::toggleAgent()
+{
+    if (agentWin)
+    {
+        // Already open: bring it to the front and give it focus.
+        agentWin->focus();
+        return;
+    }
+    std::string cmd = resolveAgentCommand(buildConfig.agent, settings.defaultAgent);
+    if (cmd.empty())
+    {
+        messageBox("No coding agent is configured.", mfInformation | mfOKButton);
+        return;
+    }
+    // Open a normal, freely-placeable window over the editor area (to the right
+    // of the file tree if shown), like a new terminal; the user can zoom/move/
+    // resize it. The back-pointer nulls agentWin when the window closes.
+    TRect r = deskTop->getExtent();
+    if (docTree && (docTree->state & sfVisible))
+    {
+        TRect t = docTree->getBounds();
+        if (t.a.x > r.b.x - t.b.x)
+            r.b.x = max(t.a.x, 20);
+        else
+            r.a.x = min(t.b.x, r.b.x - 20);
+    }
+    agentWin = new TerminalWindow(r, cmd, "Agent (" + cmd + ")", &agentWin);
+    deskTop->insert(agentWin);
+}
+
+void TurboApp::selectAgent()
+{
+    char buf[256] = {};
+    std::string current = !buildConfig.agent.empty() ? buildConfig.agent
+                                                      : settings.defaultAgent;
+    strncpy(buf, current.c_str(), sizeof(buf) - 1);
+    if (inputBox("Select Agent",
+                 "Agent (claude / codex / opencode, or a command):",
+                 buf, sizeof(buf) - 1) != cmOK)
+        return;
+    if (hasProject())
+    {
+        buildConfig.agent = buf;
+        buildConfig.save(projectRoot); // .turbo/config.json
+    }
+    else
+    {
+        settings.defaultAgent = buf;   // no project: set the global default
+        saveSettings(settings);
+    }
+    messageBox(mfInformation | mfOKButton,
+               "Agent set to '%s'.%s", resolveAgentCommand(buildConfig.agent,
+                                                            settings.defaultAgent).c_str(),
+               agentWin ? " Use Restart Agent to apply." : "");
+}
+
+void TurboApp::restartAgent()
+{
+    if (agentWin)
+        agentWin->close(); // shutDown() nulls agentWin as it is destroyed
+    toggleAgent();
 }
 
 void TurboApp::registerTerminal(TerminalView *t) noexcept
