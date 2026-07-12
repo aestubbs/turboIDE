@@ -99,6 +99,7 @@ const PaletteCommand kCommands[] =
     { "Test",                          cmTest,                 "",             false },
     { "Stop",                          cmStop,                 "",             false },
     { "Build: Configure...",           cmBuildConfig,          "",             false },
+    { "Tools: Configure...",           cmToolsConfig,          "",             false },
     { "Toggle Output Pane",            cmToggleOutput,         "",             false },
     // Git
     { "Git: Commit...",                cmGitCommit,            "",             false },

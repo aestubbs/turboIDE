@@ -400,12 +400,30 @@ static TMenuItem &recentWindowsItems(int count)
     return *head;
 }
 
-TMenuBar *TurboApp::initMenuBar(TRect r)
+// Builds 'count' placeholder items for the tool-toggle section of the Run menu.
+// Each starts with a blank label; fillToolMenuLabels() writes the configured
+// tool names and refreshMenuChecks() ticks the ones whose process is running.
+static TMenuItem &toolMenuItems(int count)
 {
-    return makeMenuBar(r, 0); // no editors open yet, so no recent-window slots
+    TMenuItem *head = nullptr;
+    TMenuItem *tail = nullptr;
+    for (int i = 0; i < count; ++i)
+    {
+        auto *item = new TMenuItem("  ", cmToolBase + i, kbNoKey, hcNoContext);
+        if (!head)
+            head = tail = item;
+        else { tail->append(item); tail = item; }
+    }
+    return *head;
 }
 
-TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
+TMenuBar *TurboApp::initMenuBar(TRect r)
+{
+    // No editors open and no project (so no tools) yet: zero dynamic slots.
+    return makeMenuBar(r, 0, 0);
+}
+
+TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount, int toolCount)
 {
     r.b.y = r.a.y+1;
 
@@ -424,6 +442,21 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
         *new TMenuItem( "Next (in tree)", cmTreeNext, kbAltDown, hcNoContext, "Alt-Down" );
     if (recentCount > 0)
         windows + newLine() + recentWindowsItems(recentCount);
+
+    // Build the Run submenu separately so the per-tool toggles (one checkable
+    // item per configured tool process) can be spliced in only when tools exist,
+    // bracketed by separators, just before the Show/Hide Output item.
+    TSubMenu &run = *new TSubMenu( "~R~un", kbAltR ) +
+        *new TMenuItem( "~B~uild", cmBuild, kbF7, hcNoContext, "F7" ) +
+        *new TMenuItem( "~R~un", cmRun, kbNoKey, hcNoContext ) +
+        *new TMenuItem( "~T~est", cmTest, kbNoKey, hcNoContext ) +
+        *new TMenuItem( "~S~top", cmStop, kbNoKey, hcNoContext ) +
+        newLine() +
+        *new TMenuItem( "~C~onfigure...", cmBuildConfig, kbNoKey, hcNoContext ) +
+        *new TMenuItem( "Too~l~s...", cmToolsConfig, kbNoKey, hcNoContext );
+    if (toolCount > 0)
+        run + newLine() + toolMenuItems(toolCount) + newLine();
+    run + *new TMenuItem( "Show/Hide ~O~utput", cmToggleOutput, kbNoKey, hcNoContext );
 
     return new TurboMenuBar( r,
         *new TSubMenu( "~F~ile", kbAltF, hcNoContext ) +
@@ -461,7 +494,23 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             *new TMenuItem( "Find ~P~revious", cmSearchPrev, kbShiftF3, hcNoContext, "Shift-F3" ) +
             newLine() +
             *new TMenuItem( "C~o~mplete", cmCompletion, kbNoKey, hcNoContext, "Ctrl-Space" ) +
-        *new TSubMenu( "Se~l~ection", kbAltL ) +
+        *new TSubMenu( "~V~iew", kbAltV ) +
+            *new TMenuItem( "Line ~N~umbers", cmToggleLineNums, kbF8, hcNoContext, "F8" ) +
+            *new TMenuItem( "Line ~W~rapping", cmToggleWrap, kbF9, hcNoContext, "F9" ) +
+            *new TMenuItem( "Auto ~I~ndent", cmToggleIndent, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~H~idden Files", cmToggleHidden, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Chan~g~e History", cmToggleChangeHistory, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Long Line G~u~ide", cmToggleEdge, kbNoKey, hcNoContext ) +
+            newLine() +
+            *new TMenuItem( "Code ~F~olding", cmToggleFolding, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Fold a~t~ Cursor", cmFoldAtCursor, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Fold ~A~ll", cmFoldAll, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~U~nfold All", cmUnfoldAll, kbNoKey, hcNoContext ) +
+            newLine() +
+            *new TMenuItem( "Toggle ~B~ookmark", cmToggleBookmark, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~N~ext Bookmark", cmNextBookmark, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~P~revious Bookmark", cmPrevBookmark, kbNoKey, hcNoContext ) +
+        *new TSubMenu( "~C~ode", kbAltC ) +
             *new TMenuItem( "~T~oggle Comment", cmToggleComment, kbCtrlE, hcNoContext, "Ctrl-E" ) +
             newLine() +
             *new TMenuItem( "~U~ppercase", cmSelUppercase, kbNoKey, hcNoContext ) +
@@ -476,26 +525,6 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             *new TMenuItem( "Add Caret ~U~p", cmAddCaretUp, kbNoKey, hcNoContext, "Ctrl-Alt-Up" ) +
             *new TMenuItem( "Add Caret ~D~own", cmAddCaretDown, kbNoKey, hcNoContext, "Ctrl-Alt-Down" ) +
             *new TMenuItem( "Spl~i~t into Lines", cmSplitSelectionLines, kbNoKey, hcNoContext ) +
-        *new TSubMenu( "~C~ode", kbAltC ) +
-            *new TMenuItem( "Code ~F~olding", cmToggleFolding, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "Fold a~t~ Cursor", cmFoldAtCursor, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "Fold ~A~ll", cmFoldAll, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "~U~nfold All", cmUnfoldAll, kbNoKey, hcNoContext ) +
-            newLine() +
-            *new TMenuItem( "Toggle ~B~ookmark", cmToggleBookmark, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "~N~ext Bookmark", cmNextBookmark, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "~P~revious Bookmark", cmPrevBookmark, kbNoKey, hcNoContext ) +
-        *new TSubMenu( "~S~ettings", kbAltS ) +
-            *new TMenuItem( "Line ~N~umbers", cmToggleLineNums, kbF8, hcNoContext, "F8" ) +
-            *new TMenuItem( "Line ~W~rapping", cmToggleWrap, kbF9, hcNoContext, "F9" ) +
-            *new TMenuItem( "Auto ~I~ndent", cmToggleIndent, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "~H~idden Files", cmToggleHidden, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "~A~uto-save on Focus Loss", cmToggleAutoSave, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "Chan~g~e History", cmToggleChangeHistory, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "Long Line G~u~ide", cmToggleEdge, kbNoKey, hcNoContext ) +
-            newLine() +
-            *new TMenuItem( "~C~olour Scheme...", cmThemeSettings, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "~L~anguage Servers...", cmLspSettings, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~G~it", kbAltG ) +
             *new TMenuItem( "~C~ommit...", cmGitCommit, kbNoKey, hcNoContext ) +
             newLine() +
@@ -509,14 +538,7 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             *new TMenuItem( "Co~n~tinue Merge", cmGitMergeContinue, kbNoKey, hcNoContext ) +
             newLine() +
             *new TMenuItem( "~R~efresh Status", cmGitRefresh, kbNoKey, hcNoContext ) +
-        *new TSubMenu( "~B~uild", kbAltB ) +
-            *new TMenuItem( "~B~uild", cmBuild, kbF7, hcNoContext, "F7" ) +
-            *new TMenuItem( "~R~un", cmRun, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "~T~est", cmTest, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "~S~top", cmStop, kbNoKey, hcNoContext ) +
-            newLine() +
-            *new TMenuItem( "~C~onfigure...", cmBuildConfig, kbNoKey, hcNoContext ) +
-            *new TMenuItem( "Show/Hide ~O~utput", cmToggleOutput, kbNoKey, hcNoContext ) +
+        run +
         *new TSubMenu( "L~u~a", kbAltU ) +
             *new TMenuItem( "~R~un Script...", cmLuaRunScript, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~N~ew Script...", cmLuaNewScript, kbNoKey, hcNoContext ) +
@@ -528,6 +550,11 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount)
             newLine() +
             *new TMenuItem( "~S~elect Agent...", cmSelectAgent, kbNoKey, hcNoContext ) +
         windows +
+        *new TSubMenu( "~S~ettings", kbAltS ) +
+            *new TMenuItem( "~C~olour Scheme...", cmThemeSettings, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~L~anguage Servers...", cmLspSettings, kbNoKey, hcNoContext ) +
+            newLine() +
+            *new TMenuItem( "~A~uto-save on Focus Loss", cmToggleAutoSave, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~H~elp", kbAltH ) +
             *new TMenuItem( "~K~eyboard shortcuts", cmHelp, kbF1, hcNoContext, "F1" ) +
             newLine() +
@@ -601,7 +628,7 @@ void TurboApp::shutDown()
     pendingAfterBuild = nullptr;
     if (buildRunner)
         buildRunner->stop();
-    stopBackgroundCommands();
+    stopAllTools();
     docTree = nullptr;
     clock = nullptr;
     branchView = nullptr;
@@ -633,9 +660,10 @@ void TurboApp::idle()
     // wakeUp pattern as the terminals).
     if (buildRunner)
         buildRunner->pump();
-    for (auto &j : bgJobs)
-        if (j && j->runner)
-            j->runner->pump();
+    // Drain each running tool process's output into its Output tab.
+    for (auto &t : tools)
+        if (t.runner)
+            t.runner->pump();
     // Run any action deferred from a runner's onExit (e.g. start Run after a
     // build-first), now that we're safely outside that runner's pump.
     if (pendingAfterBuild)
@@ -686,6 +714,7 @@ void TurboApp::handleEvent(TEvent &event)
             case cmTest: runTest(); break;
             case cmStop: stopAll(); break;
             case cmBuildConfig: editBuildConfig(); break;
+            case cmToolsConfig: editToolsConfig(); break;
             case cmToggleOutput: toggleOutputView(); break;
             case cmLuaRunScript: runLuaScriptPicker(); break;
             case cmLuaNewScript: luaNewScript(); break;
@@ -749,6 +778,9 @@ void TurboApp::handleEvent(TEvent &event)
                 if (event.message.command >= cmWindowBase &&
                     event.message.command < cmWindowBase + windowListMax)
                     focusRecentWindow(event.message.command - cmWindowBase);
+                else if (event.message.command >= cmToolBase &&
+                         event.message.command < cmToolBase + toolListMax)
+                    toggleTool(event.message.command - cmToolBase);
                 else if (event.message.command >= cmLuaScriptBase &&
                          event.message.command < cmLuaScriptBase + luaScriptListMax)
                     runDiscoveredLuaScript(event.message.command - cmLuaScriptBase);
@@ -977,6 +1009,7 @@ void TurboApp::openProject(const std::string &dir) noexcept
     std::filesystem::current_path(root, ec);
 
     buildConfig.load(projectRoot); // .turbo/config.json (no-op if absent)
+    applyToolConfig();             // build the Run menu's tool toggles from it
     ensureTurboCacheIgnored(projectRoot); // retrofit .gitignore on existing .turbo
     docTree->tree->setShowHidden(settings.showHidden); // before the first scan
     docTree->tree->scanDirectory(root.c_str());
@@ -1040,7 +1073,9 @@ void TurboApp::closeProject() noexcept
     if (mcp)
         mcp->stop();       // drop the project's MCP server (restarts on next open)
     projectRoot.clear();
+    stopAllTools();               // kill the project's tool processes
     buildConfig = BuildConfig {}; // forget the project's build/run config
+    applyToolConfig();            // clears 'tools' + removes their Output tabs/menu
     lastBuildCommand.clear();
     if (watcher)
         watcher->stop();
@@ -1682,7 +1717,7 @@ void TurboApp::refreshMenuChecks() noexcept
     setMenuItemCheck(m, cmToggleEdge,          edge);
 }
 
-void TurboApp::rebuildMenuBar(int recentCount)
+void TurboApp::rebuildMenuBar(int recentCount, int toolCount)
 {
     if (menuBar)
     {
@@ -1690,7 +1725,7 @@ void TurboApp::rebuildMenuBar(int recentCount)
         TObject::destroy(menuBar);
     }
     TRect r = getExtent();
-    menuBar = makeMenuBar(r, recentCount);
+    menuBar = makeMenuBar(r, recentCount, toolCount);
     insert(menuBar);
     // The branch indicator sits on top of the full-width menu bar's right end;
     // re-insert it so the freshly inserted menu bar doesn't cover it.
@@ -1700,19 +1735,25 @@ void TurboApp::rebuildMenuBar(int recentCount)
         insert(branchView);
     }
     menuRecentCount = recentCount;
-    refreshMenuChecks(); // the new bar starts without check marks
+    menuToolCount = toolCount;
+    fillToolMenuLabels(); // the new bar's tool items start blank
+    refreshMenuChecks();  // ... and without check marks
 }
 
 void TurboApp::refreshWindowList() noexcept
 {
-    // Size the recent-window section to the number of open editors, rebuilding
-    // the menu bar when that count changes so there are never empty rows.
+    // Size the recent-window and tool-toggle sections to their current counts,
+    // rebuilding the menu bar once when either changes so there are never empty
+    // rows (and the two dynamic sections agree with the bar that is built).
     int count = 0;
     MRUlist.forEach([&] (EditorWindow *w) { if (w) ++count; });
     if (count > windowListMax)
         count = windowListMax;
-    if (count != menuRecentCount)
-        rebuildMenuBar(count);
+    int toolCount = (int) tools.size();
+    if (toolCount > toolListMax)
+        toolCount = toolListMax;
+    if (count != menuRecentCount || toolCount != menuToolCount)
+        rebuildMenuBar(count, toolCount);
 
     auto *bar = (TurboMenuBar *) menuBar;
     if (!bar)
@@ -1735,6 +1776,11 @@ void TurboApp::refreshWindowList() noexcept
         setMenuItemLabel(m, cmWindowBase + i, label.c_str(), true);
         ++i;
     });
+
+    // Tick the tool toggles whose process is currently running. Labels are set
+    // once (rebuild / config change); here we only maintain the check marks.
+    for (int t = 0; t < menuToolCount && t < (int) tools.size(); ++t)
+        setMenuItemCheck(m, cmToolBase + t, toolRunning(t));
 }
 
 void TurboApp::focusRecentWindow(int index) noexcept
@@ -2789,7 +2835,7 @@ void TurboApp::runBuild()
     if (command.empty())
     {
         // No build command configured yet: prompt for a one-off (configure a
-        // default in Build > Configure to skip this).
+        // default in Run > Configure to skip this).
         char cmd[256] = ""; // inputBox's length limit is a uchar (<= 255)
         strnzcpy(cmd, lastBuildCommand.c_str(), sizeof cmd);
         if (inputBox("Build", "Build ~c~ommand:", cmd, sizeof(cmd) - 1) != cmOK)
@@ -2812,7 +2858,7 @@ void TurboApp::runTest()
 {
     if (buildConfig.test.empty())
     {
-        messageBox("No test command configured.\nSet one in Build > Configure.",
+        messageBox("No test command configured.\nSet one in Run > Configure.",
                    mfInformation | mfOKButton);
         return;
     }
@@ -2872,7 +2918,7 @@ void TurboApp::runRun()
 {
     if (buildConfig.run.empty())
     {
-        messageBox("No run command configured.\nSet one in Build > Configure.",
+        messageBox("No run command configured.\nSet one in Run > Configure.",
                    mfInformation | mfOKButton);
         return;
     }
@@ -2893,62 +2939,167 @@ void TurboApp::runRun()
 
 void TurboApp::startRun()
 {
-    runInOutput(buildConfig.run, buildConfig.run); // clears + streams in the pane
-    startBackgroundCommands();                     // then note the background cmds
+    // Tool processes are managed independently now (Run-menu toggles); Run only
+    // runs the configured run command and streams it into the pane.
+    runInOutput(buildConfig.run, buildConfig.run);
 }
 
-static std::string sanitizeName(const std::string &name) noexcept
-{
-    std::string s;
-    for (char c : name)
-        s += (std::isalnum((unsigned char) c) || c == '-' || c == '_') ? c : '_';
-    return s.empty() ? std::string("job") : s;
-}
+// ---------------------------------------------------------------------------
+// Tool processes (Run-menu toggles)
 
-void TurboApp::startBackgroundCommands()
+void TurboApp::editToolsConfig()
 {
-    stopBackgroundCommands();
-    if (projectRoot.empty() || buildConfig.extra.empty())
-        return;
-    std::string logDir = projectRoot + "/.turbo/logs";
-    std::error_code ec;
-    std::filesystem::create_directories(logDir, ec);
-    for (auto &cmd : buildConfig.extra)
+    if (executeToolsDialog(buildConfig.extra))
     {
-        if (cmd.command.empty())
-            continue;
-        auto job = std::make_unique<BackgroundJob>();
-        job->name = cmd.name.empty() ? cmd.command : cmd.name;
-        job->log.open(logDir + "/" + sanitizeName(job->name) + ".log", std::ios::trunc);
-        BackgroundJob *jp = job.get();
-        job->runner = std::make_unique<CommandRunner>();
-        job->runner->onLine = [jp] (std::string_view line) {
-            if (jp->log) { jp->log << line << '\n'; jp->log.flush(); }
-        };
-        job->runner->start(cmd.command, projectRoot);
-        bgJobs.push_back(std::move(job));
+        buildConfig.save(projectRoot);
+        applyToolConfig();
     }
-    if (outputWin && !bgJobs.empty())
-        outputWin->view->addLine(otBuild,
-            { "[started " + std::to_string(bgJobs.size()) +
-              " background command(s); output in .turbo/logs]", okInfo, "", -1 });
 }
 
-void TurboApp::stopBackgroundCommands()
+bool TurboApp::toolRunning(int i) const noexcept
 {
-    for (auto &j : bgJobs)
-        if (j && j->runner)
-            j->runner->stop();
-    bgJobs.clear();
+    return i >= 0 && i < (int) tools.size() && tools[i].runner &&
+           tools[i].runner->running();
+}
+
+void TurboApp::applyToolConfig() noexcept
+{
+    // Reconcile 'tools' with buildConfig.extra, preserving a running process (and
+    // its Output tab) when its name+command are unchanged. Anything left over was
+    // removed or edited: stop it and drop its Output tab.
+    std::vector<ToolProcess> next;
+    next.reserve(buildConfig.extra.size());
+    std::vector<bool> consumed(tools.size(), false);
+    for (auto &e : buildConfig.extra)
+    {
+        int match = -1;
+        for (int i = 0; i < (int) tools.size(); ++i)
+            if (!consumed[i] && tools[i].name == e.name &&
+                tools[i].command == e.command)
+            { match = i; break; }
+        if (match >= 0)
+        {
+            consumed[match] = true;
+            next.push_back(std::move(tools[match]));
+        }
+        else
+            next.push_back(ToolProcess{ e.name, e.command, -1, nullptr });
+    }
+    for (int i = 0; i < (int) tools.size(); ++i)
+        if (!consumed[i])
+        {
+            if (tools[i].runner)
+                tools[i].runner->stop();
+            if (outputWin && tools[i].tabId >= 0)
+                outputWin->view->removeTab(tools[i].tabId);
+        }
+    tools = std::move(next);
+
+    // Resize / relabel the Run menu's tool section. A count change is otherwise
+    // picked up by refreshWindowList (idle); rebuild now so the labels are right
+    // straight away, and relabel in place when only the names changed.
+    int toolCount = (int) tools.size();
+    if (toolCount > toolListMax)
+        toolCount = toolListMax;
+    if (toolCount != menuToolCount)
+        rebuildMenuBar(menuRecentCount, toolCount);
+    else
+        fillToolMenuLabels();
+}
+
+void TurboApp::fillToolMenuLabels() noexcept
+{
+    auto *bar = (TurboMenuBar *) menuBar;
+    if (!bar)
+        return;
+    TMenu *m = bar->rootMenu();
+    for (int i = 0; i < menuToolCount && i < (int) tools.size(); ++i)
+    {
+        const ToolProcess &t = tools[i];
+        std::string name = t.name.empty() ? t.command : t.name;
+        setMenuItemLabel(m, cmToolBase + i, name.c_str(), true);
+    }
+}
+
+void TurboApp::toggleTool(int i) noexcept
+{
+    if (i < 0 || i >= (int) tools.size())
+        return;
+    if (toolRunning(i))
+        stopTool(i);
+    else
+        startTool(i);
+    refreshWindowList(); // reflect the new check state immediately
+}
+
+void TurboApp::startTool(int i) noexcept
+{
+    if (i < 0 || i >= (int) tools.size() || tools[i].command.empty())
+        return;
+    ToolProcess &t = tools[i];
+    std::string cwd = projectRoot.empty() ? std::string(".") : projectRoot;
+    std::string title = t.name.empty() ? t.command : t.name;
+    if (t.tabId < 0)
+        t.tabId = nextToolTabId++; // allocate a stable Output tab on first start
+    int tab = t.tabId;
+    showOutput();
+    if (outputWin)
+    {
+        outputWin->view->ensureTab(tab, title);
+        outputWin->view->clear(tab); // fresh run: wipe the previous output
+        outputWin->view->addLine(tab, {"$ " + t.command, okInfo, "", -1});
+        outputWin->view->showTab(tab);
+    }
+    t.runner = std::make_unique<CommandRunner>();
+    t.runner->onLine = [this, tab] (std::string_view line) {
+        if (outputWin)
+            outputWin->view->addLine(tab,
+                parseBuildLine(std::string(line), projectRoot));
+    };
+    t.runner->onExit = [this, tab] (int code) {
+        if (outputWin)
+            outputWin->view->addLine(tab,
+                { code == 0 ? std::string("[finished]")
+                            : ("[exited with code " + std::to_string(code) + "]"),
+                  okInfo, "", -1 });
+        // running() is already false; refreshWindowList (idle) clears the check.
+    };
+    if (!t.runner->start(t.command, cwd))
+    {
+        if (outputWin)
+            outputWin->view->addLine(tab, {"Failed to start tool.", okError, "", -1});
+        t.runner.reset();
+    }
+}
+
+void TurboApp::stopTool(int i) noexcept
+{
+    if (i < 0 || i >= (int) tools.size() || !tools[i].runner)
+        return;
+    tools[i].runner->stop(); // no onExit fires; keep the tab + its output
+    tools[i].runner.reset();
+    if (outputWin && tools[i].tabId >= 0)
+        outputWin->view->addLine(tools[i].tabId, {"[stopped]", okInfo, "", -1});
+}
+
+void TurboApp::stopAllTools() noexcept
+{
+    for (auto &t : tools)
+        if (t.runner)
+        {
+            t.runner->stop();
+            t.runner.reset();
+        }
 }
 
 void TurboApp::stopAll()
 {
-    bool had = (buildRunner && buildRunner->running()) || !bgJobs.empty();
+    // Stop only the current Build/Run/Test command; tool processes are long-lived
+    // and toggled off individually from the Run menu.
+    bool had = buildRunner && buildRunner->running();
     pendingAfterBuild = nullptr;
     if (buildRunner)
         buildRunner->stop();
-    stopBackgroundCommands();
     if (outputWin && had)
         outputWin->view->addLine(otBuild, {"[stopped]", okInfo, "", -1});
 }

@@ -88,6 +88,7 @@ enum : ushort
     cmTest,
     cmStop,
     cmBuildConfig,
+    cmToolsConfig,    // open the tool-processes configuration dialog
     cmToggleOutput,
     // Colour-scheme dialog (Settings menu) and the "apply the active scheme"
     // notification the dialog posts to the application on Apply/OK.
@@ -121,6 +122,9 @@ enum : ushort
     // Lua-registered commands (turbo.register_command): cmLuaCommandBase + i
     // invokes the i-th registered Lua function (i in [0, luaCommandListMax)).
     cmLuaCommandBase = 1600,
+    // Run-menu tool toggles: cmToolBase + i starts/stops the i-th configured
+    // tool process (i in [0, toolListMax)).
+    cmToolBase = 1500,
     // Branch dropdown in the menu bar: cmBranchBase + i checks out the i-th
     // branch shown in the list (i in [0, branchListMax)).
     cmBranchBase = 1200,
@@ -130,6 +134,7 @@ enum : ushort
 };
 
 enum { windowListMax = 10 };
+enum { toolListMax = 32 };
 enum { branchListMax = 100 };
 enum { luaScriptListMax = 100 };
 enum { luaCommandListMax = 100 };
