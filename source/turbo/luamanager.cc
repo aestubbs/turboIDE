@@ -9,10 +9,97 @@ extern "C" {
 #include <lualib.h>
 }
 
+#include <nlohmann/json.hpp>
+
 #include <cstdio>
 
 namespace
 {
+
+using Json = nlohmann::json;
+
+// Push a JSON value onto the Lua stack (objects -> tables keyed by name, arrays
+// -> 1-based tables). Used to hand MCP tool arguments to a Lua command handler.
+void pushJson(lua_State *L, const Json &j) noexcept
+{
+    switch (j.type())
+    {
+        case Json::value_t::boolean: lua_pushboolean(L, j.get<bool>()); break;
+        case Json::value_t::number_integer:
+        case Json::value_t::number_unsigned:
+            lua_pushinteger(L, (lua_Integer) j.get<long long>()); break;
+        case Json::value_t::number_float:
+            lua_pushnumber(L, j.get<double>()); break;
+        case Json::value_t::string:
+        {
+            const auto &s = j.get_ref<const std::string &>();
+            lua_pushlstring(L, s.data(), s.size());
+            break;
+        }
+        case Json::value_t::array:
+        {
+            lua_createtable(L, (int) j.size(), 0);
+            int idx = 1;
+            for (const auto &el : j) { pushJson(L, el); lua_rawseti(L, -2, idx++); }
+            break;
+        }
+        case Json::value_t::object:
+        {
+            lua_createtable(L, 0, (int) j.size());
+            for (auto it = j.begin(); it != j.end(); ++it)
+            {
+                pushJson(L, it.value());
+                lua_setfield(L, -2, it.key().c_str());
+            }
+            break;
+        }
+        default: lua_pushnil(L); break; // null / discarded
+    }
+}
+
+// Convert the Lua value at 'idx' to JSON. A table with a non-empty 1..n integer
+// run is treated as an array, otherwise as an object over its string keys.
+Json luaToJson(lua_State *L, int idx) noexcept
+{
+    idx = lua_absindex(L, idx);
+    switch (lua_type(L, idx))
+    {
+        case LUA_TBOOLEAN: return (bool) lua_toboolean(L, idx);
+        case LUA_TNUMBER:
+            if (lua_isinteger(L, idx)) return (long long) lua_tointeger(L, idx);
+            return (double) lua_tonumber(L, idx);
+        case LUA_TSTRING:
+        {
+            size_t n = 0; const char *s = lua_tolstring(L, idx, &n);
+            return std::string(s, n);
+        }
+        case LUA_TTABLE:
+        {
+            lua_Integer len = luaL_len(L, idx);
+            if (len > 0)
+            {
+                Json arr = Json::array();
+                for (lua_Integer i = 1; i <= len; ++i)
+                {
+                    lua_rawgeti(L, idx, i);
+                    arr.push_back(luaToJson(L, -1));
+                    lua_pop(L, 1);
+                }
+                return arr;
+            }
+            Json obj = Json::object();
+            lua_pushnil(L);
+            while (lua_next(L, idx) != 0) // key at -2, value at -1
+            {
+                if (lua_type(L, -2) == LUA_TSTRING)
+                    obj[lua_tostring(L, -2)] = luaToJson(L, -1);
+                lua_pop(L, 1); // pop value, keep key for next()
+            }
+            return obj;
+        }
+        default: return nullptr; // nil / function / etc.
+    }
+}
 
 // The LuaManager pointer lives in the lua_State's extra space (a void*-sized
 // slot reserved per state). Every C API callback fetches it from there.
@@ -125,9 +212,66 @@ int l_project_root(lua_State *L)
 }
 
 // turbo.register_command(name, fn) or turbo.register_command(name, description, fn)
-// -- add a command that appears in the command palette and runs fn when chosen.
+// or the table form:
+//   turbo.register_command{ name=, description=, params={ {name=,type=,
+//     description=, required=}, ... }, run=function(args) ... return result end }
+// -- add a command that appears in the command palette and, via the MCP server,
+// is exposed to the agent as a tool.
 int l_register_command(lua_State *L)
 {
+    if (lua_istable(L, 1)) // table form: declares typed params and returns a value
+    {
+        lua_getfield(L, 1, "name");
+        std::string name = luaL_checkstring(L, -1);
+        lua_pop(L, 1);
+
+        std::string desc;
+        lua_getfield(L, 1, "description");
+        if (lua_isstring(L, -1))
+            desc = lua_tostring(L, -1);
+        lua_pop(L, 1);
+
+        std::vector<LuaParam> params;
+        lua_getfield(L, 1, "params");
+        if (lua_istable(L, -1))
+        {
+            int pt = lua_absindex(L, -1);
+            lua_Integer n = luaL_len(L, pt);
+            for (lua_Integer k = 1; k <= n; ++k)
+            {
+                lua_rawgeti(L, pt, k); // the k-th param descriptor
+                if (lua_istable(L, -1))
+                {
+                    LuaParam p;
+                    lua_getfield(L, -1, "name");
+                    if (lua_isstring(L, -1)) p.name = lua_tostring(L, -1);
+                    lua_pop(L, 1);
+                    lua_getfield(L, -1, "type");
+                    if (lua_isstring(L, -1)) p.type = lua_tostring(L, -1);
+                    lua_pop(L, 1);
+                    lua_getfield(L, -1, "description");
+                    if (lua_isstring(L, -1)) p.description = lua_tostring(L, -1);
+                    lua_pop(L, 1);
+                    lua_getfield(L, -1, "required");
+                    p.required = lua_toboolean(L, -1);
+                    lua_pop(L, 1);
+                    if (!p.name.empty())
+                        params.push_back(std::move(p));
+                }
+                lua_pop(L, 1); // pop the descriptor
+            }
+        }
+        lua_pop(L, 1); // pop params
+
+        lua_getfield(L, 1, "run");
+        if (!lua_isfunction(L, -1))
+            return luaL_error(L, "register_command: 'run' must be a function");
+        int ref = luaL_ref(L, LUA_REGISTRYINDEX); // pops the function
+        mgr(L)->addRegisteredCommand(std::move(name), std::move(desc), ref,
+                                     std::move(params));
+        return 0;
+    }
+
     const char *name = luaL_checkstring(L, 1);
     const char *desc = "";
     int fnIndex;
@@ -252,9 +396,9 @@ int LuaManager::loadInitScripts(const std::string &projectTurboDir,
 }
 
 void LuaManager::addRegisteredCommand(std::string name, std::string description,
-                                      int ref) noexcept
+                                      int ref, std::vector<LuaParam> params) noexcept
 {
-    commands.push_back({std::move(name), std::move(description), ref});
+    commands.push_back({std::move(name), std::move(description), ref, std::move(params)});
 }
 
 void LuaManager::clearRegisteredCommands() noexcept
@@ -267,10 +411,59 @@ void LuaManager::clearRegisteredCommands() noexcept
 
 void LuaManager::runRegisteredCommand(int i) noexcept
 {
+    // Interactive (palette/menu) path: no arguments, discard the return, and
+    // surface any error via the host message (a modal box) as before.
+    std::string out;
+    if (!runRegisteredCommandJson(i, "{}", out) && host.message && !errorMessage.empty())
+        host.message(errorMessage);
+}
+
+bool LuaManager::runRegisteredCommandJson(int i, const std::string &argsJson,
+                                          std::string &out) noexcept
+{
+    out.clear();
     if (!L || i < 0 || i >= (int) commands.size())
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, commands[i].ref); // push the handler function
-    reportIfError(lua_pcall(L, 0, 0, 0));
+    {
+        errorMessage = "no such command";
+        return false;
+    }
+    Json args;
+    if (!argsJson.empty())
+    {
+        try { args = Json::parse(argsJson); }
+        catch (const std::exception &e)
+        {
+            errorMessage = std::string("invalid arguments: ") + e.what();
+            return false;
+        }
+    }
+    lua_rawgeti(L, LUA_REGISTRYINDEX, commands[i].ref); // push the handler
+    if (args.is_object() || args.is_array())
+        pushJson(L, args);                              // push the args table
+    else
+        lua_newtable(L);                                // no/scalar args -> {}
+    int status = lua_pcall(L, 1, 1, 0);
+    if (status != LUA_OK)
+    {
+        const char *msg = lua_tostring(L, -1);
+        errorMessage = msg ? msg : "error";
+        lua_pop(L, 1);
+        return false;                                   // NOTE: no host.message here
+    }
+    if (lua_isnoneornil(L, -1))
+        out.clear();
+    else if (lua_type(L, -1) == LUA_TSTRING)
+    {
+        size_t n = 0; const char *s = lua_tolstring(L, -1, &n);
+        out.assign(s, n);                               // pass strings through raw
+    }
+    else
+    {
+        try { out = luaToJson(L, -1).dump(); }
+        catch (...) { out.clear(); }
+    }
+    lua_pop(L, 1);
+    return true;
 }
 
 bool LuaManager::hasHandlers(const std::string &event) noexcept

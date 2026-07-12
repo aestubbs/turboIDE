@@ -229,6 +229,21 @@ set_source_files_properties(
         SKIP_UNITY_BUILD_INCLUSION ON
         SKIP_PRECOMPILE_HEADERS ON)
 
+# The MCP transport/bridge (source/turbo-core/mcp/*.cc) are pure POSIX socket
+# code with no tvision; keep them out of the unity batch / PCH like pty.cc.
+set_source_files_properties(
+    "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}-core/mcp/transport.cc"
+    "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}-core/mcp/bridge.cc"
+    PROPERTIES
+        SKIP_UNITY_BUILD_INCLUSION ON
+        SKIP_PRECOMPILE_HEADERS ON)
+
+# The MCP transport uses std::thread regardless of the LSP feature, so link the
+# threading library unconditionally (the LSP block below is a no-op duplicate
+# when enabled).
+find_package(Threads REQUIRED)
+target_link_libraries(${TURBO}-core PUBLIC Threads::Threads)
+
 if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.13.0")
     install(TARGETS ${TURBO}-core
         EXPORT ${TURBO}-config
@@ -292,6 +307,11 @@ if (TURBO_BUILD_APP)
     # out of the unity batch so those macros can't leak into batch-mates.
     set_source_files_properties(
         "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}/luamanager.cc"
+        PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+    # mcpserver.cc pulls in the large nlohmann/json header; keep it out of the
+    # unity batch (like buildconfig.cc).
+    set_source_files_properties(
+        "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}/mcpserver.cc"
         PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
     target_compile_features(${TURBO} PRIVATE cxx_std_17)
     turbo_set_warnings(${TURBO})

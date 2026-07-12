@@ -42,6 +42,12 @@ struct DocumentTreeView : public TOutline {
         // stands for (so "New Lua Script..." knows where to create). Empty for
         // every ordinary file/directory node.
         std::string luaDir;
+        // For a synthetic Skills-home group node: the real skills directory it
+        // stands for (so "New Skill..." knows where to create). Empty otherwise.
+        std::string skillDir;
+        // Overrides the label derived from 'path'. Used for skill leaves, whose
+        // path points at .../<name>/SKILL.md but which display the skill's name.
+        std::string displayName;
 
         Node(Node *parent, std::string_view path, bool isDir) noexcept;
         void setEditor(EditorWindow *w) noexcept;
@@ -57,6 +63,21 @@ struct DocumentTreeView : public TOutline {
         std::string label;
         std::string dir;
         std::vector<std::string> scripts;
+    };
+
+    // One skill under a Skills home: 'name' is the skill (folder) name shown in
+    // the tree, 'path' is the SKILL.md file opened when it is activated.
+    struct SkillEntry {
+        std::string name;
+        std::string path;
+    };
+
+    // A synthetic top-level "Skills" home, laid out like a Lua home: a friendly
+    // label, the real skills directory it represents, and the skills beneath it.
+    struct SkillSection {
+        std::string label;
+        std::string dir;
+        std::vector<SkillEntry> skills;
     };
 
     DocumentTreeView(const TRect &bounds, TScrollBar *hsb, TScrollBar *vsb,
@@ -113,6 +134,11 @@ struct DocumentTreeView : public TOutline {
     // sections are stored and re-applied after a tree rebuild (e.g. toggling
     // hidden files).
     void setLuaScripts(bool show, std::vector<LuaSection> sections) noexcept;
+
+    // Inject synthetic top-level "Skills" homes, laid out exactly like the Lua
+    // homes (project vs global as separate labelled groups). Stored and
+    // re-applied after a tree rebuild.
+    void setSkills(bool show, std::vector<SkillSection> sections) noexcept;
 
     // Whether to include hidden entries (dotfiles/dot-dirs) when scanning.
     // Changing it rebuilds the tree from the current root, preserving the links
@@ -188,6 +214,13 @@ struct DocumentTreeView : public TOutline {
     std::vector<LuaSection> luaSections;
     std::vector<Node *> luaGroups; // live group nodes, parallel to luaSections
     void reinjectLuaNodes() noexcept; // rebuild the groups from luaSections
+
+    // Synthetic Skills homes (see setSkills): same machinery as the Lua homes,
+    // freed and rebuilt from skillSections on any tree rebuild.
+    bool showSkills {true};
+    std::vector<SkillSection> skillSections;
+    std::vector<Node *> skillGroups; // live group nodes, parallel to skillSections
+    void reinjectSkillNodes() noexcept; // rebuild the groups from skillSections
     std::string filter;     // active filter query (lowercased; "" = no filter)
     // Recompute Node::visible for the whole tree from 'filter'. A file is
     // visible iff its name matches; a folder is visible iff its name matches

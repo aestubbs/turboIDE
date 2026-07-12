@@ -23,10 +23,12 @@ struct OutputLine
     long line {-1};     // 0-based target line (-1 = none)
 };
 
-// The output pane keeps one buffer per tab. BUILD is wiped at the start of each
-// build/run; GIT is a continuous log of every git command. The tab bar at the
-// foot of the window switches between them.
-enum OutputTab { otBuild = 0, otGit = 1, otTabCount = 2 };
+// The output pane keeps one buffer per tab, identified by a stable id. BUILD and
+// GIT are the two built-in tabs (BUILD is wiped at the start of each build/run;
+// GIT is a continuous log of every git command). The app adds one further tab
+// per configured tool process; those get ids allocated above otGit. The tab bar
+// at the foot of the window switches between whatever tabs currently exist.
+enum OutputTab { otBuild = 0, otGit = 1 };
 
 struct OutputTabBar;
 
@@ -37,13 +39,15 @@ struct OutputView : public TListViewer
 {
     struct Buffer
     {
+        int id {0};            // stable tab id (otBuild / otGit / a tool tab id)
+        std::string title;     // tab label shown in the bar (no brackets)
         std::vector<OutputLine> lines;
         bool followTail {true};
         int savedTop {0};      // topItem to restore when this tab is reactivated
         int savedFocused {0};  // focused item to restore
     };
-    Buffer buffers[otTabCount];
-    int activeTab {otBuild};
+    std::vector<Buffer> buffers; // [0]=BUILD, [1]=GIT, then one per tool tab
+    int activeId {otBuild};
     OutputTabBar *tabBar {nullptr}; // redrawn on tab change (set by OutputWindow)
 
     // Called when a line with a resolved (file, line) is activated (Enter or
@@ -53,25 +57,35 @@ struct OutputView : public TListViewer
 
     OutputView(const TRect &bounds, TScrollBar *vScrollBar) noexcept;
 
-    std::vector<OutputLine> &active() noexcept { return buffers[activeTab].lines; }
+    // Tab lookup / management, all keyed by stable id.
+    int indexOfId(int id) const noexcept;               // -1 if absent
+    Buffer *bufferById(int id) noexcept;                // nullptr if absent
+    void ensureTab(int id, const std::string &title) noexcept; // add or retitle
+    void removeTab(int id) noexcept;                    // drop a tool tab
+    std::vector<OutputLine> &active() noexcept
+    {
+        int i = indexOfId(activeId);
+        return buffers[i < 0 ? 0 : i].lines;
+    }
 
-    void addLine(int tab, OutputLine ln) noexcept; // append to a tab's buffer
-    void clear(int tab) noexcept;                  // wipe a tab's buffer
-    void setActiveTab(int tab) noexcept;           // switch tab, preserve scroll
-    void showTab(int tab) noexcept;                // switch tab + follow its tail
+    void addLine(int id, OutputLine ln) noexcept;  // append to a tab's buffer
+    void clear(int id) noexcept;                   // wipe a tab's buffer
+    void setActiveTab(int id) noexcept;            // switch tab, preserve scroll
+    void showTab(int id) noexcept;                 // switch tab + follow its tail
     void activate(int idx) noexcept; // jump to active()[idx]'s file:line if any
 
     void draw() override;
     void handleEvent(TEvent &ev) override;
 };
 
-// One-row tab bar docked at the foot of the output window: draws "<BUILD>" and
-// "<GIT>" (the active one highlighted) and switches OutputView's tab on a click.
+// One-row tab bar docked at the foot of the output window: draws each tab's
+// bracketed label (the active one highlighted) and switches OutputView's tab on
+// a click. Hit-test ranges are recomputed each draw to match the current tabs.
 struct OutputTabBar : public TView
 {
     OutputView *view {nullptr};
-    int tabX0[otTabCount] {};  // hit-test ranges, recomputed each draw
-    int tabX1[otTabCount] {};
+    std::vector<int> tabX0;    // per-tab hit-test ranges (parallel to view->buffers)
+    std::vector<int> tabX1;
 
     OutputTabBar(const TRect &bounds, OutputView *view) noexcept;
 

@@ -128,8 +128,14 @@ void Node::setEditor(EditorWindow *w) noexcept
 
 void Node::refreshText() noexcept
 {
-    TStringView bn = TPath::basename(path);
-    std::string label {bn.data(), bn.size()};
+    std::string label;
+    if (!displayName.empty())
+        label = displayName;   // skill leaf: show the skill name, not "SKILL.md"
+    else
+    {
+        TStringView bn = TPath::basename(path);
+        label.assign(bn.data(), bn.size());
+    }
     // Mark files with unsaved changes.
     if (editor && !editor->getEditor().inSavePoint())
         label += " *";
@@ -249,6 +255,8 @@ void DocumentTreeView::assembleRoot() noexcept
     append(projectNode);
     for (Node *g : luaGroups)
         append(g);
+    for (Node *g : skillGroups)
+        append(g);
 }
 
 void DocumentTreeView::disposeProjectNode() noexcept
@@ -276,6 +284,7 @@ void DocumentTreeView::scanDirectory(std::string_view aRootPath) noexcept
     rootPath = std::string {aRootPath};
     rebuildProjectNode();
     reinjectLuaNodes(); // rebuilds the Lua homes and reassembles root
+    reinjectSkillNodes(); // rebuilds the Skills homes and reassembles root
     update();
     drawView();
 }
@@ -326,6 +335,46 @@ void DocumentTreeView::setLuaScripts(bool show, std::vector<LuaSection> sections
     reinjectLuaNodes();
 }
 
+void DocumentTreeView::reinjectSkillNodes() noexcept
+{
+    for (Node *&g : skillGroups)
+        disposeLuaGroup(g); // same shape as a Lua home: one level of leaves
+    skillGroups.clear();
+    if (showSkills)
+    {
+        for (const auto &sec : skillSections)
+        {
+            // Synthetic directory node, like a Lua home: its path is the label,
+            // with the real skills dir carried in skillDir. Built even when empty
+            // so the home is a clear place to add a skill.
+            auto *group = new Node(nullptr, sec.label, true);
+            group->expanded = True;
+            group->skillDir = sec.dir;
+            for (const auto &e : sec.skills)
+            {
+                // The leaf opens the SKILL.md file but shows the skill's name.
+                auto *leaf = new Node(group, e.path, false);
+                leaf->displayName = e.name;
+                leaf->refreshText(); // relabel before putNode sorts on text
+                putNode(&group->childList, leaf);
+            }
+            skillGroups.push_back(group);
+        }
+    }
+    assembleRoot();
+    if (filtering())
+        recomputeVisibility();
+    update();
+    drawView();
+}
+
+void DocumentTreeView::setSkills(bool show, std::vector<SkillSection> sections) noexcept
+{
+    showSkills = show;
+    skillSections = std::move(sections);
+    reinjectSkillNodes();
+}
+
 void DocumentTreeView::clear() noexcept
 {
     // Free the project subtree (the Lua homes are freed and rebuilt by
@@ -335,6 +384,7 @@ void DocumentTreeView::clear() noexcept
     foc = 0;
     rootPath.clear();
     reinjectLuaNodes();
+    reinjectSkillNodes();
     update();
     drawView();
 }
@@ -357,6 +407,7 @@ void DocumentTreeView::setShowHidden(bool show) noexcept
     foc = 0;
     rebuildProjectNode();
     reinjectLuaNodes(); // reassembles root (project + Lua homes) before re-linking
+    reinjectSkillNodes(); // ... and the Skills homes
     for (auto *w : openEditors)
         linkEditor(w);
     update();
@@ -740,6 +791,7 @@ void DocumentTreeView::showContextMenu(int row, TPoint where) noexcept
     bool isDir = node->isDir;
     char gs = node->gitStatus;
     std::string luaDir = node->luaDir;
+    std::string skillDir = node->skillDir;
 
     // A synthetic Lua-script home: the only meaningful action is creating a new
     // script in its directory. The file/git actions don't apply (its path is a
@@ -752,6 +804,19 @@ void DocumentTreeView::showContextMenu(int row, TPoint where) noexcept
         if (cmd == cmTreeNewLuaScript)
             if (auto *app = (TurboApp *) TProgram::application)
                 app->treeNewLuaScript(luaDir);
+        return;
+    }
+
+    // A synthetic Skills home: its only action is creating a new skill in its
+    // directory (like the Lua homes above).
+    if (!skillDir.empty())
+    {
+        auto *only = new TMenuItem("~N~ew Skill...", cmTreeNewSkill,
+                                   kbNoKey, hcNoContext);
+        ushort cmd = popupMenu(where, *only, nullptr);
+        if (cmd == cmTreeNewSkill)
+            if (auto *app = (TurboApp *) TProgram::application)
+                app->treeNewSkill(skillDir);
         return;
     }
 

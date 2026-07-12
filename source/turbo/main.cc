@@ -1,5 +1,9 @@
 #include "app.h"
 
+#include <turbo/mcp/bridge.h>
+
+#include <cstring>
+
 static void runTurbo(int argc, const char **argv)
 {
     TurboApp app(argc, argv);
@@ -11,6 +15,9 @@ static void runTurbo(int argc, const char **argv)
 
 int main(int argc, const char *argv[])
 {
+    // `turboIDE mcp [...]` runs the stdio<->socket MCP bridge, not the TUI.
+    if (argc >= 2 && std::strcmp(argv[1], "mcp") == 0)
+        return turbo::mcp::runBridge(argc, argv);
     runTurbo(argc, argv);
 }
 
@@ -63,6 +70,8 @@ int wmain(int argc, const wchar_t *wargv[])
     for (int i = 0; i < argc; ++i)
         argv[i] = convertToUtf8(wargv[i]);
 
+    if (argc >= 2 && std::strcmp(argv[1], "mcp") == 0)
+        return turbo::mcp::runBridge(argc, argv);
     runTurbo(argc, argv);
 
     for (int i = 0; i < argc; ++i)

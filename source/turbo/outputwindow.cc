@@ -49,12 +49,59 @@ OutputView::OutputView(const TRect &bounds, TScrollBar *vScrollBar) noexcept :
     TListViewer(bounds, 1, nullptr, vScrollBar)
 {
     options |= ofFirstClick; // the first click on the pane still selects a line
+    // The two built-in tabs. Tool tabs are appended later by the app.
+    buffers.push_back(Buffer{otBuild, "BUILD", {}, true, 0, 0});
+    buffers.push_back(Buffer{otGit,   "GIT",   {}, true, 0, 0});
     setRange(0);
 }
 
-void OutputView::addLine(int tab, OutputLine ln) noexcept
+int OutputView::indexOfId(int id) const noexcept
 {
-    if (tab < 0 || tab >= otTabCount)
+    for (int i = 0; i < (int) buffers.size(); ++i)
+        if (buffers[i].id == id)
+            return i;
+    return -1;
+}
+
+OutputView::Buffer *OutputView::bufferById(int id) noexcept
+{
+    int i = indexOfId(id);
+    return i < 0 ? nullptr : &buffers[i];
+}
+
+void OutputView::ensureTab(int id, const std::string &title) noexcept
+{
+    if (Buffer *b = bufferById(id))
+        b->title = title; // already present: just keep the label current
+    else
+        buffers.push_back(Buffer{id, title, {}, true, 0, 0});
+    if (tabBar)
+        tabBar->drawView();
+}
+
+void OutputView::removeTab(int id) noexcept
+{
+    if (id == otBuild || id == otGit) // never drop the built-in tabs
+        return;
+    int i = indexOfId(id);
+    if (i < 0)
+        return;
+    bool wasActive = (activeId == id);
+    buffers.erase(buffers.begin() + i);
+    if (wasActive)
+        setActiveTab(otBuild); // switches + redraws the bar
+    else
+    {
+        drawView();
+        if (tabBar)
+            tabBar->drawView();
+    }
+}
+
+void OutputView::addLine(int id, OutputLine ln) noexcept
+{
+    Buffer *bp = bufferById(id);
+    if (!bp)
         return;
     // Expand tabs to 8-column stops: a raw tab would otherwise be drawn through
     // the CP437 codepage as a glyph (e.g. git's tab-indented "modified:" lines).
@@ -69,14 +116,14 @@ void OutputView::addLine(int tab, OutputLine ln) noexcept
                 e.push_back(c);
         ln.text.swap(e);
     }
-    Buffer &buf = buffers[tab];
+    Buffer &buf = *bp;
     buf.lines.push_back(std::move(ln));
     // Bound memory: keep the most recent ~5000 lines per buffer.
     const size_t kMax = 5000;
     if (buf.lines.size() > kMax)
         buf.lines.erase(buf.lines.begin(),
                         buf.lines.begin() + (buf.lines.size() - kMax));
-    if (tab == activeTab)
+    if (id == activeId)
     {
         setRange((short) buf.lines.size());
         if (buf.followTail && range > 0)
@@ -87,16 +134,17 @@ void OutputView::addLine(int tab, OutputLine ln) noexcept
     // to that tab (showTab/setActiveTab) sets the range and follows its tail.
 }
 
-void OutputView::clear(int tab) noexcept
+void OutputView::clear(int id) noexcept
 {
-    if (tab < 0 || tab >= otTabCount)
+    Buffer *bp = bufferById(id);
+    if (!bp)
         return;
-    Buffer &buf = buffers[tab];
+    Buffer &buf = *bp;
     buf.lines.clear();
     buf.followTail = true;
     buf.savedTop = 0;
     buf.savedFocused = 0;
-    if (tab == activeTab)
+    if (id == activeId)
     {
         setRange(0);
         focused = 0;
@@ -105,18 +153,21 @@ void OutputView::clear(int tab) noexcept
     }
 }
 
-void OutputView::setActiveTab(int tab) noexcept
+void OutputView::setActiveTab(int id) noexcept
 {
-    if (tab < 0 || tab >= otTabCount)
+    if (indexOfId(id) < 0)
         return;
-    if (tab != activeTab)
+    if (id != activeId)
     {
         // Remember where the outgoing tab was scrolled, then switch.
-        buffers[activeTab].savedTop = topItem;
-        buffers[activeTab].savedFocused = focused;
-        activeTab = tab;
+        if (Buffer *old = bufferById(activeId))
+        {
+            old->savedTop = topItem;
+            old->savedFocused = focused;
+        }
+        activeId = id;
     }
-    Buffer &buf = buffers[activeTab];
+    Buffer &buf = *bufferById(activeId);
     setRange((short) buf.lines.size());
     if (buf.followTail && range > 0)
         focusItemNum(range - 1);
@@ -131,13 +182,14 @@ void OutputView::setActiveTab(int tab) noexcept
         tabBar->drawView();
 }
 
-void OutputView::showTab(int tab) noexcept
+void OutputView::showTab(int id) noexcept
 {
-    if (tab < 0 || tab >= otTabCount)
+    Buffer *bp = bufferById(id);
+    if (!bp)
         return;
     // A fresh command's output should be visible, so resume tail-follow.
-    buffers[tab].followTail = true;
-    setActiveTab(tab);
+    bp->followTail = true;
+    setActiveTab(id);
 }
 
 void OutputView::draw()
@@ -204,7 +256,8 @@ void OutputView::handleEvent(TEvent &ev)
                 activate(idx);
             drawView();
         }
-        buffers[activeTab].followTail = (range == 0) || (topItem + size.y >= range);
+        if (Buffer *b = bufferById(activeId))
+            b->followTail = (range == 0) || (topItem + size.y >= range);
         clearEvent(ev);
         return;
     }
@@ -217,7 +270,8 @@ void OutputView::handleEvent(TEvent &ev)
     TListViewer::handleEvent(ev);
     // Re-enable tail-follow only while scrolled to the bottom; pause it when the
     // user scrolls up to read.
-    buffers[activeTab].followTail = (range == 0) || (topItem + size.y >= range);
+    if (Buffer *b = bufferById(activeId))
+        b->followTail = (range == 0) || (topItem + size.y >= range);
 }
 
 // ---------------------------------------------------------------------------
@@ -240,17 +294,20 @@ void OutputTabBar::draw()
     TColorAttr cBar    {TColorRGB(winActive ? 0x9AA6CE : 0x77819E), barBg};     // unselected tab
     TColorAttr cActive {TColorRGB(winActive ? 0xFFFFFF : 0xC8D4F0), contentBg}; // selected tab
 
-    // Wrapped in white tortoise-shell brackets (U+3018/U+3019).
-    static const char *const labels[otTabCount] = {"\xE3\x80\x94" "BUILD" "\xE3\x80\x95",
-                                                   "\xE3\x80\x94" "GIT" "\xE3\x80\x95"};
+    int n = view ? (int) view->buffers.size() : 0;
+    tabX0.assign(n, 0);
+    tabX1.assign(n, 0);
     TDrawBuffer b;
     b.moveChar(0, ' ', cBar, size.x);
     int x = 1;
-    for (int t = 0; t < otTabCount; ++t)
+    for (int t = 0; t < n; ++t)
     {
-        int len = (int) strwidth(labels[t]); // display cells (brackets are wide/multi-byte)
-        bool on = view && view->activeTab == t;
-        b.moveStr(x, labels[t], on ? cActive : cBar);
+        // Each tab label is wrapped in white tortoise-shell brackets
+        // (U+3018/U+3019), which are wide/multi-byte, so measure display cells.
+        std::string label = "\xE3\x80\x94" + view->buffers[t].title + "\xE3\x80\x95";
+        int len = (int) strwidth(label.c_str());
+        bool on = view->activeId == view->buffers[t].id;
+        b.moveStr(x, label.c_str(), on ? cActive : cBar);
         tabX0[t] = x;
         tabX1[t] = x + len;
         x = tabX1[t] + 1; // one space between tabs
@@ -263,10 +320,12 @@ void OutputTabBar::handleEvent(TEvent &ev)
     if (ev.what == evMouseDown)
     {
         TPoint m = makeLocal(ev.mouse.where);
-        for (int t = 0; t < otTabCount; ++t)
-            if (view && m.x >= tabX0[t] && m.x < tabX1[t])
+        int n = view ? (int) min(view->buffers.size(),
+                                 min(tabX0.size(), tabX1.size())) : 0;
+        for (int t = 0; t < n; ++t)
+            if (m.x >= tabX0[t] && m.x < tabX1[t])
             {
-                view->setActiveTab(t); // also redraws this bar
+                view->setActiveTab(view->buffers[t].id); // also redraws this bar
                 break;
             }
         clearEvent(ev); // the bar swallows its own clicks

@@ -29,16 +29,22 @@ class TClockView;
 class LspManager;
 class GitManager;
 class LuaManager;
+class McpServer;
 struct BranchView;
 struct TerminalView;
+struct TerminalWindow;
 
-// A background command started alongside Run (e.g. a queue runner). Its output
-// is logged to .turbo/logs/<name>.log rather than shown in the output pane.
-struct BackgroundJob
+// A configured tool process, toggled on/off from the Run menu (e.g. `npm run
+// dev`). Independent of Build/Run: it runs long-lived until toggled off, and its
+// combined output streams into its own tab in the Output pane. 'runner' is
+// non-null only while it is running; 'tabId' is its Output-pane tab, allocated
+// lazily on first start (-1 until then).
+struct ToolProcess
 {
     std::string name;
+    std::string command;
+    int tabId {-1};
     std::unique_ptr<CommandRunner> runner;
-    std::ofstream log;
 };
 
 // TMenuView::menu (the root of the menu tree) is protected; expose it so the app
@@ -73,6 +79,8 @@ struct TurboApp : public TApplication, EditorWindowParent
     std::unique_ptr<turbo::FileWatcher> watcher;
     // Embedded Lua interpreter: editor scripting/configuration and event hooks.
     std::unique_ptr<LuaManager> luaMgr;
+    // MCP server: exposes editor actions + Lua commands to the agent as tools.
+    std::unique_ptr<McpServer> mcp;
 
     // Branch indicator at the right of the menu bar (clickable; opens a popup of
     // the other branches). 'branchTextShown' is the last text written to it, so
@@ -83,6 +91,10 @@ struct TurboApp : public TApplication, EditorWindowParent
     // Open terminal views, pumped each idle tick (see newTerminal()).
     std::vector<TerminalView *> terminals;
 
+    // The dedicated coding-agent window (a normal, freely-placeable terminal
+    // window running the configured agent). Single instance; nulled on close.
+    TerminalWindow *agentWin {nullptr};
+
     // Build/Run: a bordered output pane docked at the bottom of the editor area,
     // and the command runner streaming the current build into it.
     OutputWindow *outputWin {nullptr};
@@ -90,9 +102,12 @@ struct TurboApp : public TApplication, EditorWindowParent
     std::unique_ptr<CommandRunner> buildRunner;
     std::string projectRoot;      // cwd the app was opened from (build cwd)
     std::string lastBuildCommand; // remembered between Build invocations
-    BuildConfig buildConfig;      // .turbo/config.json (build/test/run + extras)
-    // Long-lived background commands started with Run (pumped each idle tick).
-    std::vector<std::unique_ptr<BackgroundJob>> bgJobs;
+    BuildConfig buildConfig;      // .turbo/config.json (build/test/run + tools)
+    // Configured tool processes, mirroring buildConfig.extra. Toggled on/off from
+    // the Run menu, pumped each idle tick, each streaming to its own Output tab.
+    std::vector<ToolProcess> tools;
+    int nextToolTabId {2};        // Output-pane tab-id allocator (0/1 = BUILD/GIT)
+    int menuToolCount {0};        // tool-toggle slots currently built into the menu
     // Deferred action run on the next idle tick (used to start Run after a
     // build-first finishes, so we don't reassign buildRunner inside its pump).
     std::function<void()> pendingAfterBuild;
@@ -101,10 +116,10 @@ struct TurboApp : public TApplication, EditorWindowParent
     ~TurboApp();
     static TMenuBar* initMenuBar(TRect r);
     // Build the menu bar with 'recentCount' recent-window slots in the Windows
-    // menu (initMenuBar builds with 0; rebuildMenuBar swaps in a new bar when the
-    // count changes).
-    static TMenuBar* makeMenuBar(TRect r, int recentCount);
-    void rebuildMenuBar(int recentCount);
+    // menu and 'toolCount' tool-toggle slots in the Run menu (initMenuBar builds
+    // with 0/0; rebuildMenuBar swaps in a new bar when either count changes).
+    static TMenuBar* makeMenuBar(TRect r, int recentCount, int toolCount);
+    void rebuildMenuBar(int recentCount, int toolCount);
     static TStatusLine* initStatusLine(TRect r);
     // Dark, high-contrast palette for the menu bar and status line (indices 2..7
     // of the application palette), so disabled items stay readable.
@@ -256,6 +271,12 @@ struct TurboApp : public TApplication, EditorWindowParent
     // Rescan the three Lua-script tiers (shared / local / system) and push them
     // into the tree as the always-shown Lua "homes".
     void refreshLuaScriptsInTree() noexcept;
+    // Prompt for a name and create+open a new skill (a <name>/SKILL.md folder,
+    // pre-filled with a template) in the given skills dir.
+    void treeNewSkill(const std::string &dir) noexcept;
+    // Rescan the project + global agent skill dirs (.claude/skills, ~/.claude/
+    // skills) and push them into the tree as the always-shown Skills "homes".
+    void refreshSkillsInTree() noexcept;
     void showEditorList(TEvent *ev);
     void toggleTreeView();
     void setTreeWidth(int w);     // resize the docked tree (from a left-border drag)
@@ -267,9 +288,10 @@ struct TurboApp : public TApplication, EditorWindowParent
     void showOutput();            // ensure it is visible
     void runBuild();              // run the configured build (or prompt for one)
     void runTest();               // run the configured test command
-    void runRun();                // build-if-needed, then run + background cmds
-    void stopAll();               // stop the build/run and all background cmds
+    void runRun();                // build-if-needed, then run the run command
+    void stopAll();               // stop the current build/run (tools keep going)
     void editBuildConfig();       // open the build-configuration dialog
+    void editToolsConfig();       // open the tool-processes dialog
     // Stream 'command' (a shell command) into the output pane, with 'label'
     // shown as the echoed header line. 'onDone' (if set) runs on the main thread
     // with the exit code once the command finishes.
@@ -280,10 +302,19 @@ struct TurboApp : public TApplication, EditorWindowParent
     // failure -- the exit code. Wired to GitManager's output sink.
     void reportGitOutput(const std::string &label, int code,
                          const std::string &output);
-    // Run the configured run command + start the configured background commands.
+    // Run the configured run command (tools are managed independently).
     void startRun();
-    void startBackgroundCommands();
-    void stopBackgroundCommands();
+    // --- Tool processes (Run menu toggles) -----------------------------------
+    // Reconcile 'tools' with buildConfig.extra: preserve running processes whose
+    // name+command are unchanged, stop+drop removed ones, add new slots, then
+    // refresh the Run menu's tool toggles and their Output tabs.
+    void applyToolConfig() noexcept;
+    bool toolRunning(int i) const noexcept;
+    void toggleTool(int i) noexcept;   // start it if stopped, else stop it
+    void startTool(int i) noexcept;    // spawn + stream into its Output tab
+    void stopTool(int i) noexcept;     // kill the process (keeps its Output tab)
+    void stopAllTools() noexcept;      // stop every running tool (shutdown/close)
+    void fillToolMenuLabels() noexcept; // write each tool item's name into the menu
     // True if Run should build first (per run mode / artifact staleness).
     bool needsBuildBeforeRun() const;
     // True if the configured artifact is missing or older than a project source.
@@ -294,6 +325,13 @@ struct TurboApp : public TApplication, EditorWindowParent
     void newTerminal();
     void registerTerminal(TerminalView *t) noexcept;
     void unregisterTerminal(TerminalView *t) noexcept;
+
+    // The dedicated coding-agent window. toggleAgent() opens it (running the
+    // resolved agent command in the project dir) or focuses the existing one;
+    // selectAgent() picks the per-project agent; restartAgent() reopens it.
+    void toggleAgent();
+    void selectAgent();
+    void restartAgent();
 
     void handleFocus(EditorWindow &w) noexcept override;
     void handleTitleChange(EditorWindow &w) noexcept override;

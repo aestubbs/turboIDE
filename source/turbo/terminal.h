@@ -37,7 +37,9 @@ struct TerminalView : public TView
     // double-width glyph, skipped when drawing).
     struct SbCell { uint32_t ch; TColorAttr attr; };
 
-    TerminalView(const TRect &bounds) noexcept;
+    // 'command' overrides what is launched in the PTY: a non-empty value runs
+    // that command line (e.g. a coding agent) instead of the configured shell.
+    TerminalView(const TRect &bounds, std::string command = {}) noexcept;
     ~TerminalView();
 
     void draw() override;
@@ -59,6 +61,7 @@ struct TerminalView : public TView
     void onMoveCursor(int row, int col, bool visible) noexcept;
     void onTitleFragment(std::string_view frag, bool initial, bool final) noexcept;
     void onCursorVisible(bool visible) noexcept;
+    void onMouseMode(int mode) noexcept; // child (de)activated mouse reporting
     void pushScrollbackLine(std::vector<SbCell> &&line) noexcept; // line scrolled off
     void onScrollbackClear() noexcept;                            // app cleared history
 
@@ -77,6 +80,16 @@ private:
     void sendText(TStringView utf8, ushort mod) noexcept;
     bool sendCommandKey(ushort command) noexcept;     // editor-accelerator -> ctrl byte
     void handlePaste(TEvent &ev) noexcept;
+    // Forward a mouse event to the child as libvterm mouse input (wheel/click/
+    // drag). Only meaningful while the child has enabled mouse reporting; returns
+    // true when the event was translated and sent.
+    bool forwardMouseEvent(TEvent &ev) noexcept;
+    // Ctrl+click handler: read the text under the cursor, and if it is an
+    // existing file path (optionally "path:line[:col]"), open it in an editor.
+    // Returns true when a file was opened.
+    bool openPathAt(TPoint where) noexcept;
+
+    std::string launchCommand;      // non-empty = run this instead of the shell
 
     VTerm *vt {nullptr};
     VTermScreen *screen {nullptr};
@@ -89,6 +102,10 @@ private:
 
     int cols {0}, rows {0};
     int curRow {0}, curCol {0};
+    // Child mouse-reporting mode (VTERM_PROP_MOUSE_*): 0 = off. When non-zero,
+    // mouse events are forwarded to the child instead of scrolling scrollback.
+    int mouseMode {0};
+    int mousePressedButton {0}; // vterm button currently held (for the release)
     bool curVisible {true};
     bool spawnFailed {false};
     bool exitNoticeShown {false};
@@ -108,15 +125,23 @@ private:
 struct TerminalWindow : public TWindow
 {
     TerminalView *view {nullptr};
+    std::string baseTitle {"Terminal"};   // caption before any OSC title
     std::string titleBuf {"Terminal"};
+    TerminalWindow **backPtr {nullptr};    // nulled on close (single-instance panes)
 
-    TerminalWindow(const TRect &bounds) noexcept;
+    // 'command' runs instead of the shell (empty = shell); 'title' is the base
+    // caption; 'backPtr', if set, is nulled when the window closes so the owner
+    // can tell the window is gone.
+    TerminalWindow(const TRect &bounds, std::string command = {},
+                   std::string title = "Terminal",
+                   TerminalWindow **backPtr = nullptr) noexcept;
 
     const char *getTitle(short) override;
     // Resolve the frame/scrollbar through the shared window-chrome scheme so the
     // terminal matches the editor windows, file tree and output pane.
     TColorAttr mapColor(uchar index) noexcept override;
     void sizeLimits(TPoint &min, TPoint &max) override;
+    void shutDown() override;   // drop the back-pointer before subviews are freed
     // Update the caption from an OSC window-title sequence ("" restores default).
     void setTermTitle(std::string_view text) noexcept;
 };

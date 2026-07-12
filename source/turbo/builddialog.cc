@@ -141,18 +141,14 @@ struct BuildDialog : public TDialog
 {
     TInputLine *buildLine, *testLine, *runLine, *artifactLine;
     TRadioButtons *modeBox;
-    CmdListView *list;
-    std::vector<BuildCommand> extra; // working copy
 
     BuildDialog(const BuildConfig &cfg) noexcept;
-    void handleEvent(TEvent &ev) override;
     void writeBack(BuildConfig &cfg) const noexcept;
 };
 
 BuildDialog::BuildDialog(const BuildConfig &cfg) noexcept :
     TWindowInit(&TDialog::initFrame),
-    TDialog(TRect(0, 0, 72, 23), "Build Configuration"),
-    extra(cfg.extra)
+    TDialog(TRect(0, 0, 72, 17), "Build Configuration")
 {
     options |= ofCentered;
 
@@ -180,17 +176,10 @@ BuildDialog::BuildDialog(const BuildConfig &cfg) noexcept :
     insert(new TLabel(TRect(2, 9, 13, 10), "On Run:", modeBox));
 
     insert(new TStaticText(TRect(2, 12, 70, 13),
-        "Additional commands (started in the background with Run):"));
-    auto *vsb = new TScrollBar(TRect(51, 13, 52, 19));
-    insert(vsb);
-    list = new CmdListView(TRect(2, 13, 51, 19), vsb, &extra);
-    insert(list);
-    insert(new TButton(TRect(53, 13, 69, 15), "~A~dd...", cmAddExtra, bfNormal));
-    insert(new TButton(TRect(53, 15, 69, 17), "~E~dit...", cmEditExtra, bfNormal));
-    insert(new TButton(TRect(53, 17, 69, 19), "Re~m~ove", cmRemoveExtra, bfNormal));
+        "Tool processes are configured separately (Run > Tools)."));
 
-    insert(new TButton(TRect(48, 20, 58, 22), "O~K~", cmOK, bfDefault));
-    insert(new TButton(TRect(59, 20, 69, 22), "Cancel", cmCancel, bfNormal));
+    insert(new TButton(TRect(48, 14, 58, 16), "O~K~", cmOK, bfDefault));
+    insert(new TButton(TRect(59, 14, 69, 16), "Cancel", cmCancel, bfNormal));
 
     // Seed from the current config.
     seedInput(buildLine, cfg.build, kCmdMax);
@@ -203,7 +192,56 @@ BuildDialog::BuildDialog(const BuildConfig &cfg) noexcept :
     selectNext(False);
 }
 
-void BuildDialog::handleEvent(TEvent &ev)
+void BuildDialog::writeBack(BuildConfig &cfg) const noexcept
+{
+    cfg.build = trim(buildLine->data);
+    cfg.test = trim(testLine->data);
+    cfg.run = trim(runLine->data);
+    cfg.artifact = trim(artifactLine->data);
+    ushort mode = 0;
+    modeBox->getData(&mode);
+    cfg.runMode = (mode == 1) ? "build" : (mode == 2) ? "run" : "auto";
+}
+
+// The tool-processes dialog: a scrolling list of {name, command} entries with
+// Add/Edit/Remove. These are the long-running commands the user toggles on/off
+// from the Run menu, each streaming into its own tab in the Output pane.
+struct ToolsDialog : public TDialog
+{
+    CmdListView *list;
+    std::vector<BuildCommand> tools; // working copy
+
+    ToolsDialog(const std::vector<BuildCommand> &initial) noexcept;
+    void handleEvent(TEvent &ev) override;
+};
+
+ToolsDialog::ToolsDialog(const std::vector<BuildCommand> &initial) noexcept :
+    TWindowInit(&TDialog::initFrame),
+    TDialog(TRect(0, 0, 72, 18), "Tool Processes"),
+    tools(initial)
+{
+    options |= ofCentered;
+
+    insert(new TStaticText(TRect(2, 2, 70, 4),
+        "Long-running commands you start and stop from the Run menu (e.g. a dev "
+        "server). Each streams its output to its own tab in the Output pane. "
+        "Saved to .turbo/config.json; run from the project root."));
+
+    auto *vsb = new TScrollBar(TRect(51, 5, 52, 15));
+    insert(vsb);
+    list = new CmdListView(TRect(2, 5, 51, 15), vsb, &tools);
+    insert(list);
+    insert(new TButton(TRect(53, 5, 69, 7), "~A~dd...", cmAddExtra, bfNormal));
+    insert(new TButton(TRect(53, 7, 69, 9), "~E~dit...", cmEditExtra, bfNormal));
+    insert(new TButton(TRect(53, 9, 69, 11), "Re~m~ove", cmRemoveExtra, bfNormal));
+
+    insert(new TButton(TRect(48, 15, 58, 17), "O~K~", cmOK, bfDefault));
+    insert(new TButton(TRect(59, 15, 69, 17), "Cancel", cmCancel, bfNormal));
+
+    selectNext(False);
+}
+
+void ToolsDialog::handleEvent(TEvent &ev)
 {
     if (ev.what == evCommand)
     {
@@ -212,9 +250,9 @@ void BuildDialog::handleEvent(TEvent &ev)
             case cmAddExtra:
             {
                 BuildCommand bc;
-                if (editCommandDialog("Add Command", bc))
+                if (editCommandDialog("Add Tool", bc))
                 {
-                    extra.push_back(bc);
+                    tools.push_back(bc);
                     list->refresh();
                 }
                 clearEvent(ev);
@@ -223,12 +261,12 @@ void BuildDialog::handleEvent(TEvent &ev)
             case cmEditExtra:
             {
                 int i = list->focused;
-                if (i >= 0 && i < (int) extra.size())
+                if (i >= 0 && i < (int) tools.size())
                 {
-                    BuildCommand bc = extra[i];
-                    if (editCommandDialog("Edit Command", bc))
+                    BuildCommand bc = tools[i];
+                    if (editCommandDialog("Edit Tool", bc))
                     {
-                        extra[i] = bc;
+                        tools[i] = bc;
                         list->refresh();
                     }
                 }
@@ -238,9 +276,9 @@ void BuildDialog::handleEvent(TEvent &ev)
             case cmRemoveExtra:
             {
                 int i = list->focused;
-                if (i >= 0 && i < (int) extra.size())
+                if (i >= 0 && i < (int) tools.size())
                 {
-                    extra.erase(extra.begin() + i);
+                    tools.erase(tools.begin() + i);
                     list->refresh();
                 }
                 clearEvent(ev);
@@ -251,18 +289,6 @@ void BuildDialog::handleEvent(TEvent &ev)
     TDialog::handleEvent(ev);
 }
 
-void BuildDialog::writeBack(BuildConfig &cfg) const noexcept
-{
-    cfg.build = trim(buildLine->data);
-    cfg.test = trim(testLine->data);
-    cfg.run = trim(runLine->data);
-    cfg.artifact = trim(artifactLine->data);
-    ushort mode = 0;
-    modeBox->getData(&mode);
-    cfg.runMode = (mode == 1) ? "build" : (mode == 2) ? "run" : "auto";
-    cfg.extra = extra;
-}
-
 } // namespace
 
 bool executeBuildDialog(BuildConfig &config) noexcept
@@ -271,6 +297,16 @@ bool executeBuildDialog(BuildConfig &config) noexcept
     bool ok = (TProgram::deskTop->execView(d) == cmOK);
     if (ok)
         d->writeBack(config);
+    TObject::destroy(d);
+    return ok;
+}
+
+bool executeToolsDialog(std::vector<BuildCommand> &tools) noexcept
+{
+    auto *d = new ToolsDialog(tools);
+    bool ok = (TProgram::deskTop->execView(d) == cmOK);
+    if (ok)
+        tools = d->tools;
     TObject::destroy(d);
     return ok;
 }

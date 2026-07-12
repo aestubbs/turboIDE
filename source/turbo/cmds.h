@@ -71,6 +71,10 @@ enum : ushort
     cmGitNewBranch,   // prompt for a name, then create + switch (checkout -b)
     cmToggleHidden,
     cmNewTerminal,
+    // Coding-agent window (Alt-0 opens or focuses it).
+    cmToggleAgent,
+    cmSelectAgent,   // choose the per-project agent (Claude Code / Codex / ...)
+    cmRestartAgent,  // close and reopen the agent window
     // Guided "New File...": prompt for a name+location up front (via the Save As
     // dialog) so the buffer is created on disk with the right lexer from the
     // start. Distinct from cmNew, which opens an unnamed scratch buffer.
@@ -84,6 +88,7 @@ enum : ushort
     cmTest,
     cmStop,
     cmBuildConfig,
+    cmToolsConfig,    // open the tool-processes configuration dialog
     cmToggleOutput,
     // Colour-scheme dialog (Settings menu) and the "apply the active scheme"
     // notification the dialog posts to the application on Apply/OK.
@@ -97,6 +102,7 @@ enum : ushort
     cmTreeGitAdd,
     cmTreeGitRevert,
     cmTreeNewLuaScript, // create a new .lua script in a Lua-home group's dir
+    cmTreeNewSkill,     // create a new skill (dir + SKILL.md) in a Skills-home dir
     // Lua scripting menu.
     cmLuaRunScript,   // pop up the list of discovered scripts and run one
     cmLuaNewScript,   // create + open a new script in the project's .turbo/scripts
@@ -116,6 +122,9 @@ enum : ushort
     // Lua-registered commands (turbo.register_command): cmLuaCommandBase + i
     // invokes the i-th registered Lua function (i in [0, luaCommandListMax)).
     cmLuaCommandBase = 1600,
+    // Run-menu tool toggles: cmToolBase + i starts/stops the i-th configured
+    // tool process (i in [0, toolListMax)).
+    cmToolBase = 1500,
     // Branch dropdown in the menu bar: cmBranchBase + i checks out the i-th
     // branch shown in the list (i in [0, branchListMax)).
     cmBranchBase = 1200,
@@ -125,6 +134,7 @@ enum : ushort
 };
 
 enum { windowListMax = 10 };
+enum { toolListMax = 32 };
 enum { branchListMax = 100 };
 enum { luaScriptListMax = 100 };
 enum { luaCommandListMax = 100 };
