@@ -133,6 +133,8 @@ static const const_unordered_map<std::string_view, const Language *> ext2lang = 
     {".sql",                        &Language::SQL},
     {".go",                         &Language::Go},
     {".php",                        &Language::PHP},
+    {".ex",                         &Language::Elixir},
+    {".exs",                        &Language::Elixir},
 };
 
 const Language *detectFileLanguage(const char *filePath)

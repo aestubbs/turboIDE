@@ -319,7 +319,7 @@ LspManager::ServerConfig LspManager::serverFor(const std::string &languageId) no
         {"go",         "gopls",                      ""},
         {"javascript", "typescript-language-server", "--stdio"},
         {"php",        "intelephense",               "--stdio"},
-        {"elixir",     "elixir-ls",                  ""},
+        {"elixir",     "expert",                     ""},
     };
     for (auto &d : defaults)
         if (languageId == d.lang)

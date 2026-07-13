@@ -29,7 +29,7 @@ const KnownLang kKnownLangs[] = {
     {"go",         "Go (gopls):",            "gopls"},
     {"javascript", "JavaScript (tsserver):", "typescript-language-server --stdio"},
     {"php",        "PHP (intelephense):",    "intelephense --stdio"},
-    {"elixir",     "Elixir (elixir-ls):",    "elixir-ls"},
+    {"elixir",     "Elixir (expert):",       "expert"},
 };
 
 constexpr int kNumLangs = sizeof(kKnownLangs) / sizeof(kKnownLangs[0]);
