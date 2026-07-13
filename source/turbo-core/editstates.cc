@@ -572,6 +572,7 @@ static const char *lexerNameForId(int id)
         // turbo's own, tree-sitter backed; see TurboLexers.cxx / TSLexer.cxx.
         case SCLEX_TURBO_ELIXIR: return "elixir";
         case SCLEX_TURBO_HEEX:   return "heex";
+        case SCLEX_TURBO_BLADE:  return "blade";
         default:               return nullptr;
     }
 }

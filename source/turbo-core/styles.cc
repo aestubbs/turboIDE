@@ -49,6 +49,10 @@ constexpr Language
     Language::PHP {"//", "/*", "*/"},
     Language::Elixir {"#"},
     Language::TypeScript {"//", "/*", "*/"},
+    // {{-- --}} is Blade's own comment: unlike an HTML <!-- --> it is stripped
+    // before render, so the PHP inside it is never evaluated. That makes it the
+    // right thing for toggle-comment to insert.
+    Language::Blade {{}, "{{--", "--}}"},
     // <%!-- --%> is HEEx's own comment: unlike an HTML <!-- --> it also suppresses
     // the Elixir inside the commented region, so it is the right thing for the
     // toggle-comment command to insert.
@@ -157,6 +161,16 @@ static const const_unordered_map<std::string_view, const Language *> ext2lang = 
 const Language *detectFileLanguage(const char *filePath)
 {
     const Language *lang = nullptr;
+    {
+        // Laravel views are named foo.blade.php, and extname() only yields the
+        // last component (".php"). Without matching the compound suffix here,
+        // every Blade template in a project would be lexed as plain PHP.
+        auto name = TPath::basename(filePath);
+        const TStringView bladeSuffix = ".blade.php";
+        if ( name.size() > bladeSuffix.size() &&
+             name.substr(name.size() - bladeSuffix.size()) == bladeSuffix )
+            return &Language::Blade;
+    }
     {
         auto ext = TPath::extname(filePath);
         if (!ext.empty())
@@ -1456,6 +1470,10 @@ constexpr struct { const Language *language; LexerSettings lexer; } builtInLexer
     {&Language::Markdown, {SCLEX_MARKDOWN, stylesMarkdown, nullptr, propertiesMarkdown}},
     {&Language::Elixir, {SCLEX_TURBO_ELIXIR, stylesTS, nullptr, nullptr}},
     {&Language::HEEx, {SCLEX_TURBO_HEEX, stylesTS, nullptr, nullptr}},
+    // Built only when TURBO_TS_BLADE is on. If it is off, createLexer("blade")
+    // falls through to Lexilla, finds nothing, and the file renders as plain text
+    // rather than failing.
+    {&Language::Blade, {SCLEX_TURBO_BLADE, stylesTS, nullptr, nullptr}},
 };
 
 TColorAttr coalesce(TColorAttr from, TColorAttr into)

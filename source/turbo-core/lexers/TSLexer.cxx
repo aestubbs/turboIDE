@@ -61,6 +61,10 @@ const TSLanguage *tree_sitter_heex(void);
 const TSLanguage *tree_sitter_html(void);
 const TSLanguage *tree_sitter_css(void);
 const TSLanguage *tree_sitter_javascript(void);
+#ifdef TURBO_TS_BLADE
+const TSLanguage *tree_sitter_php_only(void);
+const TSLanguage *tree_sitter_blade(void);
+#endif
 }
 
 namespace turbo {
@@ -75,6 +79,12 @@ extern const char kQueryCssHighlights[];
 extern const char kQueryJsHighlights[];
 extern const char kQueryJsHighlightsJsx[];
 extern const char kQueryJsInjections[];
+#ifdef TURBO_TS_BLADE
+extern const char kQueryPhpHighlights[];
+extern const char kQueryPhpInjections[];
+extern const char kQueryBladeHighlights[];
+extern const char kQueryBladeInjections[];
+#endif
 } // namespace turbo
 
 namespace {
@@ -218,6 +228,35 @@ constexpr CaptureMap kJsCaptures[] = {
     {"tag",                   SCE_TS_TAG},           // JSX
     {"attribute",             SCE_TS_TAG_ATTR},      // JSX
 };
+
+#ifdef TURBO_TS_BLADE
+constexpr CaptureMap kPhpCaptures[] = {
+    {"keyword",           SCE_TS_KEYWORD},
+    {"comment",           SCE_TS_COMMENT},
+    {"string",            SCE_TS_STRING},
+    {"number",            SCE_TS_NUMBER},
+    {"operator",          SCE_TS_OPERATOR},
+    {"function",          SCE_TS_FUNCTION},
+    {"function.builtin",  SCE_TS_FUNCTION},
+    {"function.method",   SCE_TS_FUNCTION},
+    {"constructor",       SCE_TS_MODULE},
+    {"constant",          SCE_TS_CONSTANT},
+    {"constant.builtin",  SCE_TS_CONSTANT},          // true, false, null
+    {"variable",          SCE_TS_VARIABLE},          // $foo
+    {"variable.builtin",  SCE_TS_CONSTANT},          // $this
+    {"property",          SCE_TS_PROPERTY},
+    {"module",            SCE_TS_MODULE},            // namespaces
+    {"module.builtin",    SCE_TS_MODULE},
+    {"type",              SCE_TS_MODULE},
+    {"type.builtin",      SCE_TS_MODULE},            // int, string, void
+    {"tag",               SCE_TS_TAG},               // the <?php ... ?> tags
+};
+
+// Blade reuses the HTML capture map: its own highlights.scm adds only (directive)
+// and the {{ }} braces, captured as "tag" and "punctuation.bracket", both of
+// which HTML already maps. Directives therefore share a colour with HTML tags,
+// which is what the grammar's author intended and what other editors show.
+#endif
 
 // ---------------------------------------------------------------------------
 // Query predicates.
@@ -488,6 +527,33 @@ const Grammar &jsGrammar()
     return g;
 }
 
+#ifdef TURBO_TS_BLADE
+const Grammar &phpOnlyGrammar()
+{
+    static const Grammar g = buildGrammar(tree_sitter_php_only(),
+                                          {kQueryPhpHighlights},
+                                          {kQueryPhpInjections},
+                                          kPhpCaptures, std::size(kPhpCaptures));
+    return g;
+}
+
+const Grammar &bladeGrammar()
+{
+    // Both of Blade's query files open with `; inherits: html`, so HTML's are
+    // prepended -- that comment is the whole of the convention, and this is where
+    // it is honoured. It works because Blade's grammar carries every node type
+    // HTML's queries reference (script_element, tag_name, doctype and the rest),
+    // so they compile against it unchanged. Blade's own patterns come last, which
+    // matters: precedence is last-wins, so a (directive) captured by Blade
+    // overrides anything HTML said about the same bytes.
+    static const Grammar g = buildGrammar(tree_sitter_blade(),
+                                          {kQueryHtmlHighlights, kQueryBladeHighlights},
+                                          {kQueryHtmlInjections, kQueryBladeInjections},
+                                          kHtmlCaptures, std::size(kHtmlCaptures));
+    return g;
+}
+#endif
+
 struct NamedGrammar { const char *name; const Grammar &(*get)(); };
 
 constexpr NamedGrammar kGrammars[] = {
@@ -497,6 +563,10 @@ constexpr NamedGrammar kGrammars[] = {
     {"css",        cssGrammar},
     {"javascript", jsGrammar},
     {"js",         jsGrammar},      // alias: some queries spell it this way
+#ifdef TURBO_TS_BLADE
+    {"php_only",   phpOnlyGrammar},
+    {"blade",      bladeGrammar},
+#endif
 };
 
 // An injection naming a language we have not vendored is skipped, and the region
@@ -942,6 +1012,11 @@ public:
     static ILexer5 *FactoryHeex() {
         return new LexerTS("heex", SCLEX_TURBO_HEEX, heexGrammar);
     }
+#ifdef TURBO_TS_BLADE
+    static ILexer5 *FactoryBlade() {
+        return new LexerTS("blade", SCLEX_TURBO_BLADE, bladeGrammar);
+    }
+#endif
 };
 
 void SCI_METHOD LexerTS::Lex(Sci_PositionU startPos, Sci_Position length, int,
@@ -1091,4 +1166,7 @@ void SCI_METHOD LexerTS::Fold(Sci_PositionU startPos, Sci_Position length, int,
 namespace Lexilla {
 extern const LexerModule lmTurboTsElixir(SCLEX_TURBO_ELIXIR, LexerTS::FactoryElixir, "elixir");
 extern const LexerModule lmTurboTsHeex(SCLEX_TURBO_HEEX, LexerTS::FactoryHeex, "heex");
+#ifdef TURBO_TS_BLADE
+extern const LexerModule lmTurboTsBlade(SCLEX_TURBO_BLADE, LexerTS::FactoryBlade, "blade");
+#endif
 }

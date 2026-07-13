@@ -89,6 +89,14 @@ if (TURBO_ENABLE_TREESITTER)
     set(TS_HTML_DIR   "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-html")
     set(TS_CSS_DIR    "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-css")
     set(TS_JS_DIR     "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-javascript")
+    set(TS_PHP_DIR    "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-php")
+    set(TS_BLADE_DIR  "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-blade")
+
+    # Blade is the most expensive grammar by a distance -- its generated parser is
+    # ~18 MB because half its parser states are flat tables (an acknowledged
+    # upstream issue) -- and it drags php_only in with it. Together they roughly
+    # double the binary, so unlike the rest they can be switched off.
+    option(TURBO_TS_BLADE "Build the Blade (Laravel) lexer; adds ~3 MB to the binary" ON)
 
     # lib.c is an amalgamation: it #includes the other lib/src/*.c. Compiling it
     # *and* its siblings would duplicate every symbol, so it is the only input.
@@ -140,6 +148,26 @@ if (TURBO_ENABLE_TREESITTER)
     add_library(ts-js OBJECT "${TS_JS_DIR}/src/parser.c" "${TS_JS_DIR}/src/scanner.c")
     target_include_directories(ts-js PRIVATE "${TS_JS_DIR}/src")
 
+    if (TURBO_TS_BLADE)
+        # tree-sitter-php ships two dialects off one grammar: 'php' (PHP with
+        # interleaved HTML, for a .php file) and 'php_only' (the file is pure PHP).
+        # Blade injects into php_only -- its {{ }} and @php blocks are PHP with no
+        # HTML around them -- so that is the one built here. Their scanners are thin
+        # shims over a shared common/scanner.h, whose helpers are all static, so
+        # linking both dialects would not clash if 'php' is added later.
+        add_library(ts-php-only OBJECT
+            "${TS_PHP_DIR}/php_only/src/parser.c"
+            "${TS_PHP_DIR}/php_only/src/scanner.c"
+        )
+        target_include_directories(ts-php-only PRIVATE "${TS_PHP_DIR}/php_only/src")
+
+        add_library(ts-blade OBJECT
+            "${TS_BLADE_DIR}/src/parser.c"
+            "${TS_BLADE_DIR}/src/scanner.c"
+        )
+        target_include_directories(ts-blade PRIVATE "${TS_BLADE_DIR}/src")
+    endif()
+
     if (MSVC)
         # Elixir's generated parser is a single 12.8 MB / 428k-line translation
         # unit (7001 parser states). Without /bigobj MSVC fails it with C1128,
@@ -150,6 +178,10 @@ if (TURBO_ENABLE_TREESITTER)
         target_compile_options(ts-html PRIVATE /bigobj)
         target_compile_options(ts-css PRIVATE /bigobj)
         target_compile_options(ts-js PRIVATE /bigobj)
+        if (TURBO_TS_BLADE)
+            target_compile_options(ts-php-only PRIVATE /bigobj)
+            target_compile_options(ts-blade PRIVATE /bigobj)
+        endif()
     endif()
 
     # The grammars' generated parsers are huge (Elixir's is ~12.8 MB / 7000 parser
@@ -170,6 +202,12 @@ if (TURBO_ENABLE_TREESITTER)
     # JSX lives in its own file and must be concatenated onto the main one.
     file(READ "${TS_JS_DIR}/queries/highlights-jsx.scm"    TS_Q_JS_JSX)
     file(READ "${TS_JS_DIR}/queries/injections.scm"        TS_Q_JS_INJ)
+    if (TURBO_TS_BLADE)
+        file(READ "${TS_PHP_DIR}/queries/highlights.scm"   TS_Q_PHP_HL)
+        file(READ "${TS_PHP_DIR}/queries/injections.scm"   TS_Q_PHP_INJ)
+        file(READ "${TS_BLADE_DIR}/queries/highlights.scm" TS_Q_BLADE_HL)
+        file(READ "${TS_BLADE_DIR}/queries/injections.scm" TS_Q_BLADE_INJ)
+    endif()
     set(TS_QUERIES_CXX "${CMAKE_CURRENT_BINARY_DIR}/generated/TSQueries.cxx")
     configure_file(
         "${CMAKE_CURRENT_LIST_DIR}/source/turbo-core/lexers/TSQueries.cxx.in"
@@ -248,6 +286,9 @@ if (TURBO_ENABLE_TREESITTER)
     # which would drag in a conflicting tree_sitter/parser.h (see above).
     target_include_directories(lexilla PRIVATE "${TS_DIR}/lib/include")
     target_compile_definitions(lexilla PRIVATE TURBO_ENABLE_TREESITTER)
+    if (TURBO_TS_BLADE)
+        target_compile_definitions(lexilla PRIVATE TURBO_TS_BLADE)
+    endif()
 endif()
 
 # Target 'vterm' (libvterm: VT/ANSI terminal-emulation core, MIT-licensed)
@@ -314,6 +355,12 @@ if (TURBO_ENABLE_TREESITTER)
         $<TARGET_OBJECTS:ts-css>
         $<TARGET_OBJECTS:ts-js>
     )
+    if (TURBO_TS_BLADE)
+        list(APPEND TURBO_CORE_OBJECTS
+            $<TARGET_OBJECTS:ts-php-only>
+            $<TARGET_OBJECTS:ts-blade>
+        )
+    endif()
 endif()
 add_library(${TURBO}-core
     ${TURBO_CORE_SRC}

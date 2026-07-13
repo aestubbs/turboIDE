@@ -38,3 +38,9 @@
 [submodule "deps/tree-sitter-javascript"]
 	path = deps/tree-sitter-javascript
 	url = https://github.com/tree-sitter/tree-sitter-javascript
+[submodule "deps/tree-sitter-php"]
+	path = deps/tree-sitter-php
+	url = https://github.com/tree-sitter/tree-sitter-php
+[submodule "deps/tree-sitter-blade"]
+	path = deps/tree-sitter-blade
+	url = https://github.com/EmranMR/tree-sitter-blade

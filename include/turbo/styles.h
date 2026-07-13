@@ -60,7 +60,8 @@ struct Language
         PHP,
         Elixir,
         HEEx,
-        TypeScript;
+        TypeScript,
+        Blade;
 };
 
 enum TextStyle : uchar
