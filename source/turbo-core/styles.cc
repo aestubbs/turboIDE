@@ -48,6 +48,7 @@ constexpr Language
     Language::Go {"//", "/*", "*/"},
     Language::PHP {"//", "/*", "*/"},
     Language::Elixir {"#"},
+    Language::TypeScript {"//", "/*", "*/"},
     // <%!-- --%> is HEEx's own comment: unlike an HTML <!-- --> it also suppresses
     // the Elixir inside the commented region, so it is the right thing for the
     // toggle-comment command to insert.
@@ -69,6 +70,14 @@ static const const_unordered_map<std::string_view, const Language *> ext2lang = 
     {".js",                         &Language::JavaScript},
     {".jsx",                        &Language::JavaScript},
     {".mjs",                        &Language::JavaScript},
+    {".cjs",                        &Language::JavaScript},
+    // TypeScript rendered as plain text before this: nothing mapped .ts at all.
+    // LexCPP does not understand type annotations deeply, but with the keyword
+    // list below it is a long way better than no highlighting.
+    {".ts",                         &Language::TypeScript},
+    {".tsx",                        &Language::TypeScript},
+    {".mts",                        &Language::TypeScript},
+    {".cts",                        &Language::TypeScript},
     {".asm",                        &Language::Asm},
     {".s",                          &Language::Asm},
     {".S",                          &Language::Asm},
@@ -407,6 +416,55 @@ constexpr LexerSettings::PropertyMapping propertiesC[] =
     {"lexer.cpp.escape.sequence",           "1"},
 };
 
+// JavaScript also runs on LexCPP, but it must not share C's tables: the two
+// options below are actively wrong for C (allow.hashes would stop '#include'
+// being a preprocessor line), and C has no use for the two extra styles. LexCPP
+// already implements all of this -- turbo simply never asked for it.
+constexpr LexerSettings::StyleMapping stylesJavaScript[] =
+{
+    {SCE_C_DEFAULT,                 sNormal},
+    {SCE_C_COMMENT,                 sComment},
+    {SCE_C_COMMENTLINE,             sComment},
+    {SCE_C_COMMENTDOC,              sComment},
+    {SCE_C_NUMBER,                  sNumberLiteral},
+    {SCE_C_WORD,                    sKeyword1},
+    {SCE_C_STRING,                  sStringLiteral},
+    {SCE_C_CHARACTER,               sCharLiteral},
+    {SCE_C_OPERATOR,                sOperator},
+    {SCE_C_COMMENTLINEDOC,          sComment},
+    {SCE_C_WORD2,                   sKeyword2},
+    {SCE_C_IDENTIFIER,              sIdentifier},
+    {SCE_C_GLOBALCLASS,             sTypeName},
+    {SCE_C_ESCAPESEQUENCE,          sEscapeSequence},
+    // LexCPP lexes JS regex literals correctly (it disambiguates them from
+    // division), but turbo never mapped the style, so they were painted as plain
+    // text.
+    {SCE_C_REGEX,                   sMisc},
+    // Template literals. With lexer.cpp.backquoted.strings=2 LexCPP styles the
+    // backquoted string as STRINGRAW and lexes `${...}` as real code, with a
+    // nesting stack -- so the interpolation is not part of this run.
+    {SCE_C_STRINGRAW,               sStringLiteral},
+    // An unterminated string/char literal. Worth colouring as an error rather
+    // than leaving it to fall through as plain text.
+    {SCE_C_STRINGEOL,               sError},
+    // Deliberately no SCE_C_PREPROCESSOR: with allow.hashes below, a leading '#'
+    // is an identifier character (a #private field), not a directive.
+};
+
+constexpr LexerSettings::PropertyMapping propertiesJavaScript[] =
+{
+    {"styling.within.preprocessor",         "1"},
+    {"lexer.cpp.track.preprocessor",        "0"},
+    {"lexer.cpp.escape.sequence",           "1"},
+    // 2 = JavaScript template literal: `a ${b} c` with the interpolation lexed
+    // as code. Left unset, a backtick is not a delimiter at all and an
+    // apostrophe in template prose opens a bogus char literal to end of line.
+    {"lexer.cpp.backquoted.strings",        "2"},
+    // Let '#' start an identifier, so a `#private` class field at the start of a
+    // line is not taken for a C preprocessor directive.
+    {"lexer.cpp.allow.hashes",              "1"},
+};
+
 constexpr LexerSettings::StyleMapping stylesMake[] =
 {
     {SCE_MAKE_DEFAULT,              sNormal},
@@ -430,16 +488,27 @@ constexpr LexerSettings::StyleMapping stylesAsm[] =
     {SCE_ASM_DIRECTIVE,             sPreprocessor},
 };
 
-constexpr LexerSettings::KeywordMapping keywordsJavaScript[] =
+// Serves both JavaScript and TypeScript. TypeScript's extra keywords are not
+// reserved in JavaScript, but they are also vanishingly rare as identifiers
+// there, so one list for both is a better trade than a second near-duplicate.
+constexpr LexerSettings::KeywordMapping keywordsJsTs[] =
 {
     {0,
 "await break case catch continue default do else export false finally "
 "for get if import new null return set super switch this throw true try while "
-"with yield"
+"with yield "
+// TypeScript's own keywords. Harmless in a .js file (they are not reserved
+// there, but neither are they common as identifiers), which is why one list
+// serves both.
+"abstract as asserts declare implements infer interface is keyof namespace "
+"override private protected public readonly satisfies type"
     },
     {1,
 "async class const debugger delete enum eval extends function in instanceof let "
-"static typeof var void"
+"static typeof var void "
+// TS primitive/utility types, so annotations colour as types rather than
+// as bare identifiers.
+"any bigint boolean never null number object string symbol undefined unknown"
     },
     {3,
 "arguments Array ArrayBuffer AsyncFunction Atomics BigInt BigInt64Array "
@@ -557,6 +626,10 @@ constexpr LexerSettings::KeywordMapping keywordsHTML[] =
 "include include_once instanceof insteadof interface isset list match namespace new "
 "or print private protected public readonly require require_once return static "
 "switch throw trait try unset use var while xor yield "
+// PHP 8.1: 'enum' and 'never' were missing, so enums and never-returning
+// functions rendered unstyled. LexHTML classifies PHP words by a plain wordlist
+// lookup, so this is entirely turbo's list to keep current.
+"enum never "
 "from __CLASS__ __DIR__ __FILE__ __FUNCTION__ __LINE__ __METHOD__ __NAMESPACE__ __TRAIT__ "
 
 // Builtins
@@ -1272,13 +1345,98 @@ constexpr LexerSettings::StyleMapping stylesTS[] =
     {SCE_TS_ERROR,                  sNormal},
 };
 
+// CSS and XML were declared, had extensions mapped, and had no lexer -- so they
+// rendered as plain text, even though Lexilla's lexers for both are already
+// compiled into the binary (CMake globs deps/lexilla/lexers/*.cxx wholesale).
+// Wiring them up costs two table rows each and no binary growth at all.
+constexpr LexerSettings::StyleMapping stylesCSS[] =
+{
+    {SCE_CSS_DEFAULT,               sNormal},
+    {SCE_CSS_TAG,                   sTag},
+    {SCE_CSS_CLASS,                 sTypeName},
+    {SCE_CSS_PSEUDOCLASS,           sTypeName},
+    {SCE_CSS_OPERATOR,              sOperator},
+    {SCE_CSS_IDENTIFIER,            sAttribute},   // property names
+    // "Unknown" here only means "absent from the wordlist above", and that list
+    // can never be complete: custom properties (--gap), vendor prefixes
+    // (-webkit-*) and anything CSS added recently all land here. Styling them as
+    // errors turns a modern stylesheet red, so they get the same colour as the
+    // properties and pseudo-classes they are.
+    {SCE_CSS_UNKNOWN_IDENTIFIER,    sAttribute},
+    {SCE_CSS_UNKNOWN_PSEUDOCLASS,   sTypeName},
+    {SCE_CSS_VALUE,                 sIdentifier},
+    {SCE_CSS_COMMENT,               sComment},
+    {SCE_CSS_ID,                    sTypeName},
+    {SCE_CSS_IMPORTANT,             sKeyword1},
+    {SCE_CSS_DIRECTIVE,             sPreprocessor},
+    {SCE_CSS_DOUBLESTRING,          sStringLiteral},
+    {SCE_CSS_SINGLESTRING,          sStringLiteral},
+    {SCE_CSS_IDENTIFIER2,           sAttribute},
+    {SCE_CSS_ATTRIBUTE,             sAttribute},
+    {SCE_CSS_IDENTIFIER3,           sAttribute},
+    {SCE_CSS_PSEUDOELEMENT,         sTypeName},
+    {SCE_CSS_EXTENDED_IDENTIFIER,   sAttribute},
+    {SCE_CSS_EXTENDED_PSEUDOCLASS,  sTypeName},
+    {SCE_CSS_EXTENDED_PSEUDOELEMENT, sTypeName},
+    {SCE_CSS_GROUP_RULE,            sKeyword1},   // @media, @supports
+    {SCE_CSS_VARIABLE,              sConstant},   // --custom-property
+};
+
+constexpr LexerSettings::KeywordMapping keywordsCSS[] =
+{
+    {0, // CSS1 properties
+"color background-color background-image background-repeat background-attachment "
+"background-position background font-family font-style font-variant font-weight "
+"font-size font word-spacing letter-spacing text-decoration vertical-align "
+"text-transform text-align text-indent line-height margin-top margin-right "
+"margin-bottom margin-left margin padding-top padding-right padding-bottom "
+"padding-left padding border-top-width border-right-width border-bottom-width "
+"border-left-width border-width border-top border-right border-bottom border-left "
+"border border-color border-style width height float clear display white-space "
+"list-style-type list-style-image list-style-position list-style"
+    },
+    {1, // pseudo-classes
+"first-letter first-line link active visited hover focus lang left right first "
+"first-child before after"
+    },
+    {2, // CSS2+ properties (a working subset; the lexer only uses these to
+        // distinguish known from unknown, and unknown ones style as sError)
+"azimuth border-collapse border-spacing bottom caption-side clip content "
+"counter-increment counter-reset cue cue-after cue-before cursor direction "
+"elevation empty-cells left max-height max-width min-height min-width opacity "
+"orphans outline outline-color outline-style outline-width overflow padding "
+"page-break-after page-break-before page-break-inside pause pause-after "
+"pause-before pitch pitch-range play-during position quotes richness right "
+"speak speak-header speak-numeral speak-punctuation speech-rate stress "
+"table-layout text-shadow top unicode-bidi visibility voice-family volume "
+"widows z-index "
+// Modern layout and custom properties, so a stylesheet written this decade does
+// not light up as a wall of sError.
+"align-content align-items align-self appearance backdrop-filter border-radius "
+"box-shadow box-sizing filter flex flex-basis flex-direction flex-flow flex-grow "
+"flex-shrink flex-wrap gap grid grid-area grid-auto-columns grid-auto-flow "
+"grid-auto-rows grid-column grid-column-end grid-column-start grid-gap grid-row "
+"grid-row-end grid-row-start grid-template grid-template-areas "
+"grid-template-columns grid-template-rows inset justify-content justify-items "
+"justify-self object-fit object-position order overflow-x overflow-y place-items "
+"pointer-events resize row-gap column-gap transform transform-origin transition "
+"transition-delay transition-duration transition-property transition-timing-function "
+"user-select will-change writing-mode aspect-ratio"
+    },
+};
+
 constexpr struct { const Language *language; LexerSettings lexer; } builtInLexers[] =
 {
     {&Language::CPP, {SCLEX_CPP, stylesC, keywordsC, propertiesC}},
     {&Language::Lua, {SCLEX_LUA, stylesLua, keywordsLua, nullptr}},
     {&Language::Makefile, {SCLEX_MAKEFILE, stylesMake, nullptr, nullptr}},
     {&Language::Asm, {SCLEX_ASM, stylesAsm, nullptr, nullptr}},
-    {&Language::JavaScript, {SCLEX_CPP, stylesC, keywordsJavaScript, propertiesC}},
+    {&Language::JavaScript, {SCLEX_CPP, stylesJavaScript, keywordsJsTs, propertiesJavaScript}},
+    {&Language::TypeScript, {SCLEX_CPP, stylesJavaScript, keywordsJsTs, propertiesJavaScript}},
+    {&Language::CSS, {SCLEX_CSS, stylesCSS, keywordsCSS, nullptr}},
+    // XML is LexHTML's other entry point (lmXML, "xml"), so it reuses HTML's
+    // tables wholesale.
+    {&Language::XML, {SCLEX_XML, stylesHTML, keywordsHTML, propertiesHTML}},
     {&Language::Rust, {SCLEX_RUST, stylesRust, keywordsRust, nullptr}},
     {&Language::Python, {SCLEX_PYTHON, stylesPython, keywordsPython, propertiesPython}},
     {&Language::Bash, {SCLEX_BASH, stylesBash, keywordsBash, nullptr}},
