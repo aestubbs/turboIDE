@@ -1,0 +1,38 @@
+Third-party notices
+===================
+
+This file records attribution for third-party work that turbo's own source
+draws on, beyond the dependencies vendored under deps/ (each of which carries
+its own licence in-tree).
+
+
+Elixir lexer (source/turbo-core/lexers/LexElixir.cxx)
+-----------------------------------------------------
+
+Lexilla ships no Elixir lexer, so turbo carries its own. The lexer is an
+original C++ state machine and contains no third-party code, but its token
+inventory -- the keyword and guard lists, the set of lexical categories, and
+the sigil semantics (lowercase sigils interpolate, uppercase ones do not) --
+was transcribed as a specification from the Elixir TextMate grammar.
+
+That grammar's lineage, and the notices it carries:
+
+  Elixir.tmLanguage, from elixir-editors/elixir-tmbundle
+  Licensed under the Apache License, Version 2.0
+  Copyright 2012 Plataformatec
+
+  syntaxes/elixir.json, from elixir-lsp/vscode-elixir-ls, by way of
+  fr1zle/vscode-elixir
+  Licensed under the MIT License
+  Copyright (c) 2016 Mathew McLoughlin
+  Copyright (c) 2017-2022 The Elixir community
+
+No source from either project is copied into turbo; the grammars were read as
+documentation of the language's lexical structure. Both licences are permissive
+and neither is copyleft. Per Apache-2.0 section 4, note that no files from
+elixir-tmbundle are distributed here, modified or otherwise.
+
+The lexer is validated against the highlight fixtures in
+elixir-lang/tree-sitter-elixir (Apache-2.0, Copyright 2021 The Elixir Team).
+Those fixtures are used as a test corpus during development and are not
+distributed with turbo.
