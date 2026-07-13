@@ -86,6 +86,9 @@ if (TURBO_ENABLE_TREESITTER)
     set(TS_DIR        "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter")
     set(TS_ELIXIR_DIR "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-elixir")
     set(TS_HEEX_DIR   "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-heex")
+    set(TS_HTML_DIR   "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-html")
+    set(TS_CSS_DIR    "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-css")
+    set(TS_JS_DIR     "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-javascript")
 
     # lib.c is an amalgamation: it #includes the other lib/src/*.c. Compiling it
     # *and* its siblings would duplicate every symbol, so it is the only input.
@@ -123,6 +126,20 @@ if (TURBO_ENABLE_TREESITTER)
     add_library(ts-heex OBJECT "${TS_HEEX_DIR}/src/parser.c")
     target_include_directories(ts-heex PRIVATE "${TS_HEEX_DIR}/src")
 
+    # html and css are injection targets rather than languages turbo lexes
+    # directly: HEEx (and later Blade) embed them, and html in turn injects
+    # javascript into <script> and css into <style>. Without them those regions
+    # keep their host's styling, which is why <script> inside a .heex file used to
+    # render as plain text. Together they are ~0.6 MB of generated C.
+    add_library(ts-html OBJECT "${TS_HTML_DIR}/src/parser.c" "${TS_HTML_DIR}/src/scanner.c")
+    target_include_directories(ts-html PRIVATE "${TS_HTML_DIR}/src")
+
+    add_library(ts-css OBJECT "${TS_CSS_DIR}/src/parser.c" "${TS_CSS_DIR}/src/scanner.c")
+    target_include_directories(ts-css PRIVATE "${TS_CSS_DIR}/src")
+
+    add_library(ts-js OBJECT "${TS_JS_DIR}/src/parser.c" "${TS_JS_DIR}/src/scanner.c")
+    target_include_directories(ts-js PRIVATE "${TS_JS_DIR}/src")
+
     if (MSVC)
         # Elixir's generated parser is a single 12.8 MB / 428k-line translation
         # unit (7001 parser states). Without /bigobj MSVC fails it with C1128,
@@ -130,6 +147,9 @@ if (TURBO_ENABLE_TREESITTER)
         # are the ones that produce the release artifacts, so this is load-bearing.
         target_compile_options(ts-elixir PRIVATE /bigobj)
         target_compile_options(ts-heex PRIVATE /bigobj)
+        target_compile_options(ts-html PRIVATE /bigobj)
+        target_compile_options(ts-css PRIVATE /bigobj)
+        target_compile_options(ts-js PRIVATE /bigobj)
     endif()
 
     # The grammars' generated parsers are huge (Elixir's is ~12.8 MB / 7000 parser
@@ -139,10 +159,17 @@ if (TURBO_ENABLE_TREESITTER)
     # Embed the grammars' own .scm queries by generating a TU from them, rather
     # than pasting them into turbo's source: they stay authoritative in the
     # submodule and cannot go stale against the grammar.
-    file(READ "${TS_ELIXIR_DIR}/queries/highlights.scm" TS_Q_ELIXIR_HL)
-    file(READ "${TS_ELIXIR_DIR}/queries/injections.scm" TS_Q_ELIXIR_INJ)
-    file(READ "${TS_HEEX_DIR}/queries/highlights.scm"   TS_Q_HEEX_HL)
-    file(READ "${TS_HEEX_DIR}/queries/injections.scm"   TS_Q_HEEX_INJ)
+    file(READ "${TS_ELIXIR_DIR}/queries/highlights.scm"    TS_Q_ELIXIR_HL)
+    file(READ "${TS_ELIXIR_DIR}/queries/injections.scm"    TS_Q_ELIXIR_INJ)
+    file(READ "${TS_HEEX_DIR}/queries/highlights.scm"      TS_Q_HEEX_HL)
+    file(READ "${TS_HEEX_DIR}/queries/injections.scm"      TS_Q_HEEX_INJ)
+    file(READ "${TS_HTML_DIR}/queries/highlights.scm"      TS_Q_HTML_HL)
+    file(READ "${TS_HTML_DIR}/queries/injections.scm"      TS_Q_HTML_INJ)
+    file(READ "${TS_CSS_DIR}/queries/highlights.scm"       TS_Q_CSS_HL)
+    file(READ "${TS_JS_DIR}/queries/highlights.scm"        TS_Q_JS_HL)
+    # JSX lives in its own file and must be concatenated onto the main one.
+    file(READ "${TS_JS_DIR}/queries/highlights-jsx.scm"    TS_Q_JS_JSX)
+    file(READ "${TS_JS_DIR}/queries/injections.scm"        TS_Q_JS_INJ)
     set(TS_QUERIES_CXX "${CMAKE_CURRENT_BINARY_DIR}/generated/TSQueries.cxx")
     configure_file(
         "${CMAKE_CURRENT_LIST_DIR}/source/turbo-core/lexers/TSQueries.cxx.in"
@@ -283,6 +310,9 @@ if (TURBO_ENABLE_TREESITTER)
         $<TARGET_OBJECTS:tree-sitter>
         $<TARGET_OBJECTS:ts-elixir>
         $<TARGET_OBJECTS:ts-heex>
+        $<TARGET_OBJECTS:ts-html>
+        $<TARGET_OBJECTS:ts-css>
+        $<TARGET_OBJECTS:ts-js>
     )
 endif()
 add_library(${TURBO}-core
