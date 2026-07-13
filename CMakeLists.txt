@@ -81,6 +81,16 @@ file(GLOB LEXILLA_SRC
 )
 list(APPEND LEXILLA_SRC "${CMAKE_CURRENT_LIST_DIR}/deps/lexilla/src/Lexilla.cxx")
 
+# turbo-owned lexers, for languages Lexilla has none for. They build with the
+# lexilla target rather than turbo-core for two reasons: turbo-core is a unity
+# build and lexers rely on file-local names that collide when batched (the same
+# reason lexilla itself uses a PCH instead), and they need lexilla's lexlib
+# headers. They are named .cxx so the turbo-core *.cc glob leaves them alone.
+list(APPEND LEXILLA_SRC
+    "${CMAKE_CURRENT_LIST_DIR}/source/turbo-core/lexers/LexElixir.cxx"
+    "${CMAKE_CURRENT_LIST_DIR}/source/turbo-core/lexers/TurboLexers.cxx"
+)
+
 add_library(scintilla OBJECT ${SCINTILLA_SRC})
 add_library(lexilla OBJECT ${LEXILLA_SRC})
 
@@ -119,6 +129,9 @@ target_include_directories(lexilla PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/deps/scintilla/include"
     "${CMAKE_CURRENT_LIST_DIR}/deps/lexilla/include"
     "${CMAKE_CURRENT_LIST_DIR}/deps/lexilla/lexlib"
+    # turbo-owned lexers (source/turbo-core/lexers) share the style ids with
+    # styles.cc through <turbo/lexelixir.h>.
+    "${CMAKE_CURRENT_LIST_DIR}/include"
 )
 
 # Target 'vterm' (libvterm: VT/ANSI terminal-emulation core, MIT-licensed)

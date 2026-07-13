@@ -1,6 +1,7 @@
 #include <tvision/tv.h>
 #include <turbo/scintilla.h>
 #include <turbo/styles.h>
+#include <turbo/lexelixir.h>
 #include <turbo/tpath.h>
 #include <string_view>
 #include "utils.h"
@@ -1228,6 +1229,50 @@ constexpr LexerSettings::PropertyMapping propertiesMarkdown[] =
 };
 
 
+// Elixir is lexed by turbo's own lexer (source/turbo-core/lexers/LexElixir.cxx)
+// -- Lexilla ships none, and the nearest lexers actively corrupt Elixir: Erlang
+// reads '%' as a comment, so every %{} map turns into one.
+constexpr LexerSettings::StyleMapping stylesElixir[] =
+{
+    {SCE_ELIXIR_DEFAULT,            sNormal},
+    {SCE_ELIXIR_COMMENT,            sComment},
+    {SCE_ELIXIR_NUMBER,             sNumberLiteral},
+    {SCE_ELIXIR_STRING,             sStringLiteral},
+    {SCE_ELIXIR_CHARLIST,           sCharLiteral},
+    {SCE_ELIXIR_SIGIL,              sStringLiteral},
+    {SCE_ELIXIR_SIGIL_MARK,         sMisc},
+    {SCE_ELIXIR_KEYWORD,            sKeyword1},
+    {SCE_ELIXIR_KEYWORD2,           sKeyword2},
+    {SCE_ELIXIR_ATOM,               sConstant},
+    {SCE_ELIXIR_MODULE,             sTypeName},
+    {SCE_ELIXIR_ATTRIBUTE,          sPreprocessor},
+    {SCE_ELIXIR_OPERATOR,           sOperator},
+    {SCE_ELIXIR_IDENTIFIER,         sIdentifier},
+    {SCE_ELIXIR_FUNCTION,           sFunctionName},
+    {SCE_ELIXIR_INTERPOLATION,      sEscapeSequence},
+    {SCE_ELIXIR_CHARACTER,          sCharLiteral},
+    {SCE_ELIXIR_ERROR,              sError},
+};
+
+constexpr LexerSettings::KeywordMapping keywordsElixir[] =
+{
+    {0,
+"after alias and case catch cond def defdelegate defexception defguard defguardp "
+"defimpl defmacro defmacrop defmodule defn defnp defoverridable defp defprotocol "
+"defstruct do else end fn for if import in not or quote raise receive require "
+"rescue try unless unquote unquote_splicing use when with "
+"nil true false "
+"__MODULE__ __DIR__ __ENV__ __CALLER__ __STACKTRACE__ "
+    },
+    {1,
+"is_atom is_binary is_bitstring is_boolean is_exception is_float is_function "
+"is_integer is_list is_map is_map_key is_nil is_number is_pid is_port "
+"is_reference is_struct is_tuple "
+"abs binary_part bit_size byte_size ceil div elem floor hd length map_size max "
+"min node rem round self tl trunc tuple_size "
+    },
+};
+
 constexpr struct { const Language *language; LexerSettings lexer; } builtInLexers[] =
 {
     {&Language::CPP, {SCLEX_CPP, stylesC, keywordsC, propertiesC}},
@@ -1252,6 +1297,7 @@ constexpr struct { const Language *language; LexerSettings lexer; } builtInLexer
     {&Language::Go, {SCLEX_CPP, stylesC, keywordsGo, propertiesC}},
     {&Language::PHP, {SCLEX_HTML, stylesHTML, keywordsHTML, propertiesHTML}},
     {&Language::Markdown, {SCLEX_MARKDOWN, stylesMarkdown, nullptr, propertiesMarkdown}},
+    {&Language::Elixir, {SCLEX_TURBO_ELIXIR, stylesElixir, keywordsElixir, nullptr}},
 };
 
 TColorAttr coalesce(TColorAttr from, TColorAttr into)
