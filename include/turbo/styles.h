@@ -58,7 +58,8 @@ struct Language
         SQL,
         Go,
         PHP,
-        Elixir;
+        Elixir,
+        HEEx;
 };
 
 enum TextStyle : uchar

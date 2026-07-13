@@ -1,0 +1,17 @@
+// GENERATED FILE -- do not edit. CMake writes this from the query files that
+// ship with the tree-sitter grammars, so the queries stay authoritative in the
+// submodules and cannot drift from the grammar they were written against.
+//
+//   deps/tree-sitter-elixir/queries/*.scm  Apache-2.0, (c) 2021 The Elixir Team
+//   deps/tree-sitter-heex/queries/*.scm    MIT, (c) 2021 Marlus Saraiva
+//
+// See THIRD-PARTY-NOTICES.
+
+namespace turbo {
+
+extern const char kQueryElixirHighlights[] = R"SCM(@TS_Q_ELIXIR_HL@)SCM";
+extern const char kQueryElixirInjections[] = R"SCM(@TS_Q_ELIXIR_INJ@)SCM";
+extern const char kQueryHeexHighlights[]   = R"SCM(@TS_Q_HEEX_HL@)SCM";
+extern const char kQueryHeexInjections[]   = R"SCM(@TS_Q_HEEX_INJ@)SCM";
+
+} // namespace turbo

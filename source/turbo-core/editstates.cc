@@ -4,7 +4,7 @@
 #include <turbo/editstates.h>
 #include <turbo/scintilla.h>
 #include <turbo/scintilla/internals.h>
-#include <turbo/lexelixir.h> // turbo::createLexer (turbo's lexers, then Lexilla's)
+#include <turbo/lexts.h> // turbo::createLexer (turbo's lexers, then Lexilla's)
 
 namespace turbo {
 
@@ -567,7 +567,9 @@ static const char *lexerNameForId(int id)
         case SCLEX_LATEX:      return "latex";
         case SCLEX_SQL:        return "sql";
         case SCLEX_MARKDOWN:   return "markdown";
-        case SCLEX_TURBO_ELIXIR: return "elixir"; // turbo's own; see TurboLexers.cxx
+        // turbo's own, tree-sitter backed; see TurboLexers.cxx / TSLexer.cxx.
+        case SCLEX_TURBO_ELIXIR: return "elixir";
+        case SCLEX_TURBO_HEEX:   return "heex";
         default:               return nullptr;
     }
 }

@@ -73,6 +73,75 @@ include(GNUInstallDirs)
 # Scintilla core can use a Unity Build; the lexers cannot (each LexXxx.cxx relies
 # on file-local names that collide when batched), so lexilla uses a PCH instead.
 
+# Targets 'tree-sitter', 'ts-elixir', 'ts-heex'
+#
+# Lexilla ships no Elixir or HEEx lexer, and HEEx cannot sensibly be hand-lexed:
+# it is a three-level embedding (Elixir -> ~H"""...""" -> HTML -> {...} ->
+# Elixir). Tree-sitter parses rather than regex-matches, which is what makes the
+# nesting tractable, and it is a plain C library with checked-in generated
+# parsers -- no CLI, no node, no new language runtime.
+option(TURBO_ENABLE_TREESITTER "Build the tree-sitter lexer (Elixir, HEEx)" ON)
+
+if (TURBO_ENABLE_TREESITTER)
+    set(TS_DIR        "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter")
+    set(TS_ELIXIR_DIR "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-elixir")
+    set(TS_HEEX_DIR   "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-heex")
+
+    # lib.c is an amalgamation: it #includes the other lib/src/*.c. Compiling it
+    # *and* its siblings would duplicate every symbol, so it is the only input.
+    add_library(tree-sitter OBJECT "${TS_DIR}/lib/src/lib.c")
+    target_include_directories(tree-sitter
+        PUBLIC  "${TS_DIR}/lib/include"
+        PRIVATE "${TS_DIR}/lib/src"
+    )
+    set_target_properties(tree-sitter PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+
+    # One tree-sitter, one version -- the split below is NOT two copies of it.
+    #
+    # A grammar's src/tree_sitter/parser.h is not the runtime; it is the codegen
+    # contract its generated parser.c was built against, and it ships inside the
+    # grammar precisely so the grammar compiles standalone. The runtime
+    # deliberately publishes only api.h (see lib/include/tree_sitter/), and it
+    # accepts any grammar in an ABI window -- currently 13..15 -- so that
+    # consumers need not regenerate every grammar in lockstep with it.
+    #
+    # Elixir's parser is generated at ABI 14, HEEx's at 15. Both talk to the one
+    # runtime through the one api.h; they just each need their own src/ on the
+    # include path while compiling, because a parser.c only compiles against the
+    # header it was generated with. Two object libraries is simply the tidiest way
+    # to give each its own include path. (No newer Elixir grammar exists at ABI 15
+    # -- even upstream main is still 14 -- and forcing a match would mean
+    # regenerating the parsers ourselves, which buys a toolchain dependency on the
+    # tree-sitter CLI and a fork of 12.8 MB of generated code to avoid four lines
+    # of CMake.)
+    add_library(ts-elixir OBJECT
+        "${TS_ELIXIR_DIR}/src/parser.c"
+        "${TS_ELIXIR_DIR}/src/scanner.c"
+    )
+    target_include_directories(ts-elixir PRIVATE "${TS_ELIXIR_DIR}/src")
+
+    add_library(ts-heex OBJECT "${TS_HEEX_DIR}/src/parser.c")
+    target_include_directories(ts-heex PRIVATE "${TS_HEEX_DIR}/src")
+
+    # The grammars' generated parsers are huge (Elixir's is ~12.8 MB / 7000 parser
+    # states) and force -O0 on themselves with a #pragma, so a slow compile of
+    # these two files is expected and not worth fighting.
+
+    # Embed the grammars' own .scm queries by generating a TU from them, rather
+    # than pasting them into turbo's source: they stay authoritative in the
+    # submodule and cannot go stale against the grammar.
+    file(READ "${TS_ELIXIR_DIR}/queries/highlights.scm" TS_Q_ELIXIR_HL)
+    file(READ "${TS_ELIXIR_DIR}/queries/injections.scm" TS_Q_ELIXIR_INJ)
+    file(READ "${TS_HEEX_DIR}/queries/highlights.scm"   TS_Q_HEEX_HL)
+    file(READ "${TS_HEEX_DIR}/queries/injections.scm"   TS_Q_HEEX_INJ)
+    set(TS_QUERIES_CXX "${CMAKE_CURRENT_BINARY_DIR}/generated/TSQueries.cxx")
+    configure_file(
+        "${CMAKE_CURRENT_LIST_DIR}/source/turbo-core/lexers/TSQueries.cxx.in"
+        "${TS_QUERIES_CXX}"
+        @ONLY
+    )
+endif()
+
 file(GLOB SCINTILLA_SRC "${CMAKE_CURRENT_LIST_DIR}/deps/scintilla/src/*.cxx")
 
 file(GLOB LEXILLA_SRC
@@ -87,9 +156,14 @@ list(APPEND LEXILLA_SRC "${CMAKE_CURRENT_LIST_DIR}/deps/lexilla/src/Lexilla.cxx"
 # reason lexilla itself uses a PCH instead), and they need lexilla's lexlib
 # headers. They are named .cxx so the turbo-core *.cc glob leaves them alone.
 list(APPEND LEXILLA_SRC
-    "${CMAKE_CURRENT_LIST_DIR}/source/turbo-core/lexers/LexElixir.cxx"
     "${CMAKE_CURRENT_LIST_DIR}/source/turbo-core/lexers/TurboLexers.cxx"
 )
+if (TURBO_ENABLE_TREESITTER)
+    list(APPEND LEXILLA_SRC
+        "${CMAKE_CURRENT_LIST_DIR}/source/turbo-core/lexers/TSLexer.cxx"
+        "${TS_QUERIES_CXX}"
+    )
+endif()
 
 add_library(scintilla OBJECT ${SCINTILLA_SRC})
 add_library(lexilla OBJECT ${LEXILLA_SRC})
@@ -130,9 +204,15 @@ target_include_directories(lexilla PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/deps/lexilla/include"
     "${CMAKE_CURRENT_LIST_DIR}/deps/lexilla/lexlib"
     # turbo-owned lexers (source/turbo-core/lexers) share the style ids with
-    # styles.cc through <turbo/lexelixir.h>.
+    # styles.cc through <turbo/lexts.h>.
     "${CMAKE_CURRENT_LIST_DIR}/include"
 )
+if (TURBO_ENABLE_TREESITTER)
+    # Only tree-sitter's public api.h -- deliberately NOT either grammar's src/,
+    # which would drag in a conflicting tree_sitter/parser.h (see above).
+    target_include_directories(lexilla PRIVATE "${TS_DIR}/lib/include")
+    target_compile_definitions(lexilla PRIVATE TURBO_ENABLE_TREESITTER)
+endif()
 
 # Target 'vterm' (libvterm: VT/ANSI terminal-emulation core, MIT-licensed)
 #
@@ -185,10 +265,20 @@ include(deps/CMakeLists.txt)
 set(TURBO turbo)
 
 file(GLOB_RECURSE TURBO_CORE_SRC "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}-core/*.cc")
-add_library(${TURBO}-core
-    ${TURBO_CORE_SRC}
+set(TURBO_CORE_OBJECTS
     $<TARGET_OBJECTS:scintilla>
     $<TARGET_OBJECTS:lexilla>
+)
+if (TURBO_ENABLE_TREESITTER)
+    list(APPEND TURBO_CORE_OBJECTS
+        $<TARGET_OBJECTS:tree-sitter>
+        $<TARGET_OBJECTS:ts-elixir>
+        $<TARGET_OBJECTS:ts-heex>
+    )
+endif()
+add_library(${TURBO}-core
+    ${TURBO_CORE_SRC}
+    ${TURBO_CORE_OBJECTS}
 )
 
 target_compile_features(${TURBO}-core PRIVATE cxx_std_17)
