@@ -1,6 +1,7 @@
 #include <tvision/tv.h>
 #include <turbo/scintilla.h>
 #include <turbo/styles.h>
+#include <turbo/lexts.h>
 #include <turbo/tpath.h>
 #include <string_view>
 #include "utils.h"
@@ -46,7 +47,11 @@ constexpr Language
     Language::SQL {"--", "/*", "*/"},
     Language::Go {"//", "/*", "*/"},
     Language::PHP {"//", "/*", "*/"},
-    Language::Elixir {"#"};
+    Language::Elixir {"#"},
+    // <%!-- --%> is HEEx's own comment: unlike an HTML <!-- --> it also suppresses
+    // the Elixir inside the commented region, so it is the right thing for the
+    // toggle-comment command to insert.
+    Language::HEEx {{}, "<%!--", "--%>"};
 
 static const const_unordered_map<std::string_view, const Language *> mime2lang = {
     {"text/x-c++",                  &Language::CPP},
@@ -133,6 +138,11 @@ static const const_unordered_map<std::string_view, const Language *> ext2lang = 
     {".sql",                        &Language::SQL},
     {".go",                         &Language::Go},
     {".php",                        &Language::PHP},
+    {".ex",                         &Language::Elixir},
+    {".exs",                        &Language::Elixir},
+    // Phoenix templates are usually named foo.html.heex; TPath::extname takes the
+    // last component, so ".heex" covers both that and a bare foo.heex.
+    {".heex",                       &Language::HEEx},
 };
 
 const Language *detectFileLanguage(const char *filePath)
@@ -201,7 +211,10 @@ constexpr TColorDesired
     cErrorBg     = 0xC02437, // error background (red)
     cBraceMatch  = 0xFFD75F, // matching brace (gold)
     cReplaceFg   = 0x10182E, // replace-highlight text (on green)
-    cReplaceBg   = 0x5FA84E; // replace-highlight background (green)
+    cReplaceBg   = 0x5FA84E, // replace-highlight background (green)
+    cFunction    = 0xDCDCAA, // function/method names (soft yellow)
+    cTypeName    = 0x4EC9B0, // user-defined types, classes, modules (teal)
+    cConstant    = 0x62D0E8; // atoms, symbols, enum members (cyan)
 } // namespace
 
 extern constexpr ColorScheme schemeDefault =
@@ -224,6 +237,16 @@ extern constexpr ColorScheme schemeDefault =
     /* sError            */ {cErrorFg   , cErrorBg               },
     /* sBraceMatch       */ {cBraceMatch, {}      , slBold        },
     /* sReplaceHighlight */ {cReplaceFg , cReplaceBg             },
+    // Identifiers default to the normal foreground: the role exists so themes can
+    // pick them out, not to recolour every buffer by default. Tags/attributes
+    // likewise default to the keyword colours markup already used, so enabling
+    // these roles is visually inert until a lexer or theme asks for more.
+    /* sIdentifier       */ {cFg        , {}                     },
+    /* sFunctionName     */ {cFunction  , {}                     },
+    /* sTypeName         */ {cTypeName  , {}                     },
+    /* sConstant         */ {cConstant  , {}                     },
+    /* sTag              */ {cKeyword1  , {}                     },
+    /* sAttribute        */ {cKeyword2  , {}                     },
 };
 
 // Runtime-editable scheme. Filled from the factory default at static-init (see
@@ -253,7 +276,7 @@ constexpr StyleInfo styleInfo[TextStyleCount] =
     /* sLineNums         */ {"sLineNums",         "Line numbers"},
     /* sKeyword1         */ {"sKeyword1",         "Keyword"},
     /* sKeyword2         */ {"sKeyword2",         "Keyword (type)"},
-    /* sMisc             */ {"sMisc",             "Misc / class"},
+    /* sMisc             */ {"sMisc",             "Misc"},
     /* sPreprocessor     */ {"sPreprocessor",     "Preprocessor"},
     /* sOperator         */ {"sOperator",         "Operator"},
     /* sComment          */ {"sComment",          "Comment"},
@@ -264,6 +287,12 @@ constexpr StyleInfo styleInfo[TextStyleCount] =
     /* sError            */ {"sError",            "Error"},
     /* sBraceMatch       */ {"sBraceMatch",       "Matching brace"},
     /* sReplaceHighlight */ {"sReplaceHighlight", "Replace highlight"},
+    /* sIdentifier       */ {"sIdentifier",       "Identifier"},
+    /* sFunctionName     */ {"sFunctionName",     "Function name"},
+    /* sTypeName         */ {"sTypeName",         "Type / class name"},
+    /* sConstant         */ {"sConstant",         "Constant / symbol"},
+    /* sTag              */ {"sTag",              "Markup tag"},
+    /* sAttribute        */ {"sAttribute",        "Markup attribute"},
 };
 } // namespace
 
@@ -341,7 +370,8 @@ constexpr LexerSettings::StyleMapping stylesC[] =
     {SCE_C_OPERATOR,                sOperator},
     {SCE_C_COMMENTLINEDOC,          sComment},
     {SCE_C_WORD2,                   sKeyword2},
-    {SCE_C_GLOBALCLASS,             sMisc},
+    {SCE_C_IDENTIFIER,              sIdentifier},
+    {SCE_C_GLOBALCLASS,             sTypeName},
     {SCE_C_PREPROCESSORCOMMENT,     sComment},
     {SCE_C_PREPROCESSORCOMMENTDOC,  sComment},
     {SCE_C_ESCAPESEQUENCE,          sEscapeSequence},
@@ -426,19 +456,19 @@ constexpr LexerSettings::StyleMapping stylesHTML[] =
 {
     // HTML
     { SCE_H_DEFAULT, sNormal},
-    { SCE_H_TAG, sKeyword1},
+    { SCE_H_TAG, sTag},
     { SCE_H_TAGUNKNOWN, sError},
-    { SCE_H_ATTRIBUTE, sKeyword2},
-    { SCE_H_ATTRIBUTEUNKNOWN, sKeyword2},
+    { SCE_H_ATTRIBUTE, sAttribute},
+    { SCE_H_ATTRIBUTEUNKNOWN, sAttribute},
     { SCE_H_NUMBER, sNumberLiteral},
     { SCE_H_DOUBLESTRING, sStringLiteral},
     { SCE_H_SINGLESTRING, sStringLiteral},
     { SCE_H_OTHER, sNormal},
     { SCE_H_COMMENT, sComment},
     { SCE_H_ENTITY, sNormal},
-    { SCE_H_TAGEND, sKeyword1},
-    { SCE_H_XMLSTART, sKeyword1},
-    { SCE_H_XMLEND,  sKeyword1},
+    { SCE_H_TAGEND, sTag},
+    { SCE_H_XMLSTART, sTag},
+    { SCE_H_XMLEND,  sTag},
     { SCE_H_SCRIPT, sStringLiteral},
     { SCE_H_ASP, sStringLiteral},
     { SCE_H_ASPAT, sStringLiteral},
@@ -680,10 +710,10 @@ constexpr LexerSettings::StyleMapping  stylesPython[] =
     {SCE_P_WORD,                    sKeyword1},
     {SCE_P_TRIPLE,                  sStringLiteral},
     {SCE_P_TRIPLEDOUBLE,            sStringLiteral},
-    {SCE_P_CLASSNAME,               sNormal},
-    {SCE_P_DEFNAME,                 sNormal},
+    {SCE_P_CLASSNAME,               sTypeName},
+    {SCE_P_DEFNAME,                 sFunctionName},
     {SCE_P_OPERATOR,                sOperator},
-    {SCE_P_IDENTIFIER,              sNormal},
+    {SCE_P_IDENTIFIER,              sIdentifier},
     {SCE_P_COMMENTBLOCK,            sComment},
     {SCE_P_STRINGEOL,               sNormal},
     {SCE_P_WORD2,                   sMisc},
@@ -754,14 +784,14 @@ constexpr LexerSettings::StyleMapping  stylesRuby[] =
     {SCE_RB_WORD,                   sKeyword1},
     {SCE_RB_STRING,                 sStringLiteral},
     {SCE_RB_CHARACTER,              sCharLiteral},
-    {SCE_RB_CLASSNAME,              sNormal},
-    {SCE_RB_DEFNAME,                sNormal},
+    {SCE_RB_CLASSNAME,              sTypeName},
+    {SCE_RB_DEFNAME,                sFunctionName},
     {SCE_RB_OPERATOR,               sOperator},
-    {SCE_RB_IDENTIFIER,             sNormal},
+    {SCE_RB_IDENTIFIER,             sIdentifier},
     {SCE_RB_REGEX,                  sNormal},
     {SCE_RB_GLOBAL,                 sNormal},
-    {SCE_RB_SYMBOL,                 sKeyword2},
-    {SCE_RB_MODULE_NAME,            sNormal},
+    {SCE_RB_SYMBOL,                 sConstant},
+    {SCE_RB_MODULE_NAME,            sTypeName},
     {SCE_RB_INSTANCE_VAR,           sNormal},
     {SCE_RB_CLASS_VAR,              sNormal},
     {SCE_RB_BACKTICKS,              sKeyword1},
@@ -1206,6 +1236,42 @@ constexpr LexerSettings::PropertyMapping propertiesMarkdown[] =
 };
 
 
+// Elixir and HEEx are lexed by turbo's tree-sitter lexer
+// (source/turbo-core/lexers/TSLexer.cxx). Lexilla ships neither, and HEEx cannot
+// sensibly be hand-lexed: it is a three-level embedding, and one buffer holds
+// both languages at once (an .ex file embeds HEEx through ~H, a .heex file
+// embeds Elixir through {...} and <%= %>). Hence a single style table, shared by
+// both entries below -- the grammars' capture names are mapped onto these ids
+// per grammar inside the lexer, which is where "attribute" is resolved to a
+// module attribute for Elixir and to an HTML attribute for HEEx.
+//
+// No keyword lists: tree-sitter gets keywords from the grammar, not SCI_SETKEYWORDS.
+constexpr LexerSettings::StyleMapping stylesTS[] =
+{
+    {SCE_TS_DEFAULT,                sNormal},
+    {SCE_TS_COMMENT,                sComment},
+    {SCE_TS_COMMENT_DOC,            sComment},
+    {SCE_TS_KEYWORD,                sKeyword1},
+    {SCE_TS_OPERATOR,               sOperator},
+    {SCE_TS_PUNCTUATION,            sOperator},
+    {SCE_TS_STRING,                 sStringLiteral},
+    {SCE_TS_STRING_ESCAPE,          sEscapeSequence},
+    {SCE_TS_STRING_SPECIAL,         sStringLiteral},
+    {SCE_TS_SYMBOL,                 sConstant},
+    {SCE_TS_REGEX,                  sMisc},
+    {SCE_TS_NUMBER,                 sNumberLiteral},
+    {SCE_TS_CONSTANT,               sConstant},
+    {SCE_TS_VARIABLE,               sIdentifier},
+    {SCE_TS_FUNCTION,               sFunctionName},
+    {SCE_TS_PROPERTY,               sKeyword2},
+    {SCE_TS_MODULE,                 sTypeName},
+    {SCE_TS_ATTRIBUTE,              sPreprocessor},
+    {SCE_TS_TAG,                    sTag},
+    {SCE_TS_TAG_ATTR,               sAttribute},
+    {SCE_TS_EMBEDDED,               sEscapeSequence},
+    {SCE_TS_ERROR,                  sNormal},
+};
+
 constexpr struct { const Language *language; LexerSettings lexer; } builtInLexers[] =
 {
     {&Language::CPP, {SCLEX_CPP, stylesC, keywordsC, propertiesC}},
@@ -1230,6 +1296,8 @@ constexpr struct { const Language *language; LexerSettings lexer; } builtInLexer
     {&Language::Go, {SCLEX_CPP, stylesC, keywordsGo, propertiesC}},
     {&Language::PHP, {SCLEX_HTML, stylesHTML, keywordsHTML, propertiesHTML}},
     {&Language::Markdown, {SCLEX_MARKDOWN, stylesMarkdown, nullptr, propertiesMarkdown}},
+    {&Language::Elixir, {SCLEX_TURBO_ELIXIR, stylesTS, nullptr, nullptr}},
+    {&Language::HEEx, {SCLEX_TURBO_HEEX, stylesTS, nullptr, nullptr}},
 };
 
 TColorAttr coalesce(TColorAttr from, TColorAttr into)

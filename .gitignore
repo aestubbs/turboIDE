@@ -16,6 +16,10 @@
 !.github/
 !.github/**/
 
+# Root-level files with no extension (the '!*.*' rule below only rescues
+# names containing a dot).
+!THIRD-PARTY-NOTICES
+
 !*.*
 *~/
 .*

@@ -1,0 +1,42 @@
+Third-party notices
+===================
+
+This file records attribution for third-party work turbo depends on beyond the
+libraries vendored under deps/ that carry their own licence in-tree.
+
+
+Tree-sitter, and the Elixir and HEEx grammars
+---------------------------------------------
+
+Lexilla ships no Elixir or HEEx lexer, so turbo lexes both with tree-sitter
+(source/turbo-core/lexers/TSLexer.cxx). Three submodules are vendored and
+compiled into the binary:
+
+  deps/tree-sitter            MIT
+                              Copyright (c) 2018-2024 Max Brunsfeld
+                              https://github.com/tree-sitter/tree-sitter
+
+  deps/tree-sitter-elixir     Apache License, Version 2.0
+                              Copyright 2021 The Elixir Team
+                              https://github.com/elixir-lang/tree-sitter-elixir
+
+  deps/tree-sitter-heex       MIT
+                              Copyright (c) 2021 Marlus Saraiva
+                              https://github.com/phoenixframework/tree-sitter-heex
+
+Each submodule carries its own LICENSE (and, for tree-sitter-elixir, a NOTICE)
+in-tree; those files are the authoritative terms and are distributed with the
+source. tree-sitter-elixir is used unmodified.
+
+The grammars' highlight and injection queries (queries/*.scm in each submodule)
+are compiled into the binary verbatim: CMake reads them at build time and
+generates a translation unit from them, so they remain authoritative in the
+submodule rather than being copied into turbo's source. They carry the same
+licences as their repositories, above.
+
+Apache-2.0 section 4 requires that this notice be carried in derivative
+distributions; the full licence text is at deps/tree-sitter-elixir/LICENSE.
+
+The lexer is validated against the highlight fixtures in tree-sitter-elixir
+(test/highlight/*.ex) and tree-sitter-heex (test/highlight/main.heex). Those are
+used as a development test corpus and are not distributed with turbo.

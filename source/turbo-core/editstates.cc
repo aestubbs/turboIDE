@@ -4,7 +4,7 @@
 #include <turbo/editstates.h>
 #include <turbo/scintilla.h>
 #include <turbo/scintilla/internals.h>
-#include <Lexilla.h> // Lexilla::CreateLexer (lexers are external in Scintilla 5.x)
+#include <turbo/lexts.h> // turbo::createLexer (turbo's lexers, then Lexilla's)
 
 namespace turbo {
 
@@ -567,6 +567,9 @@ static const char *lexerNameForId(int id)
         case SCLEX_LATEX:      return "latex";
         case SCLEX_SQL:        return "sql";
         case SCLEX_MARKDOWN:   return "markdown";
+        // turbo's own, tree-sitter backed; see TurboLexers.cxx / TSLexer.cxx.
+        case SCLEX_TURBO_ELIXIR: return "elixir";
+        case SCLEX_TURBO_HEEX:   return "heex";
         default:               return nullptr;
     }
 }
@@ -603,11 +606,12 @@ void applyTheming(const LexerSettings *lexer, const ColorScheme *aScheme, TScint
     setMarkerBackColor(scintilla, markChanged, scheme[sNormal]);
     if (lexer)
     {
-        // Create the lexer through Lexilla (lexers are no longer part of
-        // Scintilla core) and install it with SCI_SETILEXER.
+        // Create the lexer by name (lexers are no longer part of Scintilla
+        // core) and install it with SCI_SETILEXER. createLexer checks turbo's
+        // own lexers first, then falls back to Lexilla's catalogue.
         Scintilla::ILexer5 *ilexer = nullptr;
         if (const char *name = lexerNameForId(lexer->id))
-            ilexer = CreateLexer(name);
+            ilexer = createLexer(name);
         call(scintilla, SCI_SETILEXER, 0, (sptr_t) ilexer);
         for (const auto &s : lexer->styles)
         {
