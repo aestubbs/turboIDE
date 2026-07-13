@@ -13,5 +13,17 @@ extern const char kQueryElixirHighlights[] = R"SCM(@TS_Q_ELIXIR_HL@)SCM";
 extern const char kQueryElixirInjections[] = R"SCM(@TS_Q_ELIXIR_INJ@)SCM";
 extern const char kQueryHeexHighlights[]   = R"SCM(@TS_Q_HEEX_HL@)SCM";
 extern const char kQueryHeexInjections[]   = R"SCM(@TS_Q_HEEX_INJ@)SCM";
+extern const char kQueryHtmlHighlights[]   = R"SCM(@TS_Q_HTML_HL@)SCM";
+extern const char kQueryHtmlInjections[]   = R"SCM(@TS_Q_HTML_INJ@)SCM";
+extern const char kQueryCssHighlights[]    = R"SCM(@TS_Q_CSS_HL@)SCM";
+extern const char kQueryJsHighlights[]     = R"SCM(@TS_Q_JS_HL@)SCM";
+extern const char kQueryJsHighlightsJsx[]  = R"SCM(@TS_Q_JS_JSX@)SCM";
+extern const char kQueryJsInjections[]     = R"SCM(@TS_Q_JS_INJ@)SCM";
+extern const char kQueryTsHighlights[]     = R"SCM(@TS_Q_TS_HL@)SCM";
+extern const char kQueryPhpHighlights[]    = R"SCM(@TS_Q_PHP_HL@)SCM";
+extern const char kQueryPhpInjections[]    = R"SCM(@TS_Q_PHP_INJ@)SCM";
+extern const char kQueryPhpInjectionsText[] = R"SCM(@TS_Q_PHP_TEXT_INJ@)SCM";
+extern const char kQueryBladeHighlights[]  = R"SCM(@TS_Q_BLADE_HL@)SCM";
+extern const char kQueryBladeInjections[]  = R"SCM(@TS_Q_BLADE_INJ@)SCM";
 
 } // namespace turbo

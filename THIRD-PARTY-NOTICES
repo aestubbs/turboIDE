@@ -24,6 +24,35 @@ compiled into the binary:
                               Copyright (c) 2021 Marlus Saraiva
                               https://github.com/phoenixframework/tree-sitter-heex
 
+  deps/tree-sitter-html       MIT
+                              Copyright (c) 2019 Max Brunsfeld
+                              https://github.com/tree-sitter/tree-sitter-html
+
+  deps/tree-sitter-css        MIT
+                              Copyright (c) 2018 Max Brunsfeld
+                              https://github.com/tree-sitter/tree-sitter-css
+
+  deps/tree-sitter-javascript MIT
+                              Copyright (c) 2017 Max Brunsfeld
+                              https://github.com/tree-sitter/tree-sitter-javascript
+
+  deps/tree-sitter-php        MIT
+                              Copyright (c) 2017 Josh Vera
+                              https://github.com/tree-sitter/tree-sitter-php
+                              (both dialects: 'php' for .php files, and
+                              'php_only', which Blade injects into)
+
+  deps/tree-sitter-typescript MIT
+                              Copyright (c) 2017 GitHub
+                              https://github.com/tree-sitter/tree-sitter-typescript
+                              (only the tsx dialect is compiled; it serves .ts
+                              as well as .tsx)
+
+  deps/tree-sitter-blade      MIT
+                              Copyright (c) 2023 Emran Mohammad Reza
+                              https://github.com/EmranMR/tree-sitter-blade
+                              (built only when TURBO_TS_BLADE is on)
+
 Each submodule carries its own LICENSE (and, for tree-sitter-elixir, a NOTICE)
 in-tree; those files are the authoritative terms and are distributed with the
 source. tree-sitter-elixir is used unmodified.

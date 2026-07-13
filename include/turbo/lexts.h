@@ -10,6 +10,10 @@ namespace turbo {
 // can never collide with one of ours.
 constexpr int SCLEX_TURBO_ELIXIR = 1001;
 constexpr int SCLEX_TURBO_HEEX = 1002;
+constexpr int SCLEX_TURBO_BLADE = 1003;
+constexpr int SCLEX_TURBO_JS = 1004;
+constexpr int SCLEX_TURBO_TSX = 1005;    // serves .ts as well as .tsx
+constexpr int SCLEX_TURBO_PHP = 1006;
 
 // Style ids emitted by the tree-sitter lexer. One set is shared by Elixir and
 // HEEx, because a single buffer contains both: an .ex file embeds HEEx through

@@ -567,9 +567,15 @@ static const char *lexerNameForId(int id)
         case SCLEX_LATEX:      return "latex";
         case SCLEX_SQL:        return "sql";
         case SCLEX_MARKDOWN:   return "markdown";
+        case SCLEX_CSS:        return "css";
+        case SCLEX_XML:        return "xml";   // LexHTML's other entry point
         // turbo's own, tree-sitter backed; see TurboLexers.cxx / TSLexer.cxx.
         case SCLEX_TURBO_ELIXIR: return "elixir";
         case SCLEX_TURBO_HEEX:   return "heex";
+        case SCLEX_TURBO_BLADE:  return "blade";
+        case SCLEX_TURBO_JS:     return "javascript";
+        case SCLEX_TURBO_TSX:    return "tsx";
+        case SCLEX_TURBO_PHP:    return "php";
         default:               return nullptr;
     }
 }

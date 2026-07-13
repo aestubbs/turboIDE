@@ -58,6 +58,15 @@ using namespace Lexilla;
 extern "C" {
 const TSLanguage *tree_sitter_elixir(void);
 const TSLanguage *tree_sitter_heex(void);
+const TSLanguage *tree_sitter_html(void);
+const TSLanguage *tree_sitter_css(void);
+const TSLanguage *tree_sitter_javascript(void);
+const TSLanguage *tree_sitter_tsx(void);
+const TSLanguage *tree_sitter_php(void);
+#ifdef TURBO_TS_BLADE
+const TSLanguage *tree_sitter_php_only(void);
+const TSLanguage *tree_sitter_blade(void);
+#endif
 }
 
 namespace turbo {
@@ -66,6 +75,20 @@ extern const char kQueryElixirHighlights[];
 extern const char kQueryElixirInjections[];
 extern const char kQueryHeexHighlights[];
 extern const char kQueryHeexInjections[];
+extern const char kQueryHtmlHighlights[];
+extern const char kQueryHtmlInjections[];
+extern const char kQueryCssHighlights[];
+extern const char kQueryJsHighlights[];
+extern const char kQueryJsHighlightsJsx[];
+extern const char kQueryJsInjections[];
+extern const char kQueryTsHighlights[];
+extern const char kQueryPhpHighlights[];
+extern const char kQueryPhpInjections[];
+extern const char kQueryPhpInjectionsText[];
+#ifdef TURBO_TS_BLADE
+extern const char kQueryBladeHighlights[];
+extern const char kQueryBladeInjections[];
+#endif
 } // namespace turbo
 
 namespace {
@@ -153,6 +176,95 @@ constexpr CaptureMap kHeexCaptures[] = {
     // make the buffer strobe.
 };
 
+constexpr CaptureMap kHtmlCaptures[] = {
+    {"tag",                 SCE_TS_TAG},
+    {"attribute",           SCE_TS_TAG_ATTR},
+    {"string",              SCE_TS_STRING},
+    {"comment",             SCE_TS_COMMENT},
+    {"constant",            SCE_TS_CONSTANT},        // doctype
+    {"punctuation.bracket", SCE_TS_PUNCTUATION},
+    // "tag.error" omitted: same strobing argument as HEEx's "error".
+};
+
+constexpr CaptureMap kCssCaptures[] = {
+    {"property",              SCE_TS_TAG_ATTR},      // colour, display, --gap
+    {"attribute",             SCE_TS_TAG_ATTR},
+    {"tag",                   SCE_TS_TAG},           // element selectors
+    {"type",                  SCE_TS_MODULE},
+    {"keyword",               SCE_TS_KEYWORD},
+    {"media",                 SCE_TS_KEYWORD},
+    {"supports",              SCE_TS_KEYWORD},
+    {"charset",               SCE_TS_KEYWORD},
+    {"import",                SCE_TS_KEYWORD},
+    {"namespace",             SCE_TS_KEYWORD},
+    {"keyframes",             SCE_TS_KEYWORD},
+    {"function",              SCE_TS_FUNCTION},      // rgb(), var()
+    {"variable",              SCE_TS_CONSTANT},      // --custom-property
+    {"string",                SCE_TS_STRING},
+    {"string.special",        SCE_TS_STRING_SPECIAL},
+    {"number",                SCE_TS_NUMBER},
+    {"operator",              SCE_TS_OPERATOR},
+    {"punctuation.bracket",   SCE_TS_PUNCTUATION},
+    {"punctuation.delimiter", SCE_TS_PUNCTUATION},
+    {"comment",               SCE_TS_COMMENT},
+};
+
+constexpr CaptureMap kJsCaptures[] = {
+    {"keyword",               SCE_TS_KEYWORD},
+    {"string",                SCE_TS_STRING},
+    {"string.special",        SCE_TS_REGEX},         // regex literals
+    {"number",                SCE_TS_NUMBER},
+    {"comment",               SCE_TS_COMMENT},
+    {"operator",              SCE_TS_OPERATOR},
+    {"punctuation.bracket",   SCE_TS_PUNCTUATION},
+    {"punctuation.delimiter", SCE_TS_PUNCTUATION},
+    {"punctuation.special",   SCE_TS_EMBEDDED},      // the ${ } of a template literal
+    {"embedded",              SCE_TS_EMBEDDED},
+    {"function",              SCE_TS_FUNCTION},
+    {"function.builtin",      SCE_TS_FUNCTION},
+    {"function.method",       SCE_TS_FUNCTION},
+    {"constructor",           SCE_TS_MODULE},        // class names
+    {"constant",              SCE_TS_CONSTANT},
+    {"constant.builtin",      SCE_TS_CONSTANT},
+    {"variable",              SCE_TS_VARIABLE},
+    {"variable.builtin",      SCE_TS_CONSTANT},      // this, super
+    {"property",              SCE_TS_PROPERTY},
+    {"tag",                   SCE_TS_TAG},           // JSX
+    {"attribute",             SCE_TS_TAG_ATTR},      // JSX
+    // TypeScript's additions. Harmless in plain JavaScript, whose grammar never
+    // produces them, so one map serves both.
+    {"type",                  SCE_TS_MODULE},
+    {"type.builtin",          SCE_TS_MODULE},
+    {"variable.parameter",    SCE_TS_VARIABLE},
+};
+
+constexpr CaptureMap kPhpCaptures[] = {
+    {"keyword",           SCE_TS_KEYWORD},
+    {"comment",           SCE_TS_COMMENT},
+    {"string",            SCE_TS_STRING},
+    {"number",            SCE_TS_NUMBER},
+    {"operator",          SCE_TS_OPERATOR},
+    {"function",          SCE_TS_FUNCTION},
+    {"function.builtin",  SCE_TS_FUNCTION},
+    {"function.method",   SCE_TS_FUNCTION},
+    {"constructor",       SCE_TS_MODULE},
+    {"constant",          SCE_TS_CONSTANT},
+    {"constant.builtin",  SCE_TS_CONSTANT},          // true, false, null
+    {"variable",          SCE_TS_VARIABLE},          // $foo
+    {"variable.builtin",  SCE_TS_CONSTANT},          // $this
+    {"property",          SCE_TS_PROPERTY},
+    {"module",            SCE_TS_MODULE},            // namespaces
+    {"module.builtin",    SCE_TS_MODULE},
+    {"type",              SCE_TS_MODULE},
+    {"type.builtin",      SCE_TS_MODULE},            // int, string, void
+    {"tag",               SCE_TS_TAG},               // the <?php ... ?> tags
+};
+
+// Blade reuses the HTML capture map: its own highlights.scm adds only (directive)
+// and the {{ }} braces, captured as "tag" and "punctuation.bracket", both of
+// which HTML already maps. Directives therefore share a colour with HTML tags,
+// which is what the grammar's author intended and what other editors show.
+
 // ---------------------------------------------------------------------------
 // Query predicates.
 //
@@ -173,10 +285,22 @@ struct Predicate {
     bool hasRe = false;
 };
 
+// `(#offset! @cap sr sc er ec)` shifts the captured range's start and end points
+// by the given row/column deltas. HEEx uses it to peel a <script>...</script>
+// tag down to its contents (it captures the whole tag, then trims 1 row off the
+// front and 9 columns off the back). Ignoring it -- as tree-sitter-highlight
+// does -- means handing the JavaScript parser the surrounding markup, which is a
+// syntax error, so the script block simply does not highlight.
+struct InjOffset {
+    int startRow = 0, startCol = 0, endRow = 0, endCol = 0;
+    bool set = false;
+};
+
 struct InjSettings {
     std::string language;
     bool combined = false;
     bool includeChildren = false;
+    InjOffset offset;
 };
 
 std::string queryStr(const TSQuery *q, uint32_t id)
@@ -261,6 +385,18 @@ std::vector<InjSettings> loadInjSettings(const std::vector<std::vector<Predicate
             else if (key == "injection.include-children")
                 out[p].includeChildren = true;
         }
+    // #offset! is a predicate, not a #set!, so it arrives with the capture as its
+    // first argument and the four deltas after it.
+    for (size_t p = 0; p < preds.size(); ++p)
+        for (const Predicate &pr : preds[p]) {
+            if (pr.op != "offset!" || pr.args.size() < 5)
+                continue;
+            out[p].offset.startRow = atoi(pr.args[1].str.c_str());
+            out[p].offset.startCol = atoi(pr.args[2].str.c_str());
+            out[p].offset.endRow = atoi(pr.args[3].str.c_str());
+            out[p].offset.endCol = atoi(pr.args[4].str.c_str());
+            out[p].offset.set = true;
+        }
     return out;
 }
 
@@ -270,6 +406,7 @@ struct Grammar {
     TSQuery *injections = nullptr;
     std::vector<int> captureStyle;                  // highlight capture id -> style
     std::vector<uint32_t> injContentCaptures;       // injection capture ids named injection.content
+    std::vector<uint32_t> injLangCaptures;          // ... named injection.language (dynamic form)
     std::vector<std::vector<Predicate>> hlPreds;
     std::vector<std::vector<Predicate>> injPreds;
     std::vector<InjSettings> injSettings;
@@ -291,20 +428,41 @@ int styleForCapture(const std::string &name, const CaptureMap *map, size_t n)
     }
 }
 
-TSQuery *compileQuery(const TSLanguage *lang, const char *src)
+TSQuery *compileQuery(const TSLanguage *lang, const std::string &src)
 {
     uint32_t errOffset = 0;
     TSQueryError errType = TSQueryErrorNone;
-    return ts_query_new(lang, src, (uint32_t) strlen(src), &errOffset, &errType);
+    return ts_query_new(lang, src.c_str(), (uint32_t) src.size(), &errOffset, &errType);
 }
 
-Grammar buildGrammar(const TSLanguage *lang, const char *hlSrc, const char *injSrc,
+// Queries come in pieces and must be concatenated, for three separate reasons:
+//   - a grammar can split them (JavaScript keeps JSX in highlights-jsx.scm, PHP
+//     keeps its HTML injection in injections-text.scm);
+//   - a dialect can be a delta on another (TypeScript's highlights are only the
+//     type-syntax additions to JavaScript's);
+//   - a query can open with `; inherits: html`, which is an nvim-treesitter
+//     convention rather than anything tree-sitter core understands. Prepending
+//     the inherited grammar's source here *is* the implementation of it.
+std::string concatQueries(std::initializer_list<const char *> srcs)
+{
+    std::string out;
+    for (const char *s : srcs)
+        if (s && *s) {
+            out += s;
+            out += '\n';
+        }
+    return out;
+}
+
+Grammar buildGrammar(const TSLanguage *lang,
+                     std::initializer_list<const char *> hlSrcs,
+                     std::initializer_list<const char *> injSrcs,
                      const CaptureMap *map, size_t nMap)
 {
     Grammar g;
     g.language = lang;
-    g.highlights = compileQuery(lang, hlSrc);
-    g.injections = compileQuery(lang, injSrc);
+    g.highlights = compileQuery(lang, concatQueries(hlSrcs));
+    g.injections = compileQuery(lang, concatQueries(injSrcs));
     if (!g.highlights || !g.injections)
         return g;
 
@@ -314,9 +472,13 @@ Grammar buildGrammar(const TSLanguage *lang, const char *hlSrc, const char *injS
         g.captureStyle[i] = styleForCapture(captureName(g.highlights, i), map, nMap);
 
     const uint32_t nInj = ts_query_capture_count(g.injections);
-    for (uint32_t i = 0; i < nInj; ++i)
-        if (captureName(g.injections, i) == "injection.content")
+    for (uint32_t i = 0; i < nInj; ++i) {
+        const std::string n = captureName(g.injections, i);
+        if (n == "injection.content")
             g.injContentCaptures.push_back(i);
+        else if (n == "injection.language")
+            g.injLangCaptures.push_back(i);
+    }
 
     g.hlPreds = loadPredicates(g.highlights);
     g.injPreds = loadPredicates(g.injections);
@@ -326,28 +488,136 @@ Grammar buildGrammar(const TSLanguage *lang, const char *hlSrc, const char *injS
 }
 
 // The grammars and their compiled queries are immutable and shared by every
-// editor; build them once.
+// editor; build them once, on first use.
 const Grammar &elixirGrammar()
 {
-    static const Grammar g = buildGrammar(tree_sitter_elixir(), kQueryElixirHighlights,
-                                          kQueryElixirInjections, kElixirCaptures,
-                                          std::size(kElixirCaptures));
+    static const Grammar g = buildGrammar(tree_sitter_elixir(),
+                                          {kQueryElixirHighlights},
+                                          {kQueryElixirInjections},
+                                          kElixirCaptures, std::size(kElixirCaptures));
     return g;
 }
 
 const Grammar &heexGrammar()
 {
-    static const Grammar g = buildGrammar(tree_sitter_heex(), kQueryHeexHighlights,
-                                          kQueryHeexInjections, kHeexCaptures,
-                                          std::size(kHeexCaptures));
+    static const Grammar g = buildGrammar(tree_sitter_heex(),
+                                          {kQueryHeexHighlights},
+                                          {kQueryHeexInjections},
+                                          kHeexCaptures, std::size(kHeexCaptures));
     return g;
 }
 
+const Grammar &htmlGrammar()
+{
+    static const Grammar g = buildGrammar(tree_sitter_html(),
+                                          {kQueryHtmlHighlights},
+                                          {kQueryHtmlInjections},
+                                          kHtmlCaptures, std::size(kHtmlCaptures));
+    return g;
+}
+
+const Grammar &cssGrammar()
+{
+    static const Grammar g = buildGrammar(tree_sitter_css(),
+                                          {kQueryCssHighlights},
+                                          {""},                 // css injects nothing
+                                          kCssCaptures, std::size(kCssCaptures));
+    return g;
+}
+
+const Grammar &jsGrammar()
+{
+    static const Grammar g = buildGrammar(tree_sitter_javascript(),
+                                          {kQueryJsHighlights, kQueryJsHighlightsJsx},
+                                          {kQueryJsInjections},
+                                          kJsCaptures, std::size(kJsCaptures));
+    return g;
+}
+
+const Grammar &tsxGrammar()
+{
+    // TypeScript ships no injections and only a delta highlights file, so tsx is
+    // JavaScript's queries plus TypeScript's. It serves .ts as well as .tsx.
+    static const Grammar g = buildGrammar(tree_sitter_tsx(),
+                                          {kQueryJsHighlights, kQueryJsHighlightsJsx,
+                                           kQueryTsHighlights},
+                                          {kQueryJsInjections},
+                                          kJsCaptures, std::size(kJsCaptures));
+    return g;
+}
+
+const Grammar &phpGrammar()
+{
+    // The HTML injection for a .php file lives in its own query file. Everything
+    // outside <?php ?> is an opaque (text) node, and injections-text.scm is what
+    // feeds those nodes to the HTML parser -- combined, so a <div> opened above a
+    // <?php ?> block and closed below it is still one element rather than two
+    // broken trees. Omit that file and the HTML half of every .php renders as
+    // plain text.
+    static const Grammar g = buildGrammar(tree_sitter_php(),
+                                          {kQueryPhpHighlights},
+                                          {kQueryPhpInjections, kQueryPhpInjectionsText},
+                                          kPhpCaptures, std::size(kPhpCaptures));
+    return g;
+}
+
+#ifdef TURBO_TS_BLADE
+const Grammar &phpOnlyGrammar()
+{
+    static const Grammar g = buildGrammar(tree_sitter_php_only(),
+                                          {kQueryPhpHighlights},
+                                          {kQueryPhpInjections},
+                                          kPhpCaptures, std::size(kPhpCaptures));
+    return g;
+}
+
+const Grammar &bladeGrammar()
+{
+    // Both of Blade's query files open with `; inherits: html`, so HTML's are
+    // prepended -- that comment is the whole of the convention, and this is where
+    // it is honoured. It works because Blade's grammar carries every node type
+    // HTML's queries reference (script_element, tag_name, doctype and the rest),
+    // so they compile against it unchanged. Blade's own patterns come last, which
+    // matters: precedence is last-wins, so a (directive) captured by Blade
+    // overrides anything HTML said about the same bytes.
+    static const Grammar g = buildGrammar(tree_sitter_blade(),
+                                          {kQueryHtmlHighlights, kQueryBladeHighlights},
+                                          {kQueryHtmlInjections, kQueryBladeInjections},
+                                          kHtmlCaptures, std::size(kHtmlCaptures));
+    return g;
+}
+#endif
+
+struct NamedGrammar { const char *name; const Grammar &(*get)(); };
+
+constexpr NamedGrammar kGrammars[] = {
+    {"elixir",     elixirGrammar},
+    {"heex",       heexGrammar},
+    {"html",       htmlGrammar},
+    {"css",        cssGrammar},
+    {"javascript", jsGrammar},
+    {"js",         jsGrammar},      // alias: some queries spell it this way
+    {"tsx",        tsxGrammar},
+    {"typescript", tsxGrammar},     // tsx serves .ts too; see the CMake comment
+    {"php",        phpGrammar},
+#ifdef TURBO_TS_BLADE
+    {"php_only",   phpOnlyGrammar},
+    {"blade",      bladeGrammar},
+#endif
+};
+
+// An injection naming a language we have not vendored is skipped, and the region
+// simply keeps its host's styling. That is deliberate and load-bearing: the
+// grammars' own queries ask for regex, sql, markdown, python, jsdoc, vue and
+// more, and we are never going to carry all of them.
 const Grammar *grammarNamed(const std::string &name)
 {
-    if (name == "elixir") return &elixirGrammar();
-    if (name == "heex")   return &heexGrammar();
-    return nullptr;         // sql, markdown, css, ... : not vendored, so not injected
+    for (const NamedGrammar &n : kGrammars)
+        if (name == n.name) {
+            const Grammar &g = n.get();
+            return g.ok ? &g : nullptr;
+        }
+    return nullptr;
 }
 
 std::string_view nodeText(const std::string &text, TSNode n)
@@ -432,12 +702,73 @@ TSRange rangeOf(TSNode n)
     return r;
 }
 
+std::vector<uint32_t> lineStartsOf(const std::string &text)
+{
+    std::vector<uint32_t> ls{0};
+    for (uint32_t i = 0; i < text.size(); ++i)
+        if (text[i] == '\n')
+            ls.push_back(i + 1);
+    return ls;
+}
+
+// A row/column pair, offset by #offset!'s deltas, converted to a byte. The
+// deltas are signed and routinely push a column negative (HEEx trims -9 columns
+// off the end of a </script>), so this works in signed arithmetic and clamps.
+uint32_t byteAtOffset(const std::vector<uint32_t> &ls, size_t len, long row, long col)
+{
+    if (row < 0)
+        return 0;
+    if ((size_t) row >= ls.size())
+        return (uint32_t) len;
+    const long b = (long) ls[(size_t) row] + col;
+    if (b < 0)
+        return 0;
+    if ((size_t) b > len)
+        return (uint32_t) len;
+    return (uint32_t) b;
+}
+
+// Derive the point from the byte rather than offsetting it separately, so the
+// two halves of the TSRange cannot disagree.
+TSPoint pointForByte(const std::vector<uint32_t> &ls, uint32_t b)
+{
+    auto it = std::upper_bound(ls.begin(), ls.end(), b);
+    const size_t row = (size_t) (it - ls.begin()) - 1;
+    TSPoint p;
+    p.row = (uint32_t) row;
+    p.column = b - ls[row];
+    return p;
+}
+
+TSRange offsetRangeOf(TSNode n, const InjOffset &o, const std::vector<uint32_t> &ls, size_t len)
+{
+    const TSPoint sp = ts_node_start_point(n);
+    const TSPoint ep = ts_node_end_point(n);
+    TSRange r;
+    r.start_byte = byteAtOffset(ls, len, (long) sp.row + o.startRow,
+                                (long) sp.column + o.startCol);
+    r.end_byte = byteAtOffset(ls, len, (long) ep.row + o.endRow,
+                              (long) ep.column + o.endCol);
+    if (r.end_byte < r.start_byte)
+        r.end_byte = r.start_byte;
+    r.start_point = pointForByte(ls, r.start_byte);
+    r.end_point = pointForByte(ls, r.end_byte);
+    return r;
+}
+
 // With injection.include-children off (the default), the injected ranges are the
 // content node's extent minus each of its children -- so an interpolation inside
 // the region is not fed to the child parser as if it were child-language source.
-void appendRanges(std::vector<TSRange> &out, TSNode n, bool includeChildren)
+void appendRanges(std::vector<TSRange> &out, TSNode n, const InjSettings &st,
+                  const std::vector<uint32_t> &ls, size_t len)
 {
-    if (includeChildren) {
+    if (st.offset.set) {
+        // An offset trims the captured node down to the region that is actually
+        // the other language, so children are irrelevant -- the trim is the point.
+        out.push_back(offsetRangeOf(n, st.offset, ls, len));
+        return;
+    }
+    if (st.includeChildren) {
         out.push_back(rangeOf(n));
         return;
     }
@@ -490,6 +821,7 @@ void normalizeRanges(std::vector<TSRange> &r)
 // child tree's nodes carry positions in the *original* document, which is what
 // lets every layer's captures land in one flat style buffer.
 void lexLayer(const Grammar &g, const std::string &text,
+              const std::vector<uint32_t> &lineStarts,
               const std::vector<TSRange> &included, int depth,
               uint32_t startPos, uint32_t endPos, std::vector<Hl> &out, LexStats &stats)
 {
@@ -551,7 +883,12 @@ void lexLayer(const Grammar &g, const std::string &text,
     // they are one valid expression. Byte-range limiting this cursor would drop
     // whichever half is scrolled off-screen and break the pair.
     std::vector<PendingInjection> pending;
-    std::map<uint32_t, std::vector<TSNode>> combined;    // pattern index -> content nodes
+    // Keyed by (pattern, language), not by pattern alone. A combined injection
+    // merges every match of its pattern into one child parse -- but JavaScript's
+    // tagged-template pattern is both combined AND dynamically-languaged, so
+    // keying on the pattern alone would feed a css`...` and an html`...` literal
+    // to the same parser.
+    std::map<std::pair<uint32_t, std::string>, std::vector<TSNode>> combined;
 
     if (TSQueryCursor *cur = ts_query_cursor_new()) {
         ts_query_cursor_exec(cur, g.injections, root);
@@ -560,20 +897,35 @@ void lexLayer(const Grammar &g, const std::string &text,
             if (!predicatesPass(g.injPreds[m.pattern_index], m, text))
                 continue;
             const InjSettings &st = g.injSettings[m.pattern_index];
-            const Grammar *child = grammarNamed(st.language);
+
+            // The language is usually fixed by `#set! injection.language`, but it
+            // can also be dynamic: a capture named @injection.language carries the
+            // name as its own text. That is how a tagged template literal picks its
+            // language -- css`...` injects CSS, and styled.div`...` names a language
+            // ("div") that resolves to nothing and is skipped, which is correct.
+            std::string langName = st.language;
+            if (langName.empty() && !g.injLangCaptures.empty())
+                for (uint16_t i = 0; i < m.capture_count; ++i)
+                    if (std::find(g.injLangCaptures.begin(), g.injLangCaptures.end(),
+                                  m.captures[i].index) != g.injLangCaptures.end()) {
+                        langName = std::string(nodeText(text, m.captures[i].node));
+                        break;
+                    }
+
+            const Grammar *child = grammarNamed(langName);
             if (!child || !child->ok)
-                continue;                   // sql/markdown/css/js: not vendored
+                continue;                   // not vendored: leave the region to its host
             for (uint16_t i = 0; i < m.capture_count; ++i) {
                 const TSQueryCapture &c = m.captures[i];
                 if (std::find(g.injContentCaptures.begin(), g.injContentCaptures.end(),
                               c.index) == g.injContentCaptures.end())
                     continue;
                 if (st.combined) {
-                    combined[m.pattern_index].push_back(c.node);
+                    combined[{m.pattern_index, langName}].push_back(c.node);
                 } else {
                     PendingInjection pi;
                     pi.grammar = child;
-                    appendRanges(pi.ranges, c.node, st.includeChildren);
+                    appendRanges(pi.ranges, c.node, st, lineStarts, text.size());
                     pending.push_back(std::move(pi));
                 }
             }
@@ -582,13 +934,13 @@ void lexLayer(const Grammar &g, const std::string &text,
     }
 
     for (auto &kv : combined) {
-        const InjSettings &st = g.injSettings[kv.first];
+        const InjSettings &st = g.injSettings[kv.first.first];
         PendingInjection pi;
-        pi.grammar = grammarNamed(st.language);
+        pi.grammar = grammarNamed(kv.first.second);
         if (!pi.grammar)
             continue;
         for (TSNode n : kv.second)
-            appendRanges(pi.ranges, n, st.includeChildren);
+            appendRanges(pi.ranges, n, st, lineStarts, text.size());
         pending.push_back(std::move(pi));
     }
 
@@ -609,7 +961,8 @@ void lexLayer(const Grammar &g, const std::string &text,
         for (const TSRange &r : pi.ranges)
             out.push_back({r.start_byte, r.end_byte, 0, (uint8_t) (depth + 1),
                            (char) SCE_TS_DEFAULT});
-        lexLayer(*pi.grammar, text, pi.ranges, depth + 1, startPos, endPos, out, stats);
+        lexLayer(*pi.grammar, text, lineStarts, pi.ranges, depth + 1, startPos, endPos,
+                 out, stats);
     }
 }
 
@@ -696,6 +1049,20 @@ public:
     static ILexer5 *FactoryHeex() {
         return new LexerTS("heex", SCLEX_TURBO_HEEX, heexGrammar);
     }
+    static ILexer5 *FactoryJs() {
+        return new LexerTS("javascript", SCLEX_TURBO_JS, jsGrammar);
+    }
+    static ILexer5 *FactoryTsx() {
+        return new LexerTS("tsx", SCLEX_TURBO_TSX, tsxGrammar);
+    }
+    static ILexer5 *FactoryPhp() {
+        return new LexerTS("php", SCLEX_TURBO_PHP, phpGrammar);
+    }
+#ifdef TURBO_TS_BLADE
+    static ILexer5 *FactoryBlade() {
+        return new LexerTS("blade", SCLEX_TURBO_BLADE, bladeGrammar);
+    }
+#endif
 };
 
 void SCI_METHOD LexerTS::Lex(Sci_PositionU startPos, Sci_Position length, int,
@@ -716,8 +1083,10 @@ void SCI_METHOD LexerTS::Lex(Sci_PositionU startPos, Sci_Position length, int,
 
         std::vector<Hl> hls;
         LexStats stats;
+        const std::vector<uint32_t> lineStarts = lineStartsOf(text);
         const auto t0 = std::chrono::steady_clock::now();
-        lexLayer(rootGrammar(), text, {}, 0, (uint32_t) startPos, endPos, hls, stats);
+        lexLayer(rootGrammar(), text, lineStarts, {}, 0, (uint32_t) startPos, endPos,
+                 hls, stats);
         const auto t1 = std::chrono::steady_clock::now();
         tsLog("lex %s bytes=%ld range=[%u,%u) layers=%d parses=%d hls=%zu %.1f ms\n",
               GetName(), (long) docLen, (unsigned) startPos, endPos,
@@ -843,4 +1212,10 @@ void SCI_METHOD LexerTS::Fold(Sci_PositionU startPos, Sci_Position length, int,
 namespace Lexilla {
 extern const LexerModule lmTurboTsElixir(SCLEX_TURBO_ELIXIR, LexerTS::FactoryElixir, "elixir");
 extern const LexerModule lmTurboTsHeex(SCLEX_TURBO_HEEX, LexerTS::FactoryHeex, "heex");
+extern const LexerModule lmTurboTsJs(SCLEX_TURBO_JS, LexerTS::FactoryJs, "javascript");
+extern const LexerModule lmTurboTsTsx(SCLEX_TURBO_TSX, LexerTS::FactoryTsx, "tsx");
+extern const LexerModule lmTurboTsPhp(SCLEX_TURBO_PHP, LexerTS::FactoryPhp, "php");
+#ifdef TURBO_TS_BLADE
+extern const LexerModule lmTurboTsBlade(SCLEX_TURBO_BLADE, LexerTS::FactoryBlade, "blade");
+#endif
 }

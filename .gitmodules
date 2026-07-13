@@ -29,3 +29,21 @@
 [submodule "deps/tree-sitter-heex"]
 	path = deps/tree-sitter-heex
 	url = https://github.com/phoenixframework/tree-sitter-heex
+[submodule "deps/tree-sitter-html"]
+	path = deps/tree-sitter-html
+	url = https://github.com/tree-sitter/tree-sitter-html
+[submodule "deps/tree-sitter-css"]
+	path = deps/tree-sitter-css
+	url = https://github.com/tree-sitter/tree-sitter-css
+[submodule "deps/tree-sitter-javascript"]
+	path = deps/tree-sitter-javascript
+	url = https://github.com/tree-sitter/tree-sitter-javascript
+[submodule "deps/tree-sitter-php"]
+	path = deps/tree-sitter-php
+	url = https://github.com/tree-sitter/tree-sitter-php
+[submodule "deps/tree-sitter-blade"]
+	path = deps/tree-sitter-blade
+	url = https://github.com/EmranMR/tree-sitter-blade
+[submodule "deps/tree-sitter-typescript"]
+	path = deps/tree-sitter-typescript
+	url = https://github.com/tree-sitter/tree-sitter-typescript
