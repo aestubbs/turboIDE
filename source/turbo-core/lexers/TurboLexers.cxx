@@ -23,6 +23,9 @@
 namespace Lexilla {
 extern const LexerModule lmTurboTsElixir;
 extern const LexerModule lmTurboTsHeex;
+extern const LexerModule lmTurboTsJs;
+extern const LexerModule lmTurboTsTsx;
+extern const LexerModule lmTurboTsPhp;
 #ifdef TURBO_TS_BLADE
 extern const LexerModule lmTurboTsBlade;
 #endif
@@ -40,6 +43,12 @@ Scintilla::ILexer5 *createLexer(const char *name)
         return Lexilla::lmTurboTsElixir.Create();
     if (strcmp(name, "heex") == 0)
         return Lexilla::lmTurboTsHeex.Create();
+    if (strcmp(name, "javascript") == 0)
+        return Lexilla::lmTurboTsJs.Create();
+    if (strcmp(name, "tsx") == 0)
+        return Lexilla::lmTurboTsTsx.Create();
+    if (strcmp(name, "php") == 0)
+        return Lexilla::lmTurboTsPhp.Create();
 #ifdef TURBO_TS_BLADE
     if (strcmp(name, "blade") == 0)
         return Lexilla::lmTurboTsBlade.Create();

@@ -44,3 +44,6 @@
 [submodule "deps/tree-sitter-blade"]
 	path = deps/tree-sitter-blade
 	url = https://github.com/EmranMR/tree-sitter-blade
+[submodule "deps/tree-sitter-typescript"]
+	path = deps/tree-sitter-typescript
+	url = https://github.com/tree-sitter/tree-sitter-typescript

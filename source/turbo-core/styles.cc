@@ -1445,8 +1445,19 @@ constexpr struct { const Language *language; LexerSettings lexer; } builtInLexer
     {&Language::Lua, {SCLEX_LUA, stylesLua, keywordsLua, nullptr}},
     {&Language::Makefile, {SCLEX_MAKEFILE, stylesMake, nullptr, nullptr}},
     {&Language::Asm, {SCLEX_ASM, stylesAsm, nullptr, nullptr}},
+    // JavaScript, TypeScript and PHP go to tree-sitter when it is built, and fall
+    // back to Lexilla otherwise. The fallbacks are not vestigial: LexCPP handles
+    // plain modern JS well (template literals with ${} interpolation, regex
+    // literals), and LexHTML's PHP is flat but not broken. What they cannot do is
+    // JSX/TSX -- LexCPP has no notion of a tag at all -- and they cannot tell a
+    // function from a class from a property, which is what the parse tree buys.
+#ifdef TURBO_ENABLE_TREESITTER
+    {&Language::JavaScript, {SCLEX_TURBO_JS, stylesTS, nullptr, nullptr}},
+    {&Language::TypeScript, {SCLEX_TURBO_TSX, stylesTS, nullptr, nullptr}},
+#else
     {&Language::JavaScript, {SCLEX_CPP, stylesJavaScript, keywordsJsTs, propertiesJavaScript}},
     {&Language::TypeScript, {SCLEX_CPP, stylesJavaScript, keywordsJsTs, propertiesJavaScript}},
+#endif
     {&Language::CSS, {SCLEX_CSS, stylesCSS, keywordsCSS, nullptr}},
     // XML is LexHTML's other entry point (lmXML, "xml"), so it reuses HTML's
     // tables wholesale.
@@ -1466,7 +1477,11 @@ constexpr struct { const Language *language; LexerSettings lexer; } builtInLexer
     {&Language::LaTex, {SCLEX_LATEX, stylesTeX, nullptr, nullptr}},
     {&Language::SQL, {SCLEX_SQL, stylesSQL, keywordsSQL, propertiesSQL}},
     {&Language::Go, {SCLEX_CPP, stylesC, keywordsGo, propertiesC}},
+#ifdef TURBO_ENABLE_TREESITTER
+    {&Language::PHP, {SCLEX_TURBO_PHP, stylesTS, nullptr, nullptr}},
+#else
     {&Language::PHP, {SCLEX_HTML, stylesHTML, keywordsHTML, propertiesHTML}},
+#endif
     {&Language::Markdown, {SCLEX_MARKDOWN, stylesMarkdown, nullptr, propertiesMarkdown}},
     {&Language::Elixir, {SCLEX_TURBO_ELIXIR, stylesTS, nullptr, nullptr}},
     {&Language::HEEx, {SCLEX_TURBO_HEEX, stylesTS, nullptr, nullptr}},

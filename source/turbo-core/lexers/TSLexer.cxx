@@ -61,6 +61,8 @@ const TSLanguage *tree_sitter_heex(void);
 const TSLanguage *tree_sitter_html(void);
 const TSLanguage *tree_sitter_css(void);
 const TSLanguage *tree_sitter_javascript(void);
+const TSLanguage *tree_sitter_tsx(void);
+const TSLanguage *tree_sitter_php(void);
 #ifdef TURBO_TS_BLADE
 const TSLanguage *tree_sitter_php_only(void);
 const TSLanguage *tree_sitter_blade(void);
@@ -79,9 +81,11 @@ extern const char kQueryCssHighlights[];
 extern const char kQueryJsHighlights[];
 extern const char kQueryJsHighlightsJsx[];
 extern const char kQueryJsInjections[];
-#ifdef TURBO_TS_BLADE
+extern const char kQueryTsHighlights[];
 extern const char kQueryPhpHighlights[];
 extern const char kQueryPhpInjections[];
+extern const char kQueryPhpInjectionsText[];
+#ifdef TURBO_TS_BLADE
 extern const char kQueryBladeHighlights[];
 extern const char kQueryBladeInjections[];
 #endif
@@ -227,9 +231,13 @@ constexpr CaptureMap kJsCaptures[] = {
     {"property",              SCE_TS_PROPERTY},
     {"tag",                   SCE_TS_TAG},           // JSX
     {"attribute",             SCE_TS_TAG_ATTR},      // JSX
+    // TypeScript's additions. Harmless in plain JavaScript, whose grammar never
+    // produces them, so one map serves both.
+    {"type",                  SCE_TS_MODULE},
+    {"type.builtin",          SCE_TS_MODULE},
+    {"variable.parameter",    SCE_TS_VARIABLE},
 };
 
-#ifdef TURBO_TS_BLADE
 constexpr CaptureMap kPhpCaptures[] = {
     {"keyword",           SCE_TS_KEYWORD},
     {"comment",           SCE_TS_COMMENT},
@@ -256,7 +264,6 @@ constexpr CaptureMap kPhpCaptures[] = {
 // and the {{ }} braces, captured as "tag" and "punctuation.bracket", both of
 // which HTML already maps. Directives therefore share a colour with HTML tags,
 // which is what the grammar's author intended and what other editors show.
-#endif
 
 // ---------------------------------------------------------------------------
 // Query predicates.
@@ -527,6 +534,33 @@ const Grammar &jsGrammar()
     return g;
 }
 
+const Grammar &tsxGrammar()
+{
+    // TypeScript ships no injections and only a delta highlights file, so tsx is
+    // JavaScript's queries plus TypeScript's. It serves .ts as well as .tsx.
+    static const Grammar g = buildGrammar(tree_sitter_tsx(),
+                                          {kQueryJsHighlights, kQueryJsHighlightsJsx,
+                                           kQueryTsHighlights},
+                                          {kQueryJsInjections},
+                                          kJsCaptures, std::size(kJsCaptures));
+    return g;
+}
+
+const Grammar &phpGrammar()
+{
+    // The HTML injection for a .php file lives in its own query file. Everything
+    // outside <?php ?> is an opaque (text) node, and injections-text.scm is what
+    // feeds those nodes to the HTML parser -- combined, so a <div> opened above a
+    // <?php ?> block and closed below it is still one element rather than two
+    // broken trees. Omit that file and the HTML half of every .php renders as
+    // plain text.
+    static const Grammar g = buildGrammar(tree_sitter_php(),
+                                          {kQueryPhpHighlights},
+                                          {kQueryPhpInjections, kQueryPhpInjectionsText},
+                                          kPhpCaptures, std::size(kPhpCaptures));
+    return g;
+}
+
 #ifdef TURBO_TS_BLADE
 const Grammar &phpOnlyGrammar()
 {
@@ -563,6 +597,9 @@ constexpr NamedGrammar kGrammars[] = {
     {"css",        cssGrammar},
     {"javascript", jsGrammar},
     {"js",         jsGrammar},      // alias: some queries spell it this way
+    {"tsx",        tsxGrammar},
+    {"typescript", tsxGrammar},     // tsx serves .ts too; see the CMake comment
+    {"php",        phpGrammar},
 #ifdef TURBO_TS_BLADE
     {"php_only",   phpOnlyGrammar},
     {"blade",      bladeGrammar},
@@ -1012,6 +1049,15 @@ public:
     static ILexer5 *FactoryHeex() {
         return new LexerTS("heex", SCLEX_TURBO_HEEX, heexGrammar);
     }
+    static ILexer5 *FactoryJs() {
+        return new LexerTS("javascript", SCLEX_TURBO_JS, jsGrammar);
+    }
+    static ILexer5 *FactoryTsx() {
+        return new LexerTS("tsx", SCLEX_TURBO_TSX, tsxGrammar);
+    }
+    static ILexer5 *FactoryPhp() {
+        return new LexerTS("php", SCLEX_TURBO_PHP, phpGrammar);
+    }
 #ifdef TURBO_TS_BLADE
     static ILexer5 *FactoryBlade() {
         return new LexerTS("blade", SCLEX_TURBO_BLADE, bladeGrammar);
@@ -1166,6 +1212,9 @@ void SCI_METHOD LexerTS::Fold(Sci_PositionU startPos, Sci_Position length, int,
 namespace Lexilla {
 extern const LexerModule lmTurboTsElixir(SCLEX_TURBO_ELIXIR, LexerTS::FactoryElixir, "elixir");
 extern const LexerModule lmTurboTsHeex(SCLEX_TURBO_HEEX, LexerTS::FactoryHeex, "heex");
+extern const LexerModule lmTurboTsJs(SCLEX_TURBO_JS, LexerTS::FactoryJs, "javascript");
+extern const LexerModule lmTurboTsTsx(SCLEX_TURBO_TSX, LexerTS::FactoryTsx, "tsx");
+extern const LexerModule lmTurboTsPhp(SCLEX_TURBO_PHP, LexerTS::FactoryPhp, "php");
 #ifdef TURBO_TS_BLADE
 extern const LexerModule lmTurboTsBlade(SCLEX_TURBO_BLADE, LexerTS::FactoryBlade, "blade");
 #endif

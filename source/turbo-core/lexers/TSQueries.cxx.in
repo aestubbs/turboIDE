@@ -19,8 +19,10 @@ extern const char kQueryCssHighlights[]    = R"SCM(@TS_Q_CSS_HL@)SCM";
 extern const char kQueryJsHighlights[]     = R"SCM(@TS_Q_JS_HL@)SCM";
 extern const char kQueryJsHighlightsJsx[]  = R"SCM(@TS_Q_JS_JSX@)SCM";
 extern const char kQueryJsInjections[]     = R"SCM(@TS_Q_JS_INJ@)SCM";
+extern const char kQueryTsHighlights[]     = R"SCM(@TS_Q_TS_HL@)SCM";
 extern const char kQueryPhpHighlights[]    = R"SCM(@TS_Q_PHP_HL@)SCM";
 extern const char kQueryPhpInjections[]    = R"SCM(@TS_Q_PHP_INJ@)SCM";
+extern const char kQueryPhpInjectionsText[] = R"SCM(@TS_Q_PHP_TEXT_INJ@)SCM";
 extern const char kQueryBladeHighlights[]  = R"SCM(@TS_Q_BLADE_HL@)SCM";
 extern const char kQueryBladeInjections[]  = R"SCM(@TS_Q_BLADE_INJ@)SCM";
 

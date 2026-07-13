@@ -91,6 +91,7 @@ if (TURBO_ENABLE_TREESITTER)
     set(TS_JS_DIR     "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-javascript")
     set(TS_PHP_DIR    "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-php")
     set(TS_BLADE_DIR  "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-blade")
+    set(TS_TSX_DIR    "${CMAKE_CURRENT_LIST_DIR}/deps/tree-sitter-typescript")
 
     # Blade is the most expensive grammar by a distance -- its generated parser is
     # ~18 MB because half its parser states are flat tables (an acknowledged
@@ -148,6 +149,21 @@ if (TURBO_ENABLE_TREESITTER)
     add_library(ts-js OBJECT "${TS_JS_DIR}/src/parser.c" "${TS_JS_DIR}/src/scanner.c")
     target_include_directories(ts-js PRIVATE "${TS_JS_DIR}/src")
 
+    # tree-sitter-typescript exposes two languages, 'typescript' and 'tsx', from
+    # separate generated parsers of ~8.5 MB each. Only tsx is built, and it serves
+    # .ts as well as .tsx: it is a superset of typescript bar the legacy
+    # angle-bracket cast (<Foo>bar), which TypeScript itself forbids in .tsx files
+    # and which `as Foo` replaced. That saves 8.5 MB of parser for one dead syntax.
+    add_library(ts-tsx OBJECT "${TS_TSX_DIR}/tsx/src/parser.c" "${TS_TSX_DIR}/tsx/src/scanner.c")
+    target_include_directories(ts-tsx PRIVATE "${TS_TSX_DIR}/tsx/src")
+
+    # The other dialect of tree-sitter-php: 'php' is PHP interleaved with HTML (a
+    # .php file), where everything outside <?php ?> is an opaque (text) node that
+    # the grammar expects you to inject HTML into. 'php_only' -- built below with
+    # Blade -- is for a file that is pure PHP.
+    add_library(ts-php OBJECT "${TS_PHP_DIR}/php/src/parser.c" "${TS_PHP_DIR}/php/src/scanner.c")
+    target_include_directories(ts-php PRIVATE "${TS_PHP_DIR}/php/src")
+
     if (TURBO_TS_BLADE)
         # tree-sitter-php ships two dialects off one grammar: 'php' (PHP with
         # interleaved HTML, for a .php file) and 'php_only' (the file is pure PHP).
@@ -178,6 +194,8 @@ if (TURBO_ENABLE_TREESITTER)
         target_compile_options(ts-html PRIVATE /bigobj)
         target_compile_options(ts-css PRIVATE /bigobj)
         target_compile_options(ts-js PRIVATE /bigobj)
+        target_compile_options(ts-tsx PRIVATE /bigobj)
+        target_compile_options(ts-php PRIVATE /bigobj)
         if (TURBO_TS_BLADE)
             target_compile_options(ts-php-only PRIVATE /bigobj)
             target_compile_options(ts-blade PRIVATE /bigobj)
@@ -202,9 +220,16 @@ if (TURBO_ENABLE_TREESITTER)
     # JSX lives in its own file and must be concatenated onto the main one.
     file(READ "${TS_JS_DIR}/queries/highlights-jsx.scm"    TS_Q_JS_JSX)
     file(READ "${TS_JS_DIR}/queries/injections.scm"        TS_Q_JS_INJ)
+    # TypeScript ships no injections and only a *delta* highlights file (types,
+    # interface, declare...), so tsx's queries are JavaScript's plus this.
+    file(READ "${TS_TSX_DIR}/queries/highlights.scm"       TS_Q_TS_HL)
+    file(READ "${TS_PHP_DIR}/queries/highlights.scm"       TS_Q_PHP_HL)
+    file(READ "${TS_PHP_DIR}/queries/injections.scm"       TS_Q_PHP_INJ)
+    # The HTML injection for a .php file is NOT in injections.scm -- it lives in
+    # its own file. Wire only injections.scm and the HTML half of every .php file
+    # renders as plain text, which would be a regression on LexHTML.
+    file(READ "${TS_PHP_DIR}/queries/injections-text.scm"  TS_Q_PHP_TEXT_INJ)
     if (TURBO_TS_BLADE)
-        file(READ "${TS_PHP_DIR}/queries/highlights.scm"   TS_Q_PHP_HL)
-        file(READ "${TS_PHP_DIR}/queries/injections.scm"   TS_Q_PHP_INJ)
         file(READ "${TS_BLADE_DIR}/queries/highlights.scm" TS_Q_BLADE_HL)
         file(READ "${TS_BLADE_DIR}/queries/injections.scm" TS_Q_BLADE_INJ)
     endif()
@@ -354,6 +379,8 @@ if (TURBO_ENABLE_TREESITTER)
         $<TARGET_OBJECTS:ts-html>
         $<TARGET_OBJECTS:ts-css>
         $<TARGET_OBJECTS:ts-js>
+        $<TARGET_OBJECTS:ts-tsx>
+        $<TARGET_OBJECTS:ts-php>
     )
     if (TURBO_TS_BLADE)
         list(APPEND TURBO_CORE_OBJECTS
@@ -369,6 +396,11 @@ add_library(${TURBO}-core
 
 target_compile_features(${TURBO}-core PRIVATE cxx_std_17)
 turbo_set_warnings(${TURBO}-core)
+if (TURBO_ENABLE_TREESITTER)
+    # styles.cc picks the tree-sitter lexer for JS/TS/PHP when it is built, and
+    # the Lexilla one otherwise.
+    target_compile_definitions(${TURBO}-core PRIVATE TURBO_ENABLE_TREESITTER)
+endif()
 target_include_directories(${TURBO}-core PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>"
     "$<INSTALL_INTERFACE:include>"
