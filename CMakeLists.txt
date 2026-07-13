@@ -123,6 +123,15 @@ if (TURBO_ENABLE_TREESITTER)
     add_library(ts-heex OBJECT "${TS_HEEX_DIR}/src/parser.c")
     target_include_directories(ts-heex PRIVATE "${TS_HEEX_DIR}/src")
 
+    if (MSVC)
+        # Elixir's generated parser is a single 12.8 MB / 428k-line translation
+        # unit (7001 parser states). Without /bigobj MSVC fails it with C1128,
+        # "number of sections exceeded object file format limit". The Windows jobs
+        # are the ones that produce the release artifacts, so this is load-bearing.
+        target_compile_options(ts-elixir PRIVATE /bigobj)
+        target_compile_options(ts-heex PRIVATE /bigobj)
+    endif()
+
     # The grammars' generated parsers are huge (Elixir's is ~12.8 MB / 7000 parser
     # states) and force -O0 on themselves with a #pragma, so a slow compile of
     # these two files is expected and not worth fighting.
