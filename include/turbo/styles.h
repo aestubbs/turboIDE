@@ -81,6 +81,12 @@ enum TextStyle : uchar
     sError,
     sBraceMatch,
     sReplaceHighlight,
+    sIdentifier,
+    sFunctionName,
+    sTypeName,
+    sConstant,
+    sTag,
+    sAttribute,
     TextStyleCount,
 };
 
