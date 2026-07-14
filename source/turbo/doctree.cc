@@ -116,7 +116,8 @@ Node::Node(Node *parent, std::string_view p, bool isDir) noexcept :
     parent(parent),
     path(p),
     isDir(isDir),
-    editor(nullptr)
+    editor(nullptr),
+    kind(isDir ? NodeKind::Dir : NodeKind::File)
 {
 }
 
@@ -126,27 +127,30 @@ void Node::setEditor(EditorWindow *w) noexcept
     refreshText();
 }
 
+std::string Node::targetDir() const noexcept
+{
+    // A home's own 'path' is a label, so the real directory is the one it stands for.
+    if (kind == NodeKind::LuaHome || kind == NodeKind::SkillsHome)
+        return primaryPath;
+    if (isDir)
+        return path;                        // Project / Dir / Skill: create inside it
+    TStringView d = TPath::dirname(path);   // a file: create alongside it
+    return std::string(d.data(), d.size());
+}
+
 void Node::refreshText() noexcept
 {
-    std::string label;
-    if (!displayName.empty())
-        label = displayName;   // skill leaf: show the skill name, not "SKILL.md"
-    else
-    {
-        TStringView bn = TPath::basename(path);
-        label.assign(bn.data(), bn.size());
-    }
+    // A home's label has no '/', so basename() returns it whole.
+    TStringView bn = TPath::basename(path);
+    std::string label(bn.data(), bn.size());
     // Mark files with unsaved changes.
     if (editor && !editor->getEditor().inSavePoint())
         label += " *";
-    // Git status badge, to the right of the name (mirrors the " *" idiom).
-    if (gitStatus && gitStatus != '.')
-    {
-        label += "  ";
-        label += gitStatus;
-    }
-    else if (gitStatus == '.')
-        label += "  \xC2\xB7"; // middle dot: directory contains changes
+    // NOTE: the git status badge is deliberately NOT part of the label. It is
+    // painted by drawNode() into a column locked to the right edge of the pane, so
+    // that a long file name can neither clip it nor scroll it out of view. Keeping
+    // it out of 'text' also keeps the sort key (putNode sorts on text) stable when
+    // a file's status changes.
     delete[] text;
     text = newStr(label);
 }
@@ -196,6 +200,22 @@ static void putNode(TNode **indirect, Node *node) noexcept
     node->ptr = indirect;
 }
 
+// Directories that already have their own synthetic home at the top of the tree,
+// and so must never ALSO be listed under the project node. Scoped to the project
+// root, so a nested folder of the same name elsewhere is unaffected.
+//
+// This cannot be derived from luaSections/skillSections: openProject() scans the
+// project (scanDirectory) BEFORE it builds the homes (refreshSkillsInTree), so at
+// scan time those vectors are still empty.
+static bool hasOwnHome(const std::string &full, bool isDir,
+                       const std::string &projectRoot) noexcept
+{
+    if (!isDir || projectRoot.empty())
+        return false;
+    return full == projectRoot + "/turbo-scripts"     // -> the "Project Lua" home
+        || full == projectRoot + "/.claude/skills";   // -> the "Project Skills" home
+}
+
 static void scanInto(Node *parent, TNode **list, const std::string &dirPath,
                      int depth, bool showHidden, const std::string &projectRoot) noexcept
 {
@@ -216,15 +236,11 @@ static void scanInto(Node *parent, TNode **list, const std::string &dirPath,
             continue;
         if (name[0] == '.' && (!showHidden || name == ".git" || name == ".turbo"))
             continue;
-        // The committed scripts dir at the project root has its own home in the
-        // tree (the "Project Lua" group), so don't also list it as a plain folder
-        // under the project node. Scoped to the root level so a nested folder of
-        // the same name elsewhere is unaffected.
-        if (name == "turbo-scripts" && dirPath == projectRoot)
-            continue;
         std::error_code ec2;
         bool isDir = entry.is_directory(ec2);
         std::string full = entry.path().string();
+        if (hasOwnHome(full, isDir, projectRoot))
+            continue;
         auto *node = new Node(parent, full, isDir);
         if (isDir)
             // Every directory starts collapsed (including the top level), so the
@@ -275,6 +291,7 @@ void DocumentTreeView::rebuildProjectNode() noexcept
     if (rootPath.empty())
         return; // no project open: only the Lua homes occupy the tree
     projectNode = new Node(nullptr, rootPath, true);
+    projectNode->kind = NodeKind::Project;
     projectNode->expanded = True; // open so the project's files are visible
     scanInto(projectNode, &projectNode->childList, rootPath, 1, showHidden, rootPath);
 }
@@ -289,33 +306,53 @@ void DocumentTreeView::scanDirectory(std::string_view aRootPath) noexcept
     drawView();
 }
 
-// Dispose a synthetic Lua group: its leaf children first, then the group node
-// itself. Only the group and its children are freed -- never its siblings.
-static void disposeLuaGroup(DocumentTreeView::Node *&group) noexcept
+// An immediate child of a Skills home that is a directory holding a SKILL.md IS a
+// skill: it keeps its real path (so its whole contents stay browsable) and carries
+// the SKILL.md as the file it opens.
+static void tagSkill(Node *n) noexcept
+{
+    if (!n || !n->isDir)
+        return;
+    std::string md = n->path + "/SKILL.md";
+    std::error_code ec;
+    if (std::filesystem::is_regular_file(md, ec))
+    {
+        n->kind = NodeKind::Skill;
+        n->primaryPath = std::move(md);
+    }
+}
+
+void DocumentTreeView::disposeGroup(Node *&group) noexcept
 {
     if (!group)
         return;
-    while (group->childList)
-        ((DocumentTreeView::Node *) group->childList)->dispose();
-    group->dispose();
+    // disposeNode recurses over childList AND next, so it frees the whole subtree.
+    // (Freeing only the group's direct children -- as this used to -- was harmless
+    // when a home held flat Lua leaves, but leaks every skill's contents now that
+    // a skills home holds real folders.)
+    if (group->childList)
+        disposeNode(group->childList);
+    group->childList = nullptr;
+    group->dispose(); // unlink from root + delete the group itself
     group = nullptr;
 }
 
 void DocumentTreeView::reinjectLuaNodes() noexcept
 {
     for (Node *&g : luaGroups)
-        disposeLuaGroup(g);
+        disposeGroup(g);
     luaGroups.clear();
     if (showLuaScripts)
     {
         for (const auto &sec : luaSections)
         {
             // Synthetic directory node: its path is the label (shown as the home
-            // title), with the real scripts dir carried in luaDir. Built even
+            // title), with the real scripts dir carried in primaryPath. Built even
             // when empty, so the home is a clear place to drop scripts into.
             auto *group = new Node(nullptr, sec.label, true);
+            group->kind = NodeKind::LuaHome;
             group->expanded = True; // open so the scripts show at a glance
-            group->luaDir = sec.dir;
+            group->primaryPath = sec.dir;
             for (const auto &p : sec.scripts)
                 putNode(&group->childList, new Node(group, p, false));
             luaGroups.push_back(group);
@@ -338,26 +375,25 @@ void DocumentTreeView::setLuaScripts(bool show, std::vector<LuaSection> sections
 void DocumentTreeView::reinjectSkillNodes() noexcept
 {
     for (Node *&g : skillGroups)
-        disposeLuaGroup(g); // same shape as a Lua home: one level of leaves
+        disposeGroup(g);
     skillGroups.clear();
     if (showSkills)
     {
         for (const auto &sec : skillSections)
         {
-            // Synthetic directory node, like a Lua home: its path is the label,
-            // with the real skills dir carried in skillDir. Built even when empty
-            // so the home is a clear place to add a skill.
+            // Synthetic directory node: its path is the label, with the real skills
+            // dir carried in primaryPath. Built even when the directory is empty or
+            // missing, so the home stays a clear place to add a skill.
             auto *group = new Node(nullptr, sec.label, true);
+            group->kind = NodeKind::SkillsHome;
             group->expanded = True;
-            group->skillDir = sec.dir;
-            for (const auto &e : sec.skills)
-            {
-                // The leaf opens the SKILL.md file but shows the skill's name.
-                auto *leaf = new Node(group, e.path, false);
-                leaf->displayName = e.name;
-                leaf->refreshText(); // relabel before putNode sorts on text
-                putNode(&group->childList, leaf);
-            }
+            group->primaryPath = sec.dir;
+            // Scanned like any other folder -- so a skill's SKILL.md, references/
+            // and scripts/ are all reachable, instead of the skill being faked as a
+            // single leaf pointing at its SKILL.md.
+            scanInto(group, &group->childList, sec.dir, 1, showHidden, rootPath);
+            for (Node *c = (Node *) group->childList; c; c = (Node *) c->next)
+                tagSkill(c);
             skillGroups.push_back(group);
         }
     }
@@ -438,12 +474,44 @@ void DocumentTreeView::removeNode(std::string_view path) noexcept
         n = findDir(path);
     if (n)
     {
+        // A directory's children must go too: Node::dispose() only unlinks and
+        // deletes the node itself, so freeing a folder without this leaks its
+        // whole subtree.
+        if (n->childList)
+        {
+            disposeNode(n->childList);
+            n->childList = nullptr;
+        }
+        // A SKILL.md going away demotes its skill back to an ordinary folder.
+        Node *p = n->parent;
+        bool wasSkillMd = !n->isDir && TPath::basename(n->path) == TStringView("SKILL.md")
+                          && p && p->kind == NodeKind::Skill;
         n->dispose();
+        if (wasSkillMd)
+        {
+            p->kind = NodeKind::Dir;
+            p->primaryPath.clear();
+        }
         if (filtering())
             recomputeVisibility(); // keep the filtered view in sync
         update();
         drawView();
     }
+}
+
+DocumentTreeView::Node *DocumentTreeView::findContainer(std::string_view dirPath) noexcept
+{
+    if (Node *n = findDir(dirPath))
+        return n;
+    // A home's own 'path' is a display label, so findDir() cannot see it; match on
+    // the real directory it stands for instead.
+    for (Node *g : luaGroups)
+        if (g->primaryPath == dirPath)
+            return g;
+    for (Node *g : skillGroups)
+        if (g->primaryPath == dirPath)
+            return g;
+    return nullptr;
 }
 
 void DocumentTreeView::addNode(std::string_view path, bool isDir) noexcept
@@ -456,6 +524,10 @@ void DocumentTreeView::addNode(std::string_view path, bool isDir) noexcept
         return;
     // Honour the show-hidden setting (mirrors scanInto); .git and .turbo stay hidden.
     if (base[0] == '.' && (!showHidden || base == ".git" || base == ".turbo"))
+        return;
+    // Mirrors scanInto: turbo-scripts and .claude/skills have their own homes at
+    // the top of the tree, so never list them under the project as well.
+    if (hasOwnHome(std::string(path), isDir, rootPath))
         return;
     // Locate the parent list: the root list for a top-level entry, else the
     // parent directory's child list (only if that directory is in the tree).
@@ -471,17 +543,37 @@ void DocumentTreeView::addNode(std::string_view path, bool isDir) noexcept
     }
     else
     {
-        parent = findDir(dir);
+        // findContainer, not findDir: a new skill or script lands inside the real
+        // directory behind a synthetic home, which findDir() cannot resolve.
+        parent = findContainer(dir);
         if (!parent)
             return; // parent dir not in the tree (collapsed/unknown): skip
         list = &parent->childList;
     }
     auto *node = new Node(parent, std::string(path), isDir);
-    putNode(list, node);
     if (isDir)
         scanInto(node, &node->childList, std::string(path), 1, showHidden, rootPath);
+    // A directory dropped straight into a Skills home is a new skill...
+    if (parent->kind == NodeKind::SkillsHome)
+        tagSkill(node);
+    // ...and a SKILL.md landing inside a folder that sits under a Skills home
+    // promotes that folder, since the watcher coalesces its changed set and may
+    // report the folder before the file inside it exists.
+    else if (!isDir && base == TStringView("SKILL.md") && parent->parent &&
+             parent->parent->kind == NodeKind::SkillsHome)
+        tagSkill(parent);
+    putNode(list, node);
     if (filtering())
         recomputeVisibility(); // a new node defaults to visible; reclassify it
+    update();
+    drawView();
+}
+
+void DocumentTreeView::toggleExpand(Node *node) noexcept
+{
+    if (!node || !node->isDir)
+        return;
+    adjust(node, Boolean(!isExpanded(node)));
     update();
     drawView();
 }
@@ -490,16 +582,21 @@ void DocumentTreeView::openOrToggle(Node *node) noexcept
 {
     if (!node)
         return;
-    if (node->isDir)
+    // A skill is a folder that opens: Enter/double-click goes straight to its
+    // SKILL.md (the thing you almost always want), while the chevron and the
+    // arrow keys still expand it to reach references/, scripts/ and the rest.
+    std::string target = node->openPath();
+    if (target.empty())
     {
-        adjust(node, Boolean(!isExpanded(node)));
-        update();
-        drawView();
+        toggleExpand(node); // Project / Dir / a home: nothing to open
+        return;
     }
-    else if (node->editor)
-        node->editor->focus();
+    // Re-resolve rather than trust node->editor: a skill's editor is linked to its
+    // SKILL.md child node, not to the skill folder the user activated.
+    if (Node *n = findByPath(target); n && n->editor)
+        n->editor->focus();
     else if (auto *app = (TurboApp *) TProgram::application)
-        app->openFileFromTree(node->path.c_str());
+        app->openFileFromTree(target.c_str());
 }
 
 void DocumentTreeView::selected(int i) noexcept
@@ -578,9 +675,11 @@ void DocumentTreeView::handleEvent(TEvent &ev)
             {
                 // Right on a collapsed directory expands it. On an already
                 // expanded directory (or a file) move down one row, which lands
-                // on the first child of an expanded dir.
+                // on the first child of an expanded dir. toggleExpand, not
+                // openOrToggle: a skill is a directory that OPENS its SKILL.md,
+                // so openOrToggle here would open the file instead of expanding.
                 if (node->isDir && !isExpanded(node))
-                    openOrToggle(node);
+                    toggleExpand(node);
                 else
                 {
                     foc++;
@@ -593,7 +692,7 @@ void DocumentTreeView::handleEvent(TEvent &ev)
                 // Left on an expanded directory collapses it. Otherwise (file or
                 // collapsed dir) jump focus to the parent directory's row, if any.
                 if (node->isDir && isExpanded(node))
-                    openOrToggle(node);
+                    toggleExpand(node);
                 else if (node->parent)
                 {
                     Node *parent = node->parent;
@@ -787,117 +886,83 @@ void DocumentTreeView::showContextMenu(int row, TPoint where) noexcept
     // loop can still run the filesystem watcher, which may rebuild the tree and
     // free 'node'. So below we act on these copies and re-resolve by path, never
     // touching 'node' again.
-    std::string path = node->path;
-    bool isDir = node->isDir;
-    char gs = node->gitStatus;
-    std::string luaDir = node->luaDir;
-    std::string skillDir = node->skillDir;
+    const NodeKind kind      = node->kind;
+    const std::string path   = node->path;
+    const std::string primary = node->primaryPath; // a home's real dir / a skill's SKILL.md
+    const std::string dir    = node->targetDir();  // where New File/Folder create
+    const bool isDir         = node->isDir;
+    const char gs            = node->gitStatus;
 
-    // A synthetic Lua-script home: the only meaningful action is creating a new
-    // script in its directory. The file/git actions don't apply (its path is a
-    // label, not a real file), so give it a one-item menu of its own.
-    if (!luaDir.empty())
-    {
-        auto *only = new TMenuItem("~N~ew Lua Script...", cmTreeNewLuaScript,
-                                   kbNoKey, hcNoContext);
-        ushort cmd = popupMenu(where, *only, nullptr);
-        if (cmd == cmTreeNewLuaScript)
-            if (auto *app = (TurboApp *) TProgram::application)
-                app->treeNewLuaScript(luaDir);
-        return;
-    }
+    // A home's 'path' is a display label, not a real file, so it can be neither
+    // renamed, deleted, nor staged. And renaming the project root would rename the
+    // open project's own directory -- surprising and risky -- so skip that too.
+    const bool isHome = (kind == NodeKind::LuaHome || kind == NodeKind::SkillsHome);
 
-    // A synthetic Skills home: its only action is creating a new skill in its
-    // directory (like the Lua homes above).
-    if (!skillDir.empty())
-    {
-        auto *only = new TMenuItem("~N~ew Skill...", cmTreeNewSkill,
-                                   kbNoKey, hcNoContext);
-        ushort cmd = popupMenu(where, *only, nullptr);
-        if (cmd == cmTreeNewSkill)
-            if (auto *app = (TurboApp *) TProgram::application)
-                app->treeNewSkill(skillDir);
-        return;
-    }
+    TMenuItem *items = nullptr, *tail = nullptr;
+    auto add = [&] (TMenuItem *it) {
+        if (!items) items = tail = it;
+        else { tail->append(it); tail = it; }
+    };
+    auto sep = [&] { if (items) { tail->append(&newLine()); tail = tail->next; } };
 
-    // Renaming the project root would rename the open project's own directory --
-    // surprising and risky -- so omit that entry on the project wrapper node.
-    bool isProjectRoot = isDir && path == rootPath;
-
-    // Build the item chain by hand so the optional entries are easy to add.
-    auto *items  = new TMenuItem("~O~pen", cmTreeOpen, kbNoKey, hcNoContext);
-    TMenuItem *tail = items;
-    if (!isProjectRoot)
-    {
-        auto *rename = new TMenuItem("~R~ename...", cmTreeRename, kbNoKey, hcNoContext);
-        tail->append(rename); tail = rename;
-    }
-    auto *newf   = new TMenuItem("~N~ew File...", cmTreeNewFile, kbNoKey, hcNoContext);
-    tail->append(newf); tail = newf;
+    // Only a node with something to open gets "Open": a skill opens its SKILL.md,
+    // while a pure container has nothing to open (activating it expands it).
+    if (kind == NodeKind::File || kind == NodeKind::Skill)
+        add(new TMenuItem(kind == NodeKind::Skill ? "~O~pen SKILL.md" : "~O~pen",
+                          cmTreeOpen, kbNoKey, hcNoContext));
+    if (kind == NodeKind::LuaHome)
+        add(new TMenuItem("~N~ew Lua Script...", cmTreeNewLuaScript, kbNoKey, hcNoContext));
+    if (kind == NodeKind::SkillsHome)
+        add(new TMenuItem("~N~ew Skill...", cmTreeNewSkill, kbNoKey, hcNoContext));
+    // 'T' rather than 'N' on a home, whose menu already spends 'N' on New Skill /
+    // New Lua Script.
+    add(new TMenuItem(isHome ? "New ~T~ext File..." : "~N~ew File...",
+                      cmTreeNewFile, kbNoKey, hcNoContext));
     // Accelerator 'F' (not 'o') so it doesn't collide with "Open" in this menu.
-    auto *newd   = new TMenuItem("New ~F~older...", cmTreeNewFolder, kbNoKey, hcNoContext);
-    tail->append(newd); tail = newd;
-    tail->append(&newLine()); tail = tail->next;
-    auto *add    = new TMenuItem("Git ~A~dd", cmTreeGitAdd, kbNoKey, hcNoContext);
-    tail->append(add); tail = add;
-    // Offer Revert only for a tracked file with committed content to restore
-    // from: modified ('M'), deleted ('D') or conflicted ('U'). Not for new/
-    // untracked files (nothing at HEAD), renames, or directories.
-    if (!isDir && (gs == 'M' || gs == 'D' || gs == 'U'))
+    add(new TMenuItem("New ~F~older...", cmTreeNewFolder, kbNoKey, hcNoContext));
+
+    if (!isHome && kind != NodeKind::Project)
     {
-        auto *revert = new TMenuItem("Git Re~v~ert", cmTreeGitRevert, kbNoKey, hcNoContext);
-        tail->append(revert);
-        tail = revert;
+        sep();
+        // Renaming a skill renames its FOLDER -- the skill's identity -- and never
+        // its SKILL.md, because a skill node's path IS the directory.
+        add(new TMenuItem("~R~ename...", cmTreeRename, kbNoKey, hcNoContext));
+    }
+    if (!isHome)
+    {
+        sep();
+        add(new TMenuItem("Git ~A~dd", cmTreeGitAdd, kbNoKey, hcNoContext));
+        // Offer Revert only for a tracked file with committed content to restore
+        // from: modified ('M'), deleted ('D') or conflicted ('U'). Not for new/
+        // untracked files (nothing at HEAD), renames, or directories.
+        if (!isDir && (gs == 'M' || gs == 'D' || gs == 'U'))
+            add(new TMenuItem("Git Re~v~ert", cmTreeGitRevert, kbNoKey, hcNoContext));
     }
 
     ushort cmd = popupMenu(where, *items, nullptr);
 
     auto *app = (TurboApp *) TProgram::application;
+    if (!app)
+        return;
     switch (cmd)
     {
         case cmTreeOpen:
             // Re-resolve by path (see note above) rather than reuse 'node'.
-            if (isDir)
-            {
-                if (auto *n = findDir(path))
-                    openOrToggle(n);
-            }
-            else if (auto *n = findByPath(path))
-                openOrToggle(n);                 // focus existing editor, else open
-            else if (app)
-                app->openFileFromTree(path.c_str());
+            if (Node *n = (isDir ? findDir(path) : findByPath(path)))
+                openOrToggle(n);
+            else
+                app->openFileFromTree(
+                    (kind == NodeKind::Skill ? primary : path).c_str());
             break;
-        case cmTreeRename:
-            if (app)
-                app->treeRenamePath(path, isDir);
-            break;
-        case cmTreeNewFile:
-        case cmTreeNewFolder:
-        {
-            // Create inside a folder; for a file, create alongside it.
-            std::string dir = path;
-            if (!isDir)
-            {
-                TStringView d = TPath::dirname(path);
-                dir.assign(d.data(), d.size());
-            }
-            if (app)
-            {
-                if (cmd == cmTreeNewFile)
-                    app->treeCreateFile(dir);
-                else
-                    app->treeCreateFolder(dir);
-            }
-            break;
-        }
-        case cmTreeGitAdd:
-            if (app)
-                app->treeStagePath(path);
-            break;
-        case cmTreeGitRevert:
-            if (app)
-                app->treeRevertPath(path);
-            break;
+        // The home actions must use the captured 'primary': a home's own path is a
+        // label, so re-resolving it would find nothing.
+        case cmTreeNewLuaScript: app->treeNewLuaScript(primary); break;
+        case cmTreeNewSkill:     app->treeNewSkill(primary);     break;
+        case cmTreeNewFile:      app->treeCreateFile(dir);       break;
+        case cmTreeNewFolder:    app->treeCreateFolder(dir);     break;
+        case cmTreeRename:       app->treeRenamePath(path, isDir); break;
+        case cmTreeGitAdd:       app->treeStagePath(path);       break;
+        case cmTreeGitRevert:    app->treeRevertPath(path);      break;
     }
 }
 
@@ -908,10 +973,15 @@ struct DrawCtx { TDrawBuffer *b; int last; };
 enum class TreeRole { Normal, Focused, Selected };
 
 // Row colours for the file tree, derived from the shared window-chrome scheme so
-// the tree matches the editor windows (and follows any theme edits). Returned as
-// a TAttrPair: the low attr paints folder/expanded rows and the row fill, while
-// the high attr (color >> 8) paints file/leaf text.
-TAttrPair treeColors(TreeRole role, bool active) noexcept
+// the tree matches the editor windows (and follows any theme edits).
+struct RowColors {
+    TColorAttr    fill;   // the row background (and the blank tail of the row)
+    TColorAttr    text;   // the node's name
+    TColorAttr    guide;  // the connector graph: DIM, so the chrome recedes
+    TColorDesired bg;     // the row background, for composing the icon's attr
+};
+
+RowColors treeColors(TreeRole role, bool active) noexcept
 {
     using namespace turbo;
     // Normal rows track the window's active state (the unified blue when active,
@@ -921,85 +991,175 @@ TAttrPair treeColors(TreeRole role, bool active) noexcept
     switch (role)
     {
         case TreeRole::Focused:
-            return TAttrPair(TColorAttr(0xFFFFFF, 0x3A7FD0), TColorAttr(0xFFFFFF, 0x3A7FD0));
+            return { TColorAttr(0xFFFFFF, 0x3A7FD0), TColorAttr(0xFFFFFF, 0x3A7FD0),
+                     TColorAttr(0xA8C8EC, 0x3A7FD0), TColorRGB(0x3A7FD0) };
         case TreeRole::Selected:
-            return TAttrPair(TColorAttr(0xFFFFFF, 0x2F6FB0), TColorAttr(0xFFFFFF, 0x2F6FB0));
-        default: // Normal: folders bright, files slightly dimmer, on the window blue.
-            return TAttrPair(TColorAttr(0xEAEFFF, bg), TColorAttr(0xCBD6F2, bg));
+            return { TColorAttr(0xFFFFFF, 0x2F6FB0), TColorAttr(0xFFFFFF, 0x2F6FB0),
+                     TColorAttr(0x9CBEE4, 0x2F6FB0), TColorRGB(0x2F6FB0) };
+        default:
+            return { TColorAttr(0xEAEFFF, bg), TColorAttr(0xDCE4F7, bg),
+                     TColorAttr(0x5D6A8C, bg), bg };
     }
 }
 
-// Mirrors TOutlineViewer's internal drawTree(), with one addition: files that
-// are open in an editor (node->editor != null) are drawn in bold.
+// Row prefix geometry:
+//
+//   [guide x level][connector][chevron][' ']( [icon][' '] )
+//
+// Every glyph is exactly one column, so the prefix is ALWAYS
+// 'level + 3 + iconColumns' wide, and the icon's own column -- the gap after the
+// chevron, then the icon -- is ALWAYS 'level + 3'. That constancy is load-bearing:
+// getGraph() reserves the icon's column, and the base viewer MEASURES that string
+// for the horizontal-scroll limit and for the click-to-toggle hit test. A set with
+// no pictograms reports iconColumns == 0, so the column collapses rather than
+// sitting there blank.
+int iconColumn(int level) noexcept { return level + 3; }
+
+// The first column of the right-hand status gutter: one blank separator, then the
+// git badge hard against the pane's right edge. Reserved on EVERY row, whether or
+// not it has a status, so the badges form a straight column -- and the name is
+// clipped to it, which is what stops a long file name from ever covering a badge.
+int gutterCol(int sizeX) noexcept { return max(0, sizeX - 2); }
+
+// The single source of truth for the prefix.
+//
+// getGraph() calls this for its WIDTH alone -- that is all the base viewer uses it
+// for -- while drawNode() calls it with the node in hand, so it can pick glyphs
+// getGraph() structurally cannot know about: 'container' (an empty folder is still
+// a folder, though the base class reports it exactly like a leaf) and 'first' (the
+// tree's very first row, which rounds off the top). Both agree on the width.
+//
+// 'lines' bit i is set when an ancestor at level i has a following sibling, so a
+// vertical guide must run down column i.
+std::string treeGraph(int level, long lines, ushort flags,
+                      bool first, bool container) noexcept
+{
+    const TreeGlyphs &g = treeGlyphs();
+    std::string s;
+    s.reserve(3 * (level + 2) + 3);
+    long l = lines;
+    for (int i = 0; i < level; ++i, l >>= 1)
+        s += (l & 1) ? g.vert : " ";
+    // The connector. Top-level rows get a real one too -- which is what lets the
+    // old level-0 special case, and the root-line fixup that propped it up, both
+    // disappear: the first root rounds off the top of the tree, the last closes
+    // it, and everything between is a tee.
+    if (first)                  s += g.top;
+    else if (flags & ovLast)    s += g.corner;
+    else                        s += g.tee;
+    // The chevron. Mind the flag semantics (toutline.cpp:282-286):
+    //   ovChildren = has children AND expanded
+    //   ovExpanded = has NO children OR expanded   <-- set for leaves too!
+    // so "collapsed with children" is !ovExpanded, and a childless folder is
+    // indistinguishable from a leaf to the base class -- hence 'container'.
+    if (!(flags & ovExpanded))      s += g.chevRight; // collapsed folder
+    else if (flags & ovChildren)    s += g.chevDown;  // expanded folder
+    else if (container)             s += g.chevRight; // empty folder: still a folder
+    else                            s += g.dash;      // a leaf file
+    s += " ";                                         // gap after the chevron
+    if (g.iconColumns)
+        s += "  ";                                    // the ICON's column, + its gap
+    return s;                                         // width == graphWidth(level)
+}
+
+// Paints one row: the connector graph (dim), then the node's icon in its own
+// colour, then the name. Replaces TOutlineViewer's internal drawTree(), which
+// paints the whole row in a single attribute and so could not colour an icon.
 Boolean drawNode( TOutlineViewer *v, TNode *cur, int level, int position,
                   long lines, ushort flags, void *arg )
 {
     auto *ctx = (DrawCtx *) arg;
     TDrawBuffer &dBuf = *ctx->b;
-    if (position >= v->delta.y)
+    if (position < v->delta.y)
+        return False;
+    if (position >= v->delta.y + v->size.y)
+        return True;
+
+    auto *node = (Node *) cur;
+    bool winActive = v->owner && (v->owner->state & sfActive);
+    bool focused = (position == v->foc) && (v->state & sfFocused);
+    bool selected = v->isSelected(position);
+    RowColors rc = treeColors(focused  ? TreeRole::Focused
+                            : selected ? TreeRole::Selected
+                                       : TreeRole::Normal, winActive);
+    dBuf.moveChar(0, ' ', rc.fill, v->size.x);
+
+    // 1. The connector graph. TText's strIndent is in COLUMNS, and every glyph we
+    //    emit is one column, so a horizontal scroll can never cut one in half.
+    std::string graph = treeGraph(level, lines, flags,
+                                  /*first*/ level == 0 && cur == v->getRoot(),
+                                  /*container*/ node->isDir);
+    int x = strwidth(graph) - v->delta.x;   // == graphWidth(level) - delta.x
+    if (x > 0)
+        dBuf.moveStr(0, graph, rc.guide, (ushort) -1U, (ushort) v->delta.x);
+
+    // 2. The icon, painted into the column the graph reserved for it. A negative
+    //    column means it has scrolled off to the left -- and must not be passed to
+    //    moveStr, whose indent is a ushort.
+    int iconX = iconColumn(level) - v->delta.x;
+    if (iconX >= 0 && iconX < v->size.x)
     {
-        if (position >= v->delta.y + v->size.y)
-            return True;
-        bool winActive = v->owner && (v->owner->state & sfActive);
-        TAttrPair color;
-        if (position == v->foc && (v->state & sfFocused))
-            color = treeColors(TreeRole::Focused, winActive);
-        else if (v->isSelected(position))
-            color = treeColors(TreeRole::Selected, winActive);
-        else
-            color = treeColors(TreeRole::Normal, winActive);
-        dBuf.moveChar(0, ' ', color, v->size.x);
-        int x;
-        {
-            // The root level draws no connector for files, so its vertical line
-            // runs only between folders: column 0 (the root ancestor's line) is
-            // kept only while the root folder has another folder after it. A root
-            // folder followed only by files is therefore the "last folder" -- it
-            // ends as a corner, and its whole subtree drops column 0.
-            long glines = lines;
-            ushort gflags = flags;
-            {
-                Node *root = (Node *) cur;
-                while (root->parent) root = root->parent;
-                bool rootNextFolder = root->next && ((Node *) root->next)->isDir;
-                if (rootNextFolder) glines |= 1L; else glines &= ~1L;
-                if (level == 0 && ((Node *) cur)->isDir && !rootNextFolder)
-                    gflags |= ovLast; // last folder among the root entries -> corner
-            }
-            TStringView graph = v->getGraph(level, glines, gflags);
-            x = strwidth(graph) - v->delta.x;
-            if (x > 0)
-                dBuf.moveStr(0, graph, color, (ushort) -1U, v->delta.x);
-            delete[] (char *) graph.data();
-        }
-        {
-            TStringView text = v->getText(cur);
-            TColorAttr c = (flags & ovExpanded) ? color : (color >> 8);
-            if (((Node *) cur)->editor)
-                setStyle(c, getStyle(c) | slBold);
-            // Tint rows by git status (only when not the focused/selected row,
-            // which keep their highlight colours for legibility).
-            char gs = ((Node *) cur)->gitStatus;
-            if (gs && !(position == v->foc && (v->state & sfFocused))
-                   && !v->isSelected(position))
-            {
-                TColorDesired fg {};
-                switch (gs)
-                {
-                    case 'M': case 'R': fg = 0xE6C98C; break; // gold (modified)
-                    case 'A': case '?': fg = 0x9CDC8C; break; // green (added/new)
-                    case 'D':           fg = 0xE06C75; break; // red (deleted)
-                    case 'U':           fg = 0xD79CD2; break; // magenta (conflict)
-                    case '.':           fg = 0x9AA6CE; break; // dim (dir w/ changes)
-                    default:            fg = 0xCBD6F2; break;
-                }
-                setFore(c, fg);
-            }
-            dBuf.moveStr(max(0, x), text, c, (ushort) -1U, max(0, -x));
-        }
-        v->writeLine(0, position - v->delta.y, v->size.x, 1, dBuf);
-        ctx->last = position;
+        // "Open" for the icon means it actually has children showing, which is what
+        // makes the open-folder glyph agree with the chevron beside it.
+        TreeIcon icon = treeIconFor(node->kind, node->path, (flags & ovChildren) != 0);
+        if (icon.glyph && icon.glyph[0])
+            dBuf.moveStr((ushort) iconX, icon.glyph,
+                         icon.inheritColor ? rc.text
+                                           : TColorAttr(TColorRGB(icon.color), rc.bg),
+                         (ushort) (v->size.x - iconX));
     }
+
+    // 3. The name, clipped so it can never run into the status gutter (below).
+    //    Drawn at a column derived from the graph's width, so even a mis-measured
+    //    icon could never shift it.
+    //
+    //    The name keeps its KIND colour (gold folder, violet skill, blue Lua) even
+    //    when the file is dirty: git status is now carried unambiguously by the
+    //    gutter chip, so tinting the whole row as well would be redundant -- and
+    //    would mean a folder lost its gold the moment anything inside it changed.
+    TStringView text = v->getText(cur);
+    TColorAttr c = rc.text;
+    if (uint32_t nameFg = treeNameColor(node->kind); nameFg && !focused && !selected)
+        setFore(c, TColorRGB(nameFg));
+    if (node->editor)
+        setStyle(c, getStyle(c) | slBold);
+    int nameMax = max(0, gutterCol(v->size.x) - max(0, x));
+    dBuf.moveStr(max(0, x), text, c, (ushort) nameMax, (ushort) max(0, -x));
+
+    // 4. The git status, in a column LOCKED to the right edge of the pane: it is
+    //    positioned from size.x rather than from the text, and is never offset by
+    //    delta.x, so no name -- however long, however far scrolled -- can clip it
+    //    or push it out of view. Files get an inverted chip (the status letter
+    //    knocked out of a solid colour) so it reads at a glance; a directory's
+    //    rolled-up "something inside me changed" stays a quiet dot, since making
+    //    every ancestor folder shout would drown out the files that actually changed.
+    if (char gs = node->gitStatus; gs && v->size.x > 2)
+    {
+        int col = v->size.x - 1;
+        if (gs == '.')
+            dBuf.moveStr((ushort) col, "\xC2\xB7",          // U+00B7 middle dot
+                         TColorAttr(TColorRGB(0x9AA6CE), rc.bg), 1);
+        else
+        {
+            TColorDesired chip {};
+            switch (gs)
+            {
+                case 'M': case 'R': chip = 0xE6C98C; break; // gold (modified/renamed)
+                case 'A': case '?': chip = 0x9CDC8C; break; // green (added/untracked)
+                case 'D':           chip = 0xE06C75; break; // red (deleted)
+                case 'U':           chip = 0xD79CD2; break; // magenta (conflicted)
+                default:            chip = 0xCBD6F2; break;
+            }
+            // Inverted: the status colour becomes the background, the row's own
+            // background the letter. Reads as a solid chip, and stays legible on
+            // the focused/selected row (whose background is the highlight blue).
+            const char letter[2] = { gs, '\0' };
+            dBuf.moveStr((ushort) col, letter, TColorAttr(rc.bg, chip), 1);
+        }
+    }
+
+    v->writeLine(0, position - v->delta.y, v->size.x, 1, dBuf);
+    ctx->last = position;
     return False;
 }
 
@@ -1007,54 +1167,13 @@ Boolean drawNode( TOutlineViewer *v, TNode *cur, int level, int position,
 
 char *DocumentTreeView::getGraph(int level, long lines, ushort flags)
 {
-    if (level == 0)
-    {
-        // One column, aligned across root entries, then a space before the name:
-        //   '+' collapsed, '┬' expanded (a folder follows), '└' expanded (last
-        //   folder), ' ' file. The down-leg '┬' is only used when the root line
-        //   continues to another folder below; the last folder closes with a
-        //   corner so its leg doesn't dangle into the trailing root files.
-        char *g = new char[3];
-        if (!(flags & ovExpanded))
-            g[0] = '+';                 // has children, currently collapsed
-        else if ((flags & ovChildren) && !(flags & ovLast))
-            g[0] = '\xC2';              // ┬ : expanded, another folder follows
-        else if (flags & ovChildren)
-            g[0] = '\xC0';              // └ : expanded last folder, line ends here
-        else
-            g[0] = ' ';                 // leaf
-        g[1] = ' ';                     // gap between the marker and the name
-        g[2] = '\0';
-        return g;
-    }
-    // Deeper levels, built as tight as possible: one column per ancestor level
-    // (a vertical 'lines' bar or a gap) followed immediately by this item's
-    // connector and then the name -- no filler and no trailing marker column.
-    // The connector sits directly under the first letter of the parent name.
-    // A collapsed folder shows '+' in the connector slot (the classic
-    // expandable-node marker), so the affordance survives without any extra
-    // width; files and expanded folders show the usual branch glyph.
-    char *g = new char[level + 3]; // ancestor cols + connector + space + NUL
-    char *p = g;
-    long l = lines;
-    for (int i = 0; i < level; ++i, l >>= 1)
-        *p++ = (l & 1) ? '\xB3' : ' ';          // │ (continues) or gap
-    if (!(flags & ovExpanded))
-        *p++ = '+';                             // collapsed folder
-    else if ((flags & ovChildren) && !(flags & ovLast))
-        // ┼ : an expanded folder with siblings below. The sibling line runs
-        // through it (up + down) so it stays connected to its parent and the
-        // siblings around it, while the horizontal bar leads into its own name
-        // and (one column right) its children -- a plain '┬' would break the
-        // line by lacking the upward leg.
-        *p++ = '\xC5';
-    else
-        // └ for any last child (file or expanded folder -- its line ends, so no
-        // leg to dangle), ├ for a non-last file.
-        *p++ = (flags & ovLast) ? '\xC0' : '\xC3';
-    *p++ = ' ';                                 // gap between the connector and the name
-    *p = '\0';
-    return g;
+    // The base viewer only ever MEASURES this string -- for the horizontal-scroll
+    // limit and for the click-to-toggle hit test. All the drawing is done by
+    // drawNode(), which has the node and so can pick the exact glyphs. Both call
+    // treeGraph(), so the width they agree on is exact, which is all that matters
+    // here (every glyph in every set is one column, so the placeholder arguments
+    // cannot change it).
+    return newStr(treeGraph(level, lines, flags, false, false));
 }
 
 void DocumentTreeView::draw()
@@ -1062,8 +1181,8 @@ void DocumentTreeView::draw()
     TDrawBuffer dBuf;
     DrawCtx ctx {&dBuf, -1};
     TOutlineViewer::firstThat(drawNode, &ctx);
-    TAttrPair nrmColor = treeColors(TreeRole::Normal, owner && (owner->state & sfActive));
-    dBuf.moveChar(0, ' ', nrmColor, size.x);
+    RowColors nrm = treeColors(TreeRole::Normal, owner && (owner->state & sfActive));
+    dBuf.moveChar(0, ' ', nrm.fill, size.x);
     writeLine(0, ctx.last + 1, size.x, size.y - (ctx.last - delta.y), dBuf);
 }
 

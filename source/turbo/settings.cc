@@ -78,6 +78,12 @@ void loadSettings(AppSettings &s) noexcept
             chomp(cmd);
             s.defaultAgent = cmd;
         }
+        else if (strncmp(line, "tree.icons=", 11) == 0)
+        {
+            char *val = line + 11;
+            chomp(val);
+            s.treeIcons = val;
+        }
         else if (strncmp(line, themePrefix, sizeof themePrefix - 1) == 0)
         {
             // theme.<item>.<fg|bg|style>=<value>
@@ -121,6 +127,8 @@ void saveSettings(const AppSettings &s) noexcept
     fprintf(f, "autosave=%d\n", s.autoSaveOnFocusLoss ? 1 : 0);
     fprintf(f, "lsp.enabled=%d\n", s.lspEnabled ? 1 : 0);
     fprintf(f, "showhidden=%d\n", s.showHidden ? 1 : 0);
+    if (!s.treeIcons.empty())
+        fprintf(f, "tree.icons=%s\n", s.treeIcons.c_str());
     if (!s.defaultAgent.empty())
         fprintf(f, "agent.default=%s\n", s.defaultAgent.c_str());
     for (auto &srv : s.lspServers)

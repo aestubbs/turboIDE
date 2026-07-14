@@ -249,6 +249,11 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     // (frames, menus, file-tree connectors). The library default is faithful CP437.
     tvision::CpTranslator::setBoxDrawing(tvision::CpTranslator::BoxDrawing::Rounded);
     loadSettings(settings);
+    // Resolve the file tree's glyph set before the tree is built. "auto" (the
+    // default) only picks the Nerd Font pictograms on a terminal known to bundle a
+    // Nerd Font fallback: glyph coverage cannot be probed at runtime, and guessing
+    // wrong renders blank boxes rather than icons.
+    setTreeIconSet(parseTreeIconSet(settings.treeIcons));
     frecency.load();
     // Fold any saved colour overrides onto the built-in 24-bit defaults before
     // the first editor is created, so new editors theme from the right scheme.
@@ -257,6 +262,12 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     configureLsp();
     git = std::make_unique<GitManager>();
     watcher = std::make_unique<turbo::FileWatcher>();
+    // Watch the global skills home too: it sits outside the project, so the
+    // project watcher never sees a skill added or removed there.
+    if (const char *h = ::getenv("HOME"))
+        globalSkillsDir = std::string(h) + "/.claude/skills";
+    skillsWatcher = std::make_unique<turbo::FileWatcher>();
+    startGlobalSkillsWatch();
 
     TCommandSet ts;
     ts += cmSave;
@@ -625,6 +636,9 @@ void TurboApp::shutDown()
         git->shutdown();
     if (watcher)
         watcher->stop();
+    // Not stopped by closeProject: the global skills home isn't project-scoped.
+    if (skillsWatcher)
+        skillsWatcher->stop();
     pendingAfterBuild = nullptr;
     if (buildRunner)
         buildRunner->stop();
@@ -1436,29 +1450,6 @@ static std::vector<std::string> luaHomeFiles(const std::string &home,
     return out;
 }
 
-// Collect the skills under 'dir': each immediate sub-directory that contains a
-// SKILL.md becomes an entry {name = folder name, path = the SKILL.md}.
-static void scanSkillDir(const std::string &dir,
-                         std::vector<DocumentTreeView::SkillEntry> &out)
-{
-    if (dir.empty())
-        return;
-    std::error_code ec;
-    size_t start = out.size();
-    for (auto &e : std::filesystem::directory_iterator(dir, ec))
-    {
-        std::error_code fec;
-        if (!e.is_directory(fec))
-            continue;
-        std::string md = e.path().string() + "/SKILL.md";
-        if (std::filesystem::is_regular_file(md, fec))
-            out.push_back({ e.path().filename().string(), std::move(md) });
-    }
-    std::sort(out.begin() + start, out.end(),
-              [](const DocumentTreeView::SkillEntry &a,
-                 const DocumentTreeView::SkillEntry &b) { return a.name < b.name; });
-}
-
 std::vector<std::string> TurboApp::discoverLuaScripts() const noexcept
 {
     std::vector<std::string> out;
@@ -1604,7 +1595,15 @@ void TurboApp::treeNewSkill(const std::string &dir) noexcept
              "a `lua_<name>` tool registered via `turbo.register_command`).\n";
     }
     fileOpenOrNew(full.c_str());
-    refreshSkillsInTree(); // show the new skill under its home
+    // Add just the new skill folder, rather than rebuilding both homes: a full
+    // reinject frees and re-scans every skill, throwing away the expand state and
+    // editor links of the ones already open. addNode() scans the new folder (the
+    // SKILL.md is already written) and tags it as a skill.
+    if (docTree)
+        docTree->tree->addNode(skillDir, true);
+    // The global skills dir may not have existed at startup (so nothing watched
+    // it); if this call just created it, start watching now.
+    startGlobalSkillsWatch();
 }
 
 void TurboApp::luaNewScript() noexcept
@@ -1664,21 +1663,15 @@ void TurboApp::refreshSkillsInTree() noexcept
     // <project>/.claude/skills (project) and ~/.claude/skills (global). Kept as
     // separate labelled homes, mirroring how the Lua tiers are shown. (When
     // other agents are supported, resolve these dirs from the configured agent.)
+    //
+    // Only the directories are named here: the tree scans them like any other
+    // folder, so each skill appears as the folder it really is -- SKILL.md,
+    // references/ and all -- rather than as a leaf faking the skill's name.
     std::vector<DocumentTreeView::SkillSection> sections;
     if (!projectRoot.empty())
-    {
-        std::string dir = projectRoot + "/.claude/skills";
-        std::vector<DocumentTreeView::SkillEntry> skills;
-        scanSkillDir(dir, skills);
-        sections.push_back({"Project Skills", std::move(dir), std::move(skills)});
-    }
+        sections.push_back({"Project Skills", projectRoot + "/.claude/skills"});
     if (const char *h = ::getenv("HOME"))
-    {
-        std::string dir = std::string(h) + "/.claude/skills";
-        std::vector<DocumentTreeView::SkillEntry> skills;
-        scanSkillDir(dir, skills);
-        sections.push_back({"Global Skills", std::move(dir), std::move(skills)});
-    }
+        sections.push_back({"Global Skills", std::string(h) + "/.claude/skills"});
     docTree->tree->setSkills(true, std::move(sections));
 }
 
@@ -1874,15 +1867,28 @@ void TurboApp::gitRefresh()
     git->statusToOutput();
 }
 
+void TurboApp::startGlobalSkillsWatch() noexcept
+{
+    if (!skillsWatcher || globalSkillsDir.empty())
+        return;
+    std::error_code ec;
+    if (std::filesystem::is_directory(globalSkillsDir, ec))
+        skillsWatcher->start(globalSkillsDir);
+}
+
 void TurboApp::onFilesChanged()
 {
-    std::vector<std::string> changed;
-    if (!watcher->poll(changed))
+    std::vector<std::string> changed, globalSkills;
+    bool any = false;
+    if (watcher && watcher->poll(changed))
+        any = true;
+    if (skillsWatcher && skillsWatcher->poll(globalSkills))
+        any = true;
+    if (!any)
         return;
-    bool gitTouched = false;
-    for (auto &p : changed)
-    {
-        gitTouched = true; // any change under the worktree may affect git status
+
+    // Reconcile one changed path with the tree and any editor holding it.
+    auto reconcile = [this] (const std::string &p) {
         // If this file is open in an editor, reconcile the buffer with the new
         // on-disk contents (silent reload when clean, prompt when dirty).
         handleExternalFileChange(p);
@@ -1891,9 +1897,9 @@ void TurboApp::onFilesChanged()
         // so the Windows watcher's backslash paths match too.
         if (p.find("/.git/") != std::string::npos ||
             p.find("\\.git\\") != std::string::npos)
-            continue;
+            return;
         if (!docTree)
-            continue;
+            return;
         std::error_code ec;
         if (std::filesystem::exists(p, ec))
         {
@@ -1903,7 +1909,15 @@ void TurboApp::onFilesChanged()
         }
         else
             docTree->tree->removeNode(p); // no-op if not in the tree
-    }
+    };
+
+    // Any change under the worktree may affect git status. Global skills live
+    // outside the repo, so they never do.
+    bool gitTouched = !changed.empty();
+    for (auto &p : changed)
+        reconcile(p);
+    for (auto &p : globalSkills)
+        reconcile(p);
     if (gitTouched && git)
         git->requestStatus();
 }

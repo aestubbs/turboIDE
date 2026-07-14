@@ -77,6 +77,11 @@ struct TurboApp : public TApplication, EditorWindowParent
     std::unique_ptr<LspManager> lsp;
     std::unique_ptr<GitManager> git;
     std::unique_ptr<turbo::FileWatcher> watcher;
+    // The global skills home (~/.claude/skills) lives outside the project, so the
+    // project watcher -- which is rooted at projectRoot -- cannot see it. It gets
+    // its own, which stays up across project open/close since it isn't project-scoped.
+    std::unique_ptr<turbo::FileWatcher> skillsWatcher;
+    std::string globalSkillsDir;    // "" when there is no $HOME
     // Embedded Lua interpreter: editor scripting/configuration and event hooks.
     std::unique_ptr<LuaManager> luaMgr;
     // MCP server: exposes editor actions + Lua commands to the agent as tools.
@@ -277,6 +282,9 @@ struct TurboApp : public TApplication, EditorWindowParent
     // Rescan the project + global agent skill dirs (.claude/skills, ~/.claude/
     // skills) and push them into the tree as the always-shown Skills "homes".
     void refreshSkillsInTree() noexcept;
+    // Start watching ~/.claude/skills, if it exists. Retried after a skill is
+    // created, since the directory may not have existed at startup.
+    void startGlobalSkillsWatch() noexcept;
     void showEditorList(TEvent *ev);
     void toggleTreeView();
     void setTreeWidth(int w);     // resize the docked tree (from a left-border drag)

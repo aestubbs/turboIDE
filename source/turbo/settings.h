@@ -20,6 +20,11 @@ struct AppSettings
     bool autoSaveOnFocusLoss {true};
     bool lspEnabled {true};
     bool showHidden {false}; // include dotfiles/dot-dirs in the file tree
+    // File-tree glyph set: "auto" (the default), "nerd", "unicode" or "ascii".
+    // "auto" uses Nerd Font pictograms only on terminals known to bundle a Nerd
+    // Font fallback, since glyph coverage cannot be probed at runtime and a wrong
+    // guess renders blank boxes. See treeicons.h.
+    std::string treeIcons {"auto"};
     // Command line for the terminal window's shell (e.g. "bash", "zsh -l").
     // Empty = use $SHELL, falling back to /bin/sh.
     std::string terminalShell;
