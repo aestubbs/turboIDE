@@ -7,6 +7,8 @@
 #define Uses_TInputLine
 #include <tvision/tv.h>
 
+#include "treeicons.h"
+
 #include <functional>
 #include <string>
 #include <string_view>
@@ -29,8 +31,11 @@ struct DocumentTreeView : public TOutline {
         TNode **ptr;
         Node *parent;
         std::string path;       // Absolute path of this file or directory.
+        // Whether this node is a container (it has a child list and expands).
+        // True for Project, Dir, Skill and both home kinds.
         bool isDir;
         EditorWindow *editor;   // Non-null iff this file is open in an editor.
+        NodeKind kind {NodeKind::File};
         // Git status badge char: 0 = clean, else 'M' 'A' 'D' 'R' '?' 'U' for a
         // file, or '.' for a directory that contains changes.
         char gitStatus {0};
@@ -38,22 +43,30 @@ struct DocumentTreeView : public TOutline {
         // Whether this node is shown under the current filter (see setFilter).
         // Only consulted while a filter is active; ignored otherwise.
         bool visible {true};
-        // For a synthetic Lua-home group node: the real scripts directory it
-        // stands for (so "New Lua Script..." knows where to create). Empty for
-        // every ordinary file/directory node.
-        std::string luaDir;
-        // For a synthetic Skills-home group node: the real skills directory it
-        // stands for (so "New Skill..." knows where to create). Empty otherwise.
-        std::string skillDir;
-        // Overrides the label derived from 'path'. Used for skill leaves, whose
-        // path points at .../<name>/SKILL.md but which display the skill's name.
-        std::string displayName;
+        // The real path behind a node whose own 'path' is not the thing it acts on:
+        //   LuaHome / SkillsHome -> the real directory the home stands for (its own
+        //                           'path' is just a display label)
+        //   Skill                -> the SKILL.md inside the skill folder
+        // Empty for every other kind.
+        std::string primaryPath;
 
         Node(Node *parent, std::string_view path, bool isDir) noexcept;
         void setEditor(EditorWindow *w) noexcept;
         void refreshText() noexcept;
         void remove() noexcept;
         void dispose() noexcept;
+
+        // The file this node opens on Enter/double-click, or "" when there is
+        // nothing to open (a pure container, which toggles instead). A skill is
+        // both: a folder that expands, and a node that opens its SKILL.md.
+        std::string openPath() const noexcept
+        {
+            if (kind == NodeKind::Skill) return primaryPath;
+            if (kind == NodeKind::File)  return path;
+            return {};
+        }
+        // The directory that "New File..." / "New Folder..." create into.
+        std::string targetDir() const noexcept;
 
     };
 
@@ -65,19 +78,13 @@ struct DocumentTreeView : public TOutline {
         std::vector<std::string> scripts;
     };
 
-    // One skill under a Skills home: 'name' is the skill (folder) name shown in
-    // the tree, 'path' is the SKILL.md file opened when it is activated.
-    struct SkillEntry {
-        std::string name;
-        std::string path;
-    };
-
-    // A synthetic top-level "Skills" home, laid out like a Lua home: a friendly
-    // label, the real skills directory it represents, and the skills beneath it.
+    // A synthetic top-level "Skills" home: a friendly label and the real skills
+    // directory it stands for. Unlike a Lua home, its contents are not listed
+    // here: they are scanned from 'dir' like any other folder, so a skill's
+    // SKILL.md, references/ and scripts/ are all reachable in the tree.
     struct SkillSection {
         std::string label;
         std::string dir;
-        std::vector<SkillEntry> skills;
     };
 
     DocumentTreeView(const TRect &bounds, TScrollBar *hsb, TScrollBar *vsb,
@@ -89,11 +96,14 @@ struct DocumentTreeView : public TOutline {
     // Intercept right-click (context menu) and left double-click (open/toggle)
     // before the base outline handling; everything else falls through.
     void handleEvent(TEvent &ev) override;
-    // Custom draw so that files open in an editor are shown in bold.
+    // Custom draw: the connector graph (dim), then the node's icon in its own
+    // colour, then the name. Files open in an editor are shown in bold.
     void draw() override;
-    // Root entries (level 0) get a compact 1-char marker instead of the 3-char
-    // connector graph: the tree lines convey no hierarchy at the top level and
-    // only waste columns in the narrow pane. Deeper levels keep the full graph.
+    // The base viewer only ever MEASURES this string -- for the horizontal-scroll
+    // limit and for the click-to-toggle hit test. All drawing goes through
+    // drawNode(), which has the node in hand and so can pick glyphs this cannot
+    // know about (an empty folder still being a folder, the tree's first row).
+    // Both share treeGraph(), so the width they agree on is exact.
     char *getGraph(int level, long lines, ushort flags) override;
 
     // Outline iteration overrides. While a filter is active these present only
@@ -106,9 +116,13 @@ struct DocumentTreeView : public TOutline {
     Boolean hasChildren(TNode *node) override;
     Boolean isExpanded(TNode *node) override;
 
-    // Open a file in the editor (or focus it if already open), or toggle a
-    // directory's expanded state. Shared by Enter, double-click and the menu.
+    // Open a file in the editor (or focus it if already open), or -- for a node
+    // with nothing to open -- toggle it. Shared by Enter, double-click and the
+    // menu. A skill opens its SKILL.md rather than expanding, so the arrow keys
+    // must use toggleExpand() instead of this.
     void openOrToggle(Node *node) noexcept;
+    // Expand/collapse a container, without ever opening anything.
+    void toggleExpand(Node *node) noexcept;
     // Pop up the file/folder context menu for the node on display row 'row',
     // anchored at the absolute screen position 'where', and run the chosen action.
     void showContextMenu(int row, TPoint where) noexcept;
@@ -185,6 +199,10 @@ struct DocumentTreeView : public TOutline {
     void removeNode(std::string_view path) noexcept;
     void refreshNode(std::string_view path) noexcept;
     Node *findDir(std::string_view path) noexcept;
+    // The node that owns 'dirPath' as its child list: a real directory node, or --
+    // for the real directory behind a synthetic Lua/Skills home -- the home node
+    // itself, whose own 'path' is a label and so is invisible to findDir().
+    Node *findContainer(std::string_view dirPath) noexcept;
 
     // Append the absolute path of every file (not directory) in the whole tree,
     // regardless of expand/collapse state. Used by the "Goto Anything" picker as
@@ -220,6 +238,9 @@ struct DocumentTreeView : public TOutline {
     std::vector<SkillSection> skillSections;
     std::vector<Node *> skillGroups; // live group nodes, parallel to skillSections
     void reinjectSkillNodes() noexcept; // rebuild the groups from skillSections
+    // Free a synthetic home and its ENTIRE subtree (a skills home now holds real
+    // folders, so freeing only its direct children would leak them).
+    void disposeGroup(Node *&group) noexcept;
     std::string filter;     // active filter query (lowercased; "" = no filter)
     // Recompute Node::visible for the whole tree from 'filter'. A file is
     // visible iff its name matches; a folder is visible iff its name matches
