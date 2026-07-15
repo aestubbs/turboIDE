@@ -35,10 +35,10 @@ Editor::Editor(TScintilla &aScintilla) noexcept :
     call(scintilla, SCI_SETTABINDENTS, true, 0U);
     call(scintilla, SCI_SETBACKSPACEUNINDENTS, true, 0U);
 
-    // Margins: 0 = line numbers, 1 = bookmarks, 2 = change history, 3 = fold.
-    // The extra margins start at width 0, so the default appearance is unchanged
-    // until a feature is enabled.
-    call(scintilla, SCI_SETMARGINS, 4, 0U);
+    // Margins: 0 = line numbers, 1 = bookmarks, 2 = change history, 3 = fold,
+    // 4 = breakpoints / current line. The extra margins start at width 0, so the
+    // default appearance is unchanged until a feature is enabled.
+    call(scintilla, SCI_SETMARGINS, 5, 0U);
     call(scintilla, SCI_SETMARGINTYPEN, 0, SC_MARGIN_NUMBER);
     setUpExtraMargins();
     updateMarginWidth();
@@ -353,6 +353,54 @@ void Editor::setUpExtraMargins() noexcept
     // Let Scintilla keep folds consistent across edits and expand on actions.
     call(scintilla, SCI_SETAUTOMATICFOLD,
          SC_AUTOMATICFOLD_SHOW | SC_AUTOMATICFOLD_CHANGE, 0U);
+
+    // Margin 4: breakpoints and the current execution line (debugger). Hidden
+    // (width 0) until the first breakpoint is set or execution stops, then
+    // revealed to width 1 so the markers show as gutter symbols (a red '*' for
+    // a breakpoint, a bright '>' for the stopped line). A full-line background
+    // marker does not paint in this terminal surface, so a gutter arrow -- the
+    // same proven mechanism as the breakpoint dot -- marks the current line.
+    // markCurrentLine has the higher marker number, so it draws on top of a
+    // breakpoint when execution stops on a breakpoint line.
+    call(scintilla, SCI_SETMARGINTYPEN, 4, SC_MARGIN_SYMBOL);
+    call(scintilla, SCI_SETMARGINMASKN, 4, (1 << markBreakpoint) | (1 << markCurrentLine));
+    call(scintilla, SCI_SETMARGINWIDTHN, 4, 0);
+    call(scintilla, SCI_MARKERDEFINE, markBreakpoint, SC_MARK_CHARACTER + '*');
+    call(scintilla, SCI_MARKERSETFORE, markBreakpoint, 0x0000FF); // red (BGR 0xBBGGRR)
+    call(scintilla, SCI_MARKERDEFINE, markCurrentLine, SC_MARK_CHARACTER + '>');
+    call(scintilla, SCI_MARKERSETFORE, markCurrentLine, 0x00FFFF); // yellow (BGR 0xBBGGRR)
+}
+
+long Editor::currentLine() noexcept
+{
+    long pos = call(scintilla, SCI_GETCURRENTPOS, 0U, 0U);
+    return call(scintilla, SCI_LINEFROMPOSITION, pos, 0U);
+}
+
+void Editor::setBreakpointMarker(long line, bool on) noexcept
+{
+    if (on)
+    {
+        // Reveal the breakpoint gutter on first use (like toggleBookmark), so
+        // the marker renders as a symbol rather than a full-line background.
+        breakpointsUsed = true;
+        call(scintilla, SCI_SETMARGINWIDTHN, 4, 1);
+        call(scintilla, SCI_MARKERADD, line, markBreakpoint);
+    }
+    else
+        call(scintilla, SCI_MARKERDELETE, line, markBreakpoint);
+    redraw();
+}
+
+void Editor::setCurrentLine(long line) noexcept
+{
+    call(scintilla, SCI_MARKERDELETEALL, markCurrentLine, 0U);
+    if (line >= 0)
+    {
+        call(scintilla, SCI_SETMARGINWIDTHN, 4, 1); // reveal the gutter for the arrow
+        call(scintilla, SCI_MARKERADD, line, markCurrentLine);
+    }
+    redraw();
 }
 
 void Editor::selectNextOccurrence() noexcept

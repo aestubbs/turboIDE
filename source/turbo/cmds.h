@@ -44,6 +44,7 @@ enum : ushort
     cmUndoSelection,
     cmSplitSelectionLines,
     cmCollapseSelection,
+    cmToggleBreakpoint,   // debugger: toggle a breakpoint on the caret line
     // Commands that cannot be disabled.
     cmToggleTree = 1000,
     cmStateChanged,

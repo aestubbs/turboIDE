@@ -6,7 +6,9 @@
 #include <turbo/dap/client.h>
 
 #include <functional>
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -49,6 +51,12 @@ public:
     // config/defaults. Returns false if no adapter is available or spawn fails.
     bool start(const std::string &languageId, const std::string &program) noexcept;
 
+    // Toggle a breakpoint at 'file':'line' (0-based). Returns whether the line
+    // now has a breakpoint (so the caller can update the editor gutter). The
+    // breakpoint set persists across sessions and is (re)sent to the adapter on
+    // the next session's 'initialized', or immediately if a session is live.
+    bool toggleBreakpoint(const std::string &file, int line) noexcept;
+
     // Session controls. No-ops when no session is active.
     void terminate() noexcept;       // stop debugging (disconnect + teardown)
     void continueExec() noexcept;    // resume
@@ -78,6 +86,8 @@ private:
 
     AdapterSpec resolveAdapter(const std::string &languageId) noexcept;
     void sendLaunchOrAttach() noexcept;
+    void sendBreakpoints(const std::string &file) noexcept; // setBreakpoints for one file
+    void sendAllBreakpoints() noexcept;                     // replay every file (on 'initialized')
     void onEvent(const std::string &event, const turbo::dap::Json &body) noexcept;
     void onReverseRequest(int seq, const std::string &command,
                           const turbo::dap::Json &arguments) noexcept;
@@ -91,6 +101,8 @@ private:
     AdapterSpec pending;               // spec for the in-flight launch/attach
     std::string pendingProgram;
     int currentThreadId {0};           // from the most recent 'stopped' event
+    // Breakpoints: file -> set of 0-based lines. Persists across sessions.
+    std::map<std::string, std::set<int>> breakpoints;
 };
 
 #else // !TURBO_ENABLE_DAP
@@ -110,6 +122,7 @@ public:
     void setRootPath(const char *) noexcept {}
     bool sessionActive() const noexcept { return false; }
     bool start(const std::string &, const std::string &) noexcept { return false; }
+    bool toggleBreakpoint(const std::string &, int) noexcept { return false; }
     void terminate() noexcept {}
     void continueExec() noexcept {}
     void stepOver() noexcept {}

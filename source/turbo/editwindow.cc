@@ -341,6 +341,7 @@ EditorWindow::EditorWindow( const TRect &bounds, TurboEditor &aEditor,
     enabledCmds += cmToggleBookmark;
     enabledCmds += cmNextBookmark;
     enabledCmds += cmPrevBookmark;
+    enabledCmds += cmToggleBreakpoint;
     enabledCmds += cmToggleFolding;
     enabledCmds += cmFoldAtCursor;
     enabledCmds += cmFoldAll;
@@ -515,6 +516,9 @@ void EditorWindow::handleEvent(TEvent &ev)
                 case cmToggleBookmark:
                     editor.toggleBookmark();
                     editor.redraw();
+                    break;
+                case cmToggleBreakpoint:
+                    parent.editorToggleBreakpoint(*this, editor.currentLine());
                     break;
                 case cmNextBookmark:
                     editor.nextBookmark();

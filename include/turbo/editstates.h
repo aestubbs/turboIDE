@@ -133,6 +133,11 @@ void clearIndicator(TScintilla &scintilla, Indicator indicator);
 // margin setup agree on the numbers.
 constexpr int markBookmark = 1;
 constexpr int markChanged = 2;
+// Debugger markers. markBreakpoint is a symbol in its own margin (margin 4,
+// revealed once a breakpoint is set, like the bookmark margin). markCurrentLine
+// is an SC_MARK_BACKGROUND marker that highlights the stopped execution line.
+constexpr int markBreakpoint = 3;
+constexpr int markCurrentLine = 4;
 
 // Updates 'scintilla' so that it makes use of the current state of
 // 'lexer' and 'scheme'. If 'scheme' is null, 'schemeDefault' is used instead.

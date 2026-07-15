@@ -35,6 +35,12 @@ std::string upper(std::string s) noexcept
     return s;
 }
 
+std::string baseName(const std::string &path) noexcept
+{
+    auto slash = path.find_last_of("/\\");
+    return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
 } // namespace
 
 DapManager::DapManager() noexcept = default;
@@ -188,12 +194,53 @@ void DapManager::sendLaunchOrAttach() noexcept
         });
 }
 
+bool DapManager::toggleBreakpoint(const std::string &file, int line) noexcept
+{
+    auto &lines = breakpoints[file];
+    bool nowSet;
+    if (lines.erase(line))
+        nowSet = false;
+    else
+    {
+        lines.insert(line);
+        nowSet = true;
+    }
+    if (lines.empty())
+        breakpoints.erase(file);
+    if (active)
+        sendBreakpoints(file); // update the live session immediately
+    return nowSet;
+}
+
+void DapManager::sendBreakpoints(const std::string &file) noexcept
+{
+    if (!client)
+        return;
+    Json bps = Json::array();
+    auto it = breakpoints.find(file);
+    if (it != breakpoints.end())
+        for (int l : it->second)
+            bps.push_back(Json{{"line", l + 1}}); // DAP lines are 1-based
+    Json args = {
+        {"source", {{"path", file}, {"name", baseName(file)}}},
+        {"breakpoints", bps},
+    };
+    client->sendRequest("setBreakpoints", args);
+}
+
+void DapManager::sendAllBreakpoints() noexcept
+{
+    for (auto &kv : breakpoints)
+        sendBreakpoints(kv.first);
+}
+
 void DapManager::onEvent(const std::string &event, const Json &body) noexcept
 {
     if (event == "initialized")
     {
-        // Adapter is ready for configuration. Breakpoints are registered here
-        // from M2; for now just finish configuration so the debuggee runs.
+        // Adapter is ready for configuration: register breakpoints, then finish
+        // configuration so the debuggee runs.
+        sendAllBreakpoints();
         if (client)
             client->sendRequest("configurationDone", Json::object());
     }
@@ -206,10 +253,35 @@ void DapManager::onEvent(const std::string &event, const Json &body) noexcept
     else if (event == "stopped")
     {
         currentThreadId = body.value("threadId", 0);
-        // Frame/source resolution (stackTrace) arrives in M2; surface the stop
-        // so the UI can reflect the paused state now.
-        if (onStopped)
-            onStopped("", 0, body.value("reason", std::string()));
+        std::string reason = body.value("reason", std::string());
+        // Resolve the stop location from the top stack frame, then surface it so
+        // the UI can jump to and highlight the current line.
+        if (client && currentThreadId)
+        {
+            Json args = {{"threadId", currentThreadId}, {"startFrame", 0}, {"levels", 1}};
+            client->sendRequest("stackTrace", args,
+                [this, reason](bool ok, const Json &b, const std::string &)
+                {
+                    std::string file;
+                    int line = 0;
+                    if (ok && b.contains("stackFrames") && b["stackFrames"].is_array()
+                        && !b["stackFrames"].empty())
+                    {
+                        const Json &fr = b["stackFrames"][0];
+                        line = fr.value("line", 0);
+                        if (fr.contains("source") && fr["source"].is_object())
+                        {
+                            const Json &src = fr["source"];
+                            if (src.contains("path") && src["path"].is_string())
+                                file = src["path"].get<std::string>();
+                        }
+                    }
+                    if (onStopped)
+                        onStopped(file, line, reason);
+                });
+        }
+        else if (onStopped)
+            onStopped("", 0, reason);
     }
     else if (event == "continued")
     {

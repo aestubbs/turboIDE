@@ -87,6 +87,9 @@ struct EditorWindowParent
     // Mouse dwell start/end over a document position (for hover).
     virtual void editorHoverStart(EditorWindow &w, long pos) noexcept {}
     virtual void editorHoverEnd(EditorWindow &w) noexcept {}
+    // Toggle a debugger breakpoint on document line 'line' (0-based). The app
+    // owns the breakpoint model (DapManager) and updates the gutter marker.
+    virtual void editorToggleBreakpoint(EditorWindow &w, long line) noexcept {}
 };
 
 struct EditorWindow : public turbo::BasicEditorWindow
