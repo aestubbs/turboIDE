@@ -67,6 +67,10 @@ struct TurboApp : public TApplication, EditorWindowParent
     // menu bar is rebuilt when this needs to change, so there are never empty
     // placeholder rows (0 open editors = no slots).
     int menuRecentCount {0};
+    // Which of those slots holds the agent window, or -1 while it is closed. It
+    // is not an editor -- it never joins MRUlist -- so it gets a slot of its own
+    // after the editors, and focusRecentWindow has to route that index to it.
+    int menuAgentIndex {-1};
     bool argsParsed {false};
     int argc;
     const char **argv;

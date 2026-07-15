@@ -1756,10 +1756,17 @@ void TurboApp::refreshWindowList() noexcept
     // Size the recent-window and tool-toggle sections to their current counts,
     // rebuilding the menu bar once when either changes so there are never empty
     // rows (and the two dynamic sections agree with the bar that is built).
-    int count = 0;
-    MRUlist.forEach([&] (EditorWindow *w) { if (w) ++count; });
-    if (count > windowListMax)
-        count = windowListMax;
+    //
+    // The agent window is not an editor -- it never joins MRUlist and carries no
+    // Alt-1..9 number -- but it is still a window the user switches between, so
+    // while it is open it takes the slot after the editors.
+    bool agentOpen = (agentWin != nullptr);
+    int editors = 0;
+    MRUlist.forEach([&] (EditorWindow *w) { if (w) ++editors; });
+    int editorMax = windowListMax - (agentOpen ? 1 : 0);
+    if (editors > editorMax)
+        editors = editorMax;
+    int count = editors + (agentOpen ? 1 : 0);
     int toolCount = (int) tools.size();
     if (toolCount > toolListMax)
         toolCount = toolListMax;
@@ -1770,23 +1777,38 @@ void TurboApp::refreshWindowList() noexcept
     if (!bar)
         return;
     TMenu *m = bar->rootMenu();
+    // '~' is TVision's hotkey marker, so a title carrying one has to escape it.
+    // (EditorWindow::title is a std::string; TWindow::getTitle returns a char *.)
+    auto escapeTildes = [] (std::string &label, TStringView title) {
+        for (char c : title)
+        {
+            if (c == '~') label += '~';
+            label += c;
+        }
+    };
     int i = 0;
     MRUlist.forEach([&] (EditorWindow *w) {
-        if (i >= count || !w)
+        if (i >= editors || !w)
             return;
         // Entries are MRU-ordered, but each is prefixed with the window's stable
         // 1..9 number -- the same one Alt-1..9 selects -- so the menu and the
         // keyboard shortcut always agree. Windows past nine show no number.
         std::string label = (w->number >= 1 && w->number <= 9)
             ? std::to_string(w->number) + " " : "  ";
-        for (char c : w->title) // escape '~' (TVision's hotkey marker)
-        {
-            if (c == '~') label += '~';
-            label += c;
-        }
+        escapeTildes(label, w->title);
         setMenuItemLabel(m, cmWindowBase + i, label.c_str(), true);
         ++i;
     });
+
+    // The agent window's slot, last. It has no Alt-1..9 number, so it is indented
+    // to line up with the numbered editors above it, like an editor past nine.
+    menuAgentIndex = agentOpen ? i : -1;
+    if (agentOpen)
+    {
+        std::string label = "  ";
+        escapeTildes(label, agentWin->getTitle(0));
+        setMenuItemLabel(m, cmWindowBase + i, label.c_str(), true);
+    }
 
     // Tick the tool toggles whose process is currently running. Labels are set
     // once (rebuild / config change); here we only maintain the check marks.
@@ -1796,6 +1818,12 @@ void TurboApp::refreshWindowList() noexcept
 
 void TurboApp::focusRecentWindow(int index) noexcept
 {
+    // The agent window's slot sits after the editors (refreshWindowList).
+    if (agentWin && index == menuAgentIndex)
+    {
+        agentWin->focus();
+        return;
+    }
     int i = 0;
     EditorWindow *target = nullptr;
     MRUlist.forEach([&] (EditorWindow *w) {
@@ -2700,11 +2728,13 @@ TRect TurboApp::outputBounds() const
     TRect ext = deskTop->getExtent();
     int totalH = ext.b.y - ext.a.y;
     // User-set height once dragged, else ~1/5 of the editor area. Keep the pane
-    // at least 3 rows and leave at least an editor's minimum height (minWinSize.y
-    // = 6) above, so the editor can actually shrink that far -- otherwise locate()
-    // clamps it to its minimum and it overlaps (hides) the pane's top border.
-    int h = (outputPaneHeight > 0) ? outputPaneHeight : max(4, totalH / 5);
-    h = max(3, min(h, totalH - 6));
+    // at least minOutputRows and leave at least an editor's minimum height
+    // (minWinSize.y = 6) above, so the editor can actually shrink that far --
+    // otherwise locate() clamps it to its minimum and it overlaps (hides) the
+    // pane's top border.
+    int h = (outputPaneHeight > 0) ? outputPaneHeight
+                                   : max(minOutputRows, totalH / 5);
+    h = max((int) minOutputRows, min(h, totalH - 6));
     TRect r = ext;
     r.a.y = ext.b.y - h;           // bottom slice
     // Span only the editor area: stop at the file tree's edge when it is shown.
@@ -2763,7 +2793,8 @@ void TurboApp::setOutputPaneHeight(int h)
 {
     TRect ext = deskTop->getExtent();
     int totalH = ext.b.y - ext.a.y;
-    h = max(3, min(h, totalH - 6)); // leave an editor's min height (6) above
+    // Leave an editor's min height (6) above, and keep the pane's own minimum.
+    h = max((int) minOutputRows, min(h, totalH - 6));
     if (h == outputPaneHeight)
         return;
     if (!outputWin || !(outputWin->state & sfVisible))

@@ -81,6 +81,12 @@ TColorDesired termDefaultFg() noexcept
 TColorDesired termDefaultBg() noexcept
     { return ::getBack(turbo::schemeActive[turbo::sNormal]); }
 
+// What the default background dims to while the window is not active -- the same
+// passive shade the editors, file tree and output pane fall back to, so an
+// inactive terminal recedes with the rest of the chrome instead of staying lit.
+TColorDesired termPassiveBg() noexcept
+    { return ::getBack(turbo::windowSchemeActive[turbo::wndFramePassive]); }
+
 // Map a libvterm colour to a Turbo Vision colour. Default fg/bg fall back to the
 // Turbo window colours above; indexed colours go through the xterm-256 palette
 // (Turbo Vision renders indices 0..15 as the BIOS colours); RGB colours pass
@@ -650,7 +656,23 @@ void TerminalView::pump() noexcept
 
 void TerminalView::draw()
 {
-    const TColorAttr defAttr = TColorAttr(termDefaultFg(), termDefaultBg());
+    // Cells carrying the *default* background follow the window's active state,
+    // like every other window: the unified blue when active, the dimmer passive
+    // shade when not. Cells that asked for their own colour via SGR keep it.
+    //
+    // The swap has to be by value rather than by flag: scrollback cells baked
+    // their attr at capture time (mapCellAttr, via pushScrollbackLine), so by the
+    // time they are drawn there is nothing left marking them as "default". Any
+    // cell whose background is still the canonical default is one of ours.
+    const bool active = !owner || (owner->state & sfActive);
+    const TColorDesired baseBg = termDefaultBg();
+    const TColorDesired stateBg = active ? baseBg : termPassiveBg();
+    const TColorAttr defAttr = TColorAttr(termDefaultFg(), stateBg);
+    auto dimDefaultBg = [&] (TColorAttr &attr) {
+        if (::getBack(attr) == baseBg) // no-op while active (baseBg == stateBg)
+            ::setBack(attr, stateBg);
+    };
+
     int w = size.x, h = size.y;
     int S = (int) scrollback.size();
     for (int y = 0; y < h; ++y)
@@ -671,6 +693,7 @@ void TerminalView::draw()
                     return 0;
                 ch = c.ch;
                 attr = c.attr;
+                dimDefaultBg(attr);
                 return 1;
             });
         }
@@ -689,6 +712,7 @@ void TerminalView::draw()
                         return 0; // wide-glyph trailing half
                     ch = cell.chars[0];
                     attr = mapCellAttr(cell);
+                    dimDefaultBg(attr);
                     return 1;
                 });
         }
@@ -1014,6 +1038,18 @@ TerminalWindow::TerminalWindow(const TRect &bounds, std::string command,
     view = new TerminalView(getExtent().grow(-1, -1), std::move(command));
     insert(view);
     view->setScrollBar(vsb);
+}
+
+void TerminalWindow::setState(ushort aState, Boolean enable)
+{
+    TWindow::setState(aState, enable);
+    // Active/inactive changes the interior background (TerminalView::draw dims
+    // the default-bg cells when the window is not active). The frame repaints
+    // itself, but the view does not track active state on its own -- its own
+    // setState only moves the cursor -- so repaint it here, like the editor,
+    // tree and output windows do.
+    if ((aState & sfActive) && view)
+        view->drawView();
 }
 
 void TerminalWindow::shutDown()
