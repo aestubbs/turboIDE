@@ -141,6 +141,7 @@ struct TerminalWindow : public TWindow
     // terminal matches the editor windows, file tree and output pane.
     TColorAttr mapColor(uchar index) noexcept override;
     void sizeLimits(TPoint &min, TPoint &max) override;
+    void setState(ushort aState, Boolean enable) override; // repaint on activate
     void shutDown() override;   // drop the back-pointer before subviews are freed
     // Update the caption from an OSC window-title sequence ("" restores default).
     void setTermTitle(std::string_view text) noexcept;

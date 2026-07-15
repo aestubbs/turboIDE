@@ -55,15 +55,25 @@ constexpr TreeGlyphs kNerdGlyphs = {
     "\xE2\x95\xAD", // U+256D rounded top-left  (the first row of the tree)
     "\xE2\x95\xB0", // U+2570 rounded bottom-left (a last child)
     "\xE2\x94\x80", // U+2500 horizontal arm    (a leaf)
-    "\xE2\x96\xB8", // U+25B8 chevron, collapsed
-    "\xE2\x96\xBE", // U+25BE chevron, expanded
+    // The FULL-SIZE triangles, not the SMALL pair (U+25B8/U+25BE): a
+    // right-pointing glyph is squeezed by the cell width in a way a
+    // down-pointing one is not, so the small right chevron read as a speck next
+    // to its own expanded form. U+25B6 (rather than U+25BA, the deliberately
+    // smaller "pointer") is drawn full height in ordinary fonts, matching the
+    // down triangle. It carries Emoji=Yes but Emoji_Presentation=No, so a
+    // conforming terminal defaults it to TEXT presentation at width 1 -- the
+    // double-width colour-emoji face only appears with a U+FE0F selector, which
+    // we never append -- keeping the one-column-per-glyph invariant below.
+    // Both live in Geometric Shapes, which fonts cover near-universally.
+    "\xE2\x96\xB6", // U+25B6 chevron, collapsed
+    "\xE2\x96\xBC", // U+25BC chevron, expanded
     /*iconColumns*/ 2,
 };
 
 // Same connectors (they come from ordinary fonts, not a Nerd Font), no icons.
 constexpr TreeGlyphs kUnicodeGlyphs = {
     "\xE2\x94\x82", "\xE2\x94\x9C", "\xE2\x95\xAD", "\xE2\x95\xB0",
-    "\xE2\x94\x80", "\xE2\x96\xB8", "\xE2\x96\xBE",
+    "\xE2\x94\x80", "\xE2\x96\xB6", "\xE2\x96\xBC",
     /*iconColumns*/ 0,
 };
 

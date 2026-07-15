@@ -1,4 +1,5 @@
 #define Uses_TWindow
+#define Uses_TFrame
 #define Uses_TView
 #define Uses_TListViewer
 #define Uses_TScrollBar
@@ -75,8 +76,8 @@ void OutputView::ensureTab(int id, const std::string &title) noexcept
         b->title = title; // already present: just keep the label current
     else
         buffers.push_back(Buffer{id, title, {}, true, 0, 0});
-    if (tabBar)
-        tabBar->drawView();
+    if (tabFrame)
+        tabFrame->drawView();
 }
 
 void OutputView::removeTab(int id) noexcept
@@ -89,12 +90,12 @@ void OutputView::removeTab(int id) noexcept
     bool wasActive = (activeId == id);
     buffers.erase(buffers.begin() + i);
     if (wasActive)
-        setActiveTab(otBuild); // switches + redraws the bar
+        setActiveTab(otBuild); // switches + redraws the tabs
     else
     {
         drawView();
-        if (tabBar)
-            tabBar->drawView();
+        if (tabFrame)
+            tabFrame->drawView();
     }
 }
 
@@ -178,8 +179,8 @@ void OutputView::setActiveTab(int id) noexcept
         focused = (short) min(max(buf.savedFocused, 0), last);
     }
     drawView();
-    if (tabBar)
-        tabBar->drawView();
+    if (tabFrame)
+        tabFrame->drawView();
 }
 
 void OutputView::showTab(int id) noexcept
@@ -196,7 +197,8 @@ void OutputView::draw()
 {
     std::vector<OutputLine> &lines = active();
     // Background tracks the window's active state (matching the editor/tree).
-    TColorDesired bg = windowBg(owner, owner && (owner->state & sfActive));
+    bool winActive = owner && (owner->state & sfActive);
+    TColorDesired bg = windowBg(owner, winActive);
     TColorAttr cNormal {TColorRGB(0xCBD6F2), bg};
     TColorAttr cError  {TColorRGB(0xFF8B8B), bg};
     TColorAttr cWarn   {TColorRGB(0xEAC78A), bg};
@@ -204,7 +206,11 @@ void OutputView::draw()
     TColorRGB focusBg = lighten(bg, 26); // current-line highlight on the blue bg
 
     int n = (int) lines.size();
-    bool focusedView = (state & sfSelected) != 0;
+    // sfSelected alone is not enough: the list stays the window's selected view
+    // even while the window is inactive, so keying the highlight off it left a
+    // lit row on screen at all times -- which read as a persistent selection.
+    // Show it only when this pane actually has the focus.
+    bool focusedView = winActive && (state & sfSelected) != 0;
     for (int y = 0; y < size.y; ++y)
     {
         int idx = topItem + y;
@@ -275,70 +281,103 @@ void OutputView::handleEvent(TEvent &ev)
 }
 
 // ---------------------------------------------------------------------------
-// OutputTabBar
+// OutputFrame -- the window border, with the tabs drawn into its bottom line
 
-OutputTabBar::OutputTabBar(const TRect &bounds, OutputView *aview) noexcept :
-    TView(bounds), view(aview)
+// The tab's shoulders: filled corner triangles that flare out from the border
+// line the tab sits on, so it reads as one solid shape rising out of the border
+// rather than as loose punctuation around a word. The fill has to be at the
+// BOTTOM -- LOWER LEFT then LOWER RIGHT -- or the trapezoid comes out upside
+// down, as a notch cut into the border instead of a tab standing on it.
+//
+// Both are Geometric Shapes with no emoji mapping, so they stay one column wide,
+// as the hit-test ranges below assume.
+static const char kTabLeft[]  = "\xE2\x97\xA3"; // U+25E3 BLACK LOWER LEFT TRIANGLE
+static const char kTabRight[] = "\xE2\x97\xA2"; // U+25E2 BLACK LOWER RIGHT TRIANGLE
+
+OutputFrame::OutputFrame(const TRect &bounds) noexcept :
+    TFrame(bounds)
 {
-    eventMask |= evMouseDown;
 }
 
-void OutputTabBar::draw()
+void OutputFrame::draw()
 {
-    // The bar is a lighter shade across its width; the selected tab drops back to
-    // the content background so it reads as part of the pane above it. Both track
-    // the window's active state.
-    bool winActive = owner && (owner->state & sfActive);
-    TColorDesired contentBg = windowBg(owner, winActive);
-    TColorRGB barBg = lighten(contentBg, 24);
-    TColorAttr cBar    {TColorRGB(winActive ? 0x9AA6CE : 0x77819E), barBg};     // unselected tab
-    TColorAttr cActive {TColorRGB(winActive ? 0xFFFFFF : 0xC8D4F0), contentBg}; // selected tab
+    TFrame::draw(); // the border, title and close box, bottom line included
+    drawTabs();     // ... then overlay the tabs onto that bottom line
+}
 
-    int n = view ? (int) view->buffers.size() : 0;
+void OutputFrame::drawTabs() noexcept
+{
+    if (!view || size.y < 2 || size.x < 4)
+        return;
+    // The bottom border already carries the window background, so the active tab
+    // needs no fill of its own: bold + bright white is enough to own the line,
+    // and the dim shoulders keep the inactive tabs quiet. Both track the window's
+    // active state, like the frame they sit on.
+    bool winActive = (state & sfActive) != 0;
+    TColorDesired bg = windowBg(owner, winActive);
+    TColorAttr cOn      {TColorRGB(winActive ? 0xFFFFFF : 0xC8D4F0), bg, slBold};
+    TColorAttr cOnEdge  {TColorRGB(winActive ? 0xB9C6EA : 0x8E9AC0), bg};
+    TColorAttr cOff     {TColorRGB(winActive ? 0x8F9BC4 : 0x6C7590), bg};
+    TColorAttr cOffEdge {TColorRGB(winActive ? 0x5C6A93 : 0x4A5470), bg};
+
+    int n = (int) view->buffers.size();
     tabX0.assign(n, 0);
     tabX1.assign(n, 0);
-    TDrawBuffer b;
-    b.moveChar(0, ' ', cBar, size.x);
-    int x = 1;
+    const int y = size.y - 1;
+    int x = 2; // clear of the corner: '+-<tab>'
     for (int t = 0; t < n; ++t)
     {
-        // Each tab label is wrapped in white tortoise-shell brackets
-        // (U+3018/U+3019), which are wide/multi-byte, so measure display cells.
-        std::string label = "\xE3\x80\x94" + view->buffers[t].title + "\xE3\x80\x95";
-        int len = (int) strwidth(label.c_str());
+        const std::string &title = view->buffers[t].title;
         bool on = view->activeId == view->buffers[t].id;
-        b.moveStr(x, label.c_str(), on ? cActive : cBar);
+        // The shoulders are one column each and butt straight up against the
+        // label, with no padding: '<BUILD>'.
+        int w = 1 + (int) strwidth(title.c_str()) + 1;
+        if (x + w > size.x - 1)
+            break; // out of border: the remaining tabs stay reachable by click
+                   // on the ones shown, and by the Run menu
+        std::string label = kTabLeft + title + kTabRight;
+        TDrawBuffer b;
+        b.moveStr(0, label.c_str(), on ? cOn : cOff);
+        b.putAttribute(0, on ? cOnEdge : cOffEdge);         // the shoulders are
+        b.putAttribute((ushort) (w - 1), on ? cOnEdge : cOffEdge); // never bold
+        writeLine((short) x, (short) y, (ushort) w, 1, b);
         tabX0[t] = x;
-        tabX1[t] = x + len;
-        x = tabX1[t] + 1; // one space between tabs
+        tabX1[t] = x + w;
+        x = tabX1[t] + 1; // one column of border rule between tabs
     }
-    writeLine(0, 0, size.x, 1, b);
 }
 
-void OutputTabBar::handleEvent(TEvent &ev)
+void OutputFrame::handleEvent(TEvent &ev)
 {
-    if (ev.what == evMouseDown)
+    // A click on a tab in the bottom border selects it. Checked before TFrame,
+    // which owns the rest of the border (close box, drag) -- though with the pane
+    // docked (wfClose only) it has no business on the bottom line at all.
+    if (ev.what == evMouseDown && view)
     {
         TPoint m = makeLocal(ev.mouse.where);
-        int n = view ? (int) min(view->buffers.size(),
-                                 min(tabX0.size(), tabX1.size())) : 0;
-        for (int t = 0; t < n; ++t)
-            if (m.x >= tabX0[t] && m.x < tabX1[t])
-            {
-                view->setActiveTab(view->buffers[t].id); // also redraws this bar
-                break;
-            }
-        clearEvent(ev); // the bar swallows its own clicks
-        return;
+        int n = (int) min(view->buffers.size(), min(tabX0.size(), tabX1.size()));
+        if (m.y == size.y - 1)
+            for (int t = 0; t < n; ++t)
+                if (m.x >= tabX0[t] && m.x < tabX1[t])
+                {
+                    view->setActiveTab(view->buffers[t].id); // redraws this frame
+                    clearEvent(ev);
+                    return;
+                }
     }
-    TView::handleEvent(ev);
+    TFrame::handleEvent(ev);
 }
 
 // ---------------------------------------------------------------------------
 // OutputWindow
 
+TFrame *OutputWindow::initFrame(TRect r)
+{
+    return new OutputFrame(r);
+}
+
 OutputWindow::OutputWindow(const TRect &bounds, OutputWindow **aptr) noexcept :
-    TWindowInit(&TWindow::initFrame),
+    TWindowInit(&OutputWindow::initFrame),
     TWindow(bounds, "Output", wnNoNumber),
     ptr(aptr)
 {
@@ -348,40 +387,28 @@ OutputWindow::OutputWindow(const TRect &bounds, OutputWindow **aptr) noexcept :
     TRect inner = getExtent();
     inner.grow(-1, -1);
 
-    // The list fills the interior except for the bottom row, which holds the
-    // tab bar. The list grows with the window; the bar stays docked at the foot.
-    TRect viewR = inner;
-    viewR.b.y -= 1;
-    // The scrollbar belongs to the list only: end it where the tab row starts.
-    {
-        TRect sr = vsb->getBounds();
-        sr.b.y = viewR.b.y;
-        vsb->setBounds(sr);
-        vsb->growMode = gfGrowLoX | gfGrowHiX | gfGrowHiY;
-    }
-    view = new OutputView(viewR, vsb);
+    // The list gets the whole interior: the tabs live in the bottom border, not
+    // in a row of their own.
+    view = new OutputView(inner, vsb);
     view->growMode = gfGrowHiX | gfGrowHiY;
     insert(view);
 
-    TRect tabR = inner;
-    tabR.a.y = tabR.b.y - 1;
-    tabBar = new OutputTabBar(tabR, view);
-    tabBar->growMode = gfGrowLoY | gfGrowHiY | gfGrowHiX;
-    insert(tabBar);
-    view->tabBar = tabBar;
+    // TWindowInit built the frame before 'view' existed, so wire the two up now.
+    tabFrame = (OutputFrame *) frame;
+    if (tabFrame)
+    {
+        tabFrame->view = view;
+        view->tabFrame = tabFrame;
+    }
 }
 
 void OutputWindow::setState(ushort aState, Boolean enable)
 {
     TWindow::setState(aState, enable);
-    // Active/inactive changes the content + tab-bar background; repaint them
-    // (the frame already repaints itself on activation).
+    // Active/inactive changes the content background; repaint it (the frame,
+    // tabs included, already repaints itself on activation).
     if ((aState & sfActive) && view)
-    {
         view->drawView();
-        if (tabBar)
-            tabBar->drawView();
-    }
 }
 
 void OutputWindow::handleEvent(TEvent &ev)
@@ -407,11 +434,10 @@ void OutputWindow::handleEvent(TEvent &ev)
 void OutputWindow::sizeLimits(TPoint &min, TPoint &max) noexcept
 {
     TWindow::sizeLimits(min, max);
-    // Allow a short docked pane. The default min height (~6 rows) makes locate()
-    // grow the pane's bottom edge downward past the desktop on smaller
+    // Allow a short docked pane. TWindow's default min height (~6 rows) makes
+    // locate() grow the pane's bottom edge downward past the desktop on smaller
     // terminals, pushing the bottom border off-screen under the status line.
-    // 4 rows = top frame + one list row + tab bar + bottom frame.
-    min.y = 4;
+    min.y = minOutputRows;
     min.x = 10;
 }
 
@@ -435,9 +461,11 @@ void OutputWindow::shutDown()
     if (ptr)
         *ptr = nullptr;
     if (view)
-        view->tabBar = nullptr; // drop the back-pointer before subviews are freed
+        view->tabFrame = nullptr; // drop the back-pointers before subviews are freed
+    if (tabFrame)
+        tabFrame->view = nullptr;
     view = nullptr;
-    tabBar = nullptr;
+    tabFrame = nullptr;
     TWindow::shutDown();
 }
 
