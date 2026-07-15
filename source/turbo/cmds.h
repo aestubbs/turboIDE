@@ -113,6 +113,15 @@ enum : ushort
     // empty except for the user's global Lua scripts.
     cmOpenDir,        // pick a directory and open it as the project
     cmCloseProject,   // close the current project (empties the tree/workspace)
+    // Debugger (Debug Adapter Protocol). Global (non-disable-able) session
+    // controls; cmToggleBreakpoint is editor-scoped and lives in the 100..255
+    // block above.
+    cmDebugStart,     // start a debug session for the active file
+    cmDebugStop,      // terminate the debug session
+    cmDebugContinue,  // resume execution (DAP 'continue')
+    cmDebugStepOver,  // DAP 'next'
+    cmDebugStepInto,  // DAP 'stepIn'
+    cmDebugStepOut,   // DAP 'stepOut'
     // Recent-windows list in the Windows menu: cmWindowBase + i selects the
     // i-th most-recently-used editor window (i in [0, windowListMax)).
     cmWindowBase = 1100,

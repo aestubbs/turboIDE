@@ -506,6 +506,18 @@ if (TURBO_ENABLE_LSP)
     target_compile_definitions(${TURBO}-core PUBLIC TURBO_ENABLE_LSP)
 endif()
 
+# Optional: Debug Adapter Protocol support (debugger integration). Independent
+# of LSP -- its transport (source/turbo-core/dap) has its own Content-Length
+# framing and reader/writer threads, so it does not require TURBO_ENABLE_LSP.
+option(TURBO_ENABLE_DAP "Enable Debug Adapter Protocol support" ON)
+if (TURBO_ENABLE_DAP)
+    find_package(Threads REQUIRED)
+    # PUBLIC so the 'turbo' app target inherits the feature macro (its DAP glue
+    # includes the turbo-core DAP headers).
+    target_link_libraries(${TURBO}-core PUBLIC Threads::Threads)
+    target_compile_definitions(${TURBO}-core PUBLIC TURBO_ENABLE_DAP)
+endif()
+
 # Target 'turbo'
 
 if (TURBO_BUILD_APP)
@@ -533,6 +545,11 @@ if (TURBO_BUILD_APP)
     # unity batch (like buildconfig.cc).
     set_source_files_properties(
         "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}/mcpserver.cc"
+        PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+    # dapmanager.cc pulls in the large nlohmann/json header (via the DAP client);
+    # keep it out of the unity batch (like buildconfig.cc / mcpserver.cc).
+    set_source_files_properties(
+        "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}/dapmanager.cc"
         PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
     target_compile_features(${TURBO} PRIVATE cxx_std_17)
     turbo_set_warnings(${TURBO})
