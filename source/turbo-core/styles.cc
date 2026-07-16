@@ -284,6 +284,52 @@ void resetSchemeToDefault() noexcept
         schemeActive[i] = schemeDefault[i];
 }
 
+// Classic 16-colour (BIOS) palette entries. uchar(n) selects TColorDesired's
+// constexpr BIOS constructor (n & 0xF); a bare int would pick the RGB
+// constructor instead, so the cast is required. On a blue editor background
+// these give the authentic Turbo Vision look and stay distinct on any terminal.
+namespace {
+constexpr TColorDesired
+    kcBlack  {uchar(0)},  kcBlue    {uchar(1)},  kcGreen   {uchar(2)},  kcCyan   {uchar(3)},
+    kcRed    {uchar(4)},  kcGray    {uchar(7)},  kcDkGray  {uchar(8)},  kcLtGreen{uchar(10)},
+    kcLtCyan {uchar(11)}, kcLtRed   {uchar(12)}, kcLtMag   {uchar(13)}, kcYellow {uchar(14)},
+    kcWhite  {uchar(15)};
+} // namespace
+
+extern const ColorScheme schemeClassic =
+{
+    /* sNormal           */ {kcGray   , kcBlue           },
+    /* sSelection        */ {kcBlack  , kcGray           }, // reverse-video highlight
+    /* sWhitespace       */ {kcDkGray , {}               },
+    /* sCtrlChar         */ {kcLtRed  , {}               },
+    /* sLineNums         */ {kcDkGray , {}               },
+    /* sKeyword1         */ {kcWhite  , {}     , slBold   },
+    /* sKeyword2         */ {kcLtCyan , {}               },
+    /* sMisc             */ {kcYellow , {}     , slBold   },
+    /* sPreprocessor     */ {kcLtMag  , {}               },
+    /* sOperator         */ {kcGray   , {}               },
+    /* sComment          */ {kcCyan   , {}     , slItalic },
+    /* sStringLiteral    */ {kcLtGreen, {}               },
+    /* sCharLiteral      */ {kcLtGreen, {}               },
+    /* sNumberLiteral    */ {kcLtRed  , {}               },
+    /* sEscapeSequence   */ {kcYellow , {}               },
+    /* sError            */ {kcWhite  , kcRed            },
+    /* sBraceMatch       */ {kcYellow , {}     , slBold   },
+    /* sReplaceHighlight */ {kcBlack  , kcGreen          },
+    /* sIdentifier       */ {kcGray   , {}               },
+    /* sFunctionName     */ {kcYellow , {}               },
+    /* sTypeName         */ {kcLtCyan , {}               },
+    /* sConstant         */ {kcLtCyan , {}               },
+    /* sTag              */ {kcLtCyan , {}               },
+    /* sAttribute        */ {kcLtGreen, {}               },
+};
+
+void resetSchemeToClassic() noexcept
+{
+    for (int i = 0; i < TextStyleCount; ++i)
+        schemeActive[i] = schemeClassic[i];
+}
+
 namespace { const bool schemeActiveInitialized = (resetSchemeToDefault(), true); }
 
 namespace {

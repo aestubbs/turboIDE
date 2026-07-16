@@ -118,6 +118,15 @@ extern ColorScheme schemeActive;
 // Copy 'schemeDefault' over 'schemeActive' (the dialog's "Reset" action).
 void resetSchemeToDefault() noexcept;
 
+// A hand-authored classic 16-colour (BIOS) scheme -- the low-colour fallback for
+// terminals that render 24-bit colour poorly (e.g. the Windows console). Using
+// BIOS colours makes every cell resolve through the terminal's own configurable
+// 16-colour palette, so the colours stay distinct and legible.
+extern const ColorScheme schemeClassic;
+
+// Copy 'schemeClassic' over 'schemeActive' (selected when 16-colour mode is on).
+void resetSchemeToClassic() noexcept;
+
 // Stable identifier used to persist a style (e.g. "sKeyword1"), and a
 // human-readable label for the theme dialog (e.g. "Keyword"). 'styleName'
 // values are part of the on-disk settings format, so don't rename them.

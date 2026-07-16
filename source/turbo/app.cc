@@ -160,6 +160,14 @@ TDeskTop *TurboApp::initDeskTop(TRect r)
 // clearly readable mid-tone on a dark slate, matching the editor chrome.
 TPalette &TurboApp::getPalette() const
 {
+    if (useClassicColors(settings))
+        // Classic 16-colour mode: the stock Turbo Vision app palette already is
+        // the authentic BIOS look (blue app, cyan menu highlights, grey
+        // dialogs). Its BIOS attributes render through the terminal's own
+        // 16-colour palette, so colours stay distinct on weak terminals. Called
+        // each redraw, so toggling colour mode swaps palettes live.
+        return TProgram::getPalette();
+
     static TPalette pal = [this] {
         TPalette p = TProgram::getPalette(); // copy of the default app palette
         p[2] = TColorAttr(TColorRGB(0xD7DCE8), TColorRGB(0x222A3D)); // normal item
@@ -619,6 +627,11 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount, int toolCount)
         windows +
         *new TSubMenu( "~S~ettings", kbAltS ) +
             *new TMenuItem( "~C~olour Scheme...", cmThemeSettings, kbNoKey, hcNoContext ) +
+            newLine() +
+            *new TMenuItem( "Colour Mode: A~u~to", cmColorModeAuto, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Colour Mode: ~F~ull (24-bit)", cmColorModeFull, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Colour Mode: 1~6~-colour (classic)", cmColorMode16, kbNoKey, hcNoContext ) +
+            newLine() +
             *new TMenuItem( "~L~anguage Servers...", cmLspSettings, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~D~ebuggers...", cmDebugSettings, kbNoKey, hcNoContext ) +
             newLine() +
@@ -832,6 +845,9 @@ void TurboApp::handleEvent(TEvent &event)
             case cmDebugSettings: editDebugSettings(); break;
             case cmThemeSettings: editThemeSettings(); break;
             case cmApplyTheme: applyActiveTheme(); break;
+            case cmColorModeAuto: setColorMode("auto"); break;
+            case cmColorModeFull: setColorMode("full"); break;
+            case cmColorMode16:   setColorMode("16");   break;
             case cmGitRefresh: gitRefresh(); break;
             case cmGitCommit: gitCommitDialog(); break;
             case cmGitFetch: gitRemote(0); break;
@@ -1795,6 +1811,11 @@ void TurboApp::refreshMenuChecks() noexcept
     setMenuItemCheck(m, cmToggleTree, docTree && (docTree->state & sfVisible));
     setMenuItemCheck(m, cmToggleHidden, settings.showHidden);
     setMenuItemCheck(m, cmToggleAutoSave, settings.autoSaveOnFocusLoss);
+    // Colour-mode radio group (exactly one checked; any unknown value = auto).
+    setMenuItemCheck(m, cmColorModeFull, settings.colorMode == "full");
+    setMenuItemCheck(m, cmColorMode16,   settings.colorMode == "16");
+    setMenuItemCheck(m, cmColorModeAuto, settings.colorMode != "full" &&
+                                         settings.colorMode != "16");
 
     // Per-editor toggles reflect the active (most-recently-focused) editor.
     // With no editor open they all show unchecked.
@@ -1985,6 +2006,43 @@ void TurboApp::applyActiveTheme() noexcept
     // Repaint the window chrome (frames/scrollbars read windowSchemeActive).
     if (deskTop)
         deskTop->redraw();
+}
+
+void TurboApp::setColorMode(const char *mode) noexcept
+{
+    if (settings.colorMode == mode)
+        return;
+    // Whether Turbo Vision's colour-depth cap (TVISION_COLORS=16, applied at
+    // start-up) matches what the new mode wants. If it doesn't, views that draw
+    // with raw RGB attributes (the file tree, debug panels) can't fully switch
+    // until the next launch.
+    const char *capEnv = ::getenv("TVISION_COLORS");
+    bool capNow = capEnv && std::string(capEnv) == "16";
+
+    settings.colorMode = mode;
+    saveSettings(settings);
+
+    // Re-select the active schemes (classic BIOS vs 24-bit RGB) and repaint.
+    // The editor, window chrome, menus and dialogs switch immediately: BIOS
+    // colours render through the terminal's own 16-colour palette regardless of
+    // the detected depth, and getPalette() re-reads the mode on each redraw.
+    applyThemeFromSettings(settings);
+    MRUlist.forEach([] (EditorWindow *w) {
+        if (!w)
+            return;
+        auto &ed = w->getEditor();
+        turbo::applyTheming(ed.lexer, ed.scheme, ed.scintilla);
+        ed.redraw();
+    });
+    if (deskTop)
+        deskTop->redraw();
+    refreshMenuChecks();
+
+    if (capNow != (settings.colorMode == "16"))
+        messageBox(mfInformation | mfOKButton,
+                   "Colour mode set to \"%s\". Restart Turbo to apply it fully "
+                   "(the file tree and debug panels update on the next launch).",
+                   mode);
 }
 
 void TurboApp::gitRefresh()

@@ -207,18 +207,41 @@ static void putNode(TNode **indirect, Node *node) noexcept
 // This cannot be derived from luaSections/skillSections: openProject() scans the
 // project (scanDirectory) BEFORE it builds the homes (refreshSkillsInTree), so at
 // scan time those vectors are still empty.
+// Lexical path equality that is separator-agnostic. On Windows the tree's paths
+// come from std::filesystem (backslashes) while the literals below use forward
+// slashes; a raw string compare would never match, so turbo-scripts/.claude
+// would be listed twice. path comparison treats '/' and '\\' as equivalent
+// separators on Windows and normalises trailing slashes, without touching disk.
+static bool samePath(const std::string &a, const std::string &b) noexcept
+{
+    return std::filesystem::path(a).lexically_normal() ==
+           std::filesystem::path(b).lexically_normal();
+}
+
 static bool hasOwnHome(const std::string &full, bool isDir,
                        const std::string &projectRoot) noexcept
 {
     if (!isDir || projectRoot.empty())
         return false;
-    return full == projectRoot + "/turbo-scripts"     // -> the "Project Lua" home
-        || full == projectRoot + "/.claude/skills";   // -> the "Project Skills" home
+    return samePath(full, projectRoot + "/turbo-scripts")     // -> the "Project Lua" home
+        || samePath(full, projectRoot + "/.claude/skills");   // -> the "Project Skills" home
 }
 
+// Safety bounds for the eager recursive project scan. Without these a deep
+// tree, or a symlink/junction cycle (common on Windows reparse points), would
+// recurse until the (1 MB on Windows) stack overflows and the process crashes
+// the moment a project is opened. kMaxScanDepth caps recursion; kMaxScanNodes
+// caps total pre-scanned nodes so a pathologically large tree can't exhaust
+// memory inside this noexcept function.
+static const int kMaxScanDepth = 64;
+static const long kMaxScanNodes = 500000;
+
 static void scanInto(Node *parent, TNode **list, const std::string &dirPath,
-                     int depth, bool showHidden, const std::string &projectRoot) noexcept
+                     int depth, bool showHidden, const std::string &projectRoot,
+                     long &nodeBudget) noexcept
 {
+    if (depth > kMaxScanDepth || nodeBudget <= 0)
+        return;
     std::error_code ec;
     std::filesystem::directory_iterator it(dirPath, ec), end;
     if (ec)
@@ -227,6 +250,8 @@ static void scanInto(Node *parent, TNode **list, const std::string &dirPath,
     {
         if (ec)
             break;
+        if (nodeBudget <= 0)
+            break; // safety cap reached: stop rather than risk exhausting memory
         const auto &entry = *it;
         std::string name = entry.path().filename().string();
         // Hidden entries (dotfiles and dot-directories such as .git) are skipped
@@ -236,20 +261,25 @@ static void scanInto(Node *parent, TNode **list, const std::string &dirPath,
             continue;
         if (name[0] == '.' && (!showHidden || name == ".git" || name == ".turbo"))
             continue;
-        std::error_code ec2;
+        std::error_code ec2, ec3;
         bool isDir = entry.is_directory(ec2);
+        // A symlink/junction is shown as a folder but never descended into: its
+        // target may live outside the project or form a cycle back into it.
+        bool isSymlink = entry.is_symlink(ec3);
         std::string full = entry.path().string();
         if (hasOwnHome(full, isDir, projectRoot))
             continue;
         auto *node = new Node(parent, full, isDir);
+        --nodeBudget;
         if (isDir)
             // Every directory starts collapsed (including the top level), so the
             // tree opens compact; the user expands what they want, like any
             // other folder. (depth is no longer used to force expansion.)
             node->expanded = False;
         putNode(list, node);
-        if (isDir)
-            scanInto(node, &node->childList, full, depth + 1, showHidden, projectRoot);
+        if (isDir && !isSymlink)
+            scanInto(node, &node->childList, full, depth + 1, showHidden, projectRoot,
+                     nodeBudget);
     }
 }
 
@@ -293,7 +323,9 @@ void DocumentTreeView::rebuildProjectNode() noexcept
     projectNode = new Node(nullptr, rootPath, true);
     projectNode->kind = NodeKind::Project;
     projectNode->expanded = True; // open so the project's files are visible
-    scanInto(projectNode, &projectNode->childList, rootPath, 1, showHidden, rootPath);
+    long nodeBudget = kMaxScanNodes;
+    scanInto(projectNode, &projectNode->childList, rootPath, 1, showHidden, rootPath,
+             nodeBudget);
 }
 
 void DocumentTreeView::scanDirectory(std::string_view aRootPath) noexcept
@@ -391,7 +423,8 @@ void DocumentTreeView::reinjectSkillNodes() noexcept
             // Scanned like any other folder -- so a skill's SKILL.md, references/
             // and scripts/ are all reachable, instead of the skill being faked as a
             // single leaf pointing at its SKILL.md.
-            scanInto(group, &group->childList, sec.dir, 1, showHidden, rootPath);
+            long nodeBudget = kMaxScanNodes;
+            scanInto(group, &group->childList, sec.dir, 1, showHidden, rootPath, nodeBudget);
             for (Node *c = (Node *) group->childList; c; c = (Node *) c->next)
                 tagSkill(c);
             skillGroups.push_back(group);
@@ -534,7 +567,7 @@ void DocumentTreeView::addNode(std::string_view path, bool isDir) noexcept
     TStringView dir = TPath::dirname(path);
     TNode **list;
     Node *parent = nullptr;
-    if (dir == TStringView(rootPath))
+    if (samePath(std::string(dir), rootPath))
     {
         if (!projectNode)
             return; // no project wrapper to attach a top-level entry to
@@ -552,7 +585,10 @@ void DocumentTreeView::addNode(std::string_view path, bool isDir) noexcept
     }
     auto *node = new Node(parent, std::string(path), isDir);
     if (isDir)
-        scanInto(node, &node->childList, std::string(path), 1, showHidden, rootPath);
+    {
+        long nodeBudget = kMaxScanNodes;
+        scanInto(node, &node->childList, std::string(path), 1, showHidden, rootPath, nodeBudget);
+    }
     // A directory dropped straight into a Skills home is a new skill...
     if (parent->kind == NodeKind::SkillsHome)
         tagSkill(node);

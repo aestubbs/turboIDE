@@ -110,12 +110,28 @@ std::string languageIdFor(const turbo::Language *lang) noexcept
 
 std::string uriFromPath(const std::string &path) noexcept
 {
-    // Minimal file:// URI with percent-encoding. POSIX-oriented; Windows drive
-    // paths would need extra handling, deferred until needed.
+    // Percent-encoded file:// URI. Handles both POSIX ("/home/x" ->
+    // "file:///home/x") and Windows drive paths ("C:\\proj" ->
+    // "file:///C:/proj"): backslashes become forward slashes and a leading
+    // drive letter keeps its ':' right after the authority-less "file:///".
+    std::string p = path;
+    for (char &ch : p)
+        if (ch == '\\')
+            ch = '/';
     std::string uri = "file://";
-    char buf[4];
-    for (unsigned char c : path)
+    size_t start = 0;
+    bool hasDrive = p.size() >= 2 && std::isalpha((unsigned char) p[0]) && p[1] == ':';
+    if (hasDrive)
     {
+        uri += '/';       // "file:///"
+        uri += p[0];
+        uri += ':';
+        start = 2;
+    }
+    char buf[4];
+    for (size_t i = start; i < p.size(); ++i)
+    {
+        unsigned char c = (unsigned char) p[i];
         if (std::isalnum(c) || c == '/' || c == '-' || c == '_' ||
             c == '.' || c == '~')
             uri += (char) c;

@@ -56,6 +56,11 @@ extern WindowColorScheme windowSchemeActive;
 // Copy 'windowSchemeDefault' over 'windowSchemeActive' (the dialog's "Reset").
 void resetWindowSchemeToDefault() noexcept;
 
+// Classic 16-colour (BIOS) window chrome -- the low-colour fallback paired with
+// 'schemeClassic'. Copied over 'windowSchemeActive' when 16-colour mode is on.
+extern const WindowColorScheme windowSchemeClassic;
+void resetWindowSchemeToClassic() noexcept;
+
 class BasicEditorWindow : public TWindow, public EditorParent
 {
 

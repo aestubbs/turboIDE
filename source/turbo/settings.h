@@ -25,6 +25,12 @@ struct AppSettings
     // Font fallback, since glyph coverage cannot be probed at runtime and a wrong
     // guess renders blank boxes. See treeicons.h.
     std::string treeIcons {"auto"};
+    // Terminal colour depth: "auto" (detect), "full" (always the 24-bit RGB
+    // themes) or "16" (the classic 16-colour BIOS fallback, for terminals that
+    // render truecolor poorly such as the Windows console). Persisted as
+    // "theme.colors". See theme.cc (useClassicColors) and main.cc (which forces
+    // Turbo Vision's colour depth from this before the terminal is probed).
+    std::string colorMode {"auto"};
     // Command line for the terminal window's shell (e.g. "bash", "zsh -l").
     // Empty = use $SHELL, falling back to /bin/sh.
     std::string terminalShell;
@@ -53,5 +59,18 @@ void loadSettings(AppSettings &s) noexcept;
 
 // Write 's' to the config file.
 void saveSettings(const AppSettings &s) noexcept;
+
+// True if the terminal advertises 24-bit colour via COLORTERM (truecolor/24bit).
+// Used to decide the Windows "auto" colour default: modern terminals that
+// render truecolor well (Windows Terminal, VS Code, ...) set this, while
+// cmd.exe/PowerShell on the classic console do not.
+bool terminalAdvertisesTrueColor() noexcept;
+
+// Load the persisted colour-depth preference and, if the effective mode is the
+// 16-colour fallback, export TVISION_COLORS so Turbo Vision honours it. MUST be
+// called before the TApplication/screen is constructed (Turbo Vision probes the
+// terminal's colour support during start-up). On Windows, "auto" resolves to the
+// fallback unless the terminal advertises truecolor.
+void applyColorDepthPreference() noexcept;
 
 #endif // TURBO_SETTINGS_H

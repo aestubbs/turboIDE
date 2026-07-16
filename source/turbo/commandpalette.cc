@@ -92,6 +92,9 @@ const PaletteCommand kCommands[] =
     { "Toggle Change History",         cmToggleChangeHistory,  "",             true  },
     { "Toggle Long Line Guide",        cmToggleEdge,           "",             true  },
     { "Colour Scheme...",              cmThemeSettings,        "",             false },
+    { "Colour Mode: Auto",             cmColorModeAuto,        "",             false },
+    { "Colour Mode: Full (24-bit)",    cmColorModeFull,        "",             false },
+    { "Colour Mode: 16-colour (classic)", cmColorMode16,       "",             false },
     { "Language Servers...",           cmLspSettings,          "",             false },
     { "Debuggers...",                  cmDebugSettings,        "",             false },
     // Build / Run
