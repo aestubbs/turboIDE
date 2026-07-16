@@ -1,4 +1,5 @@
 #include "app.h"
+#include "settings.h"
 
 #include <turbo/mcp/bridge.h>
 
@@ -6,6 +7,9 @@
 
 static void runTurbo(int argc, const char **argv)
 {
+    // Honour the persisted colour-depth preference (theme.colors=16) before
+    // Turbo Vision probes the terminal during TurboApp construction.
+    applyColorDepthPreference();
     TurboApp app(argc, argv);
     app.run();
     app.shutDown();

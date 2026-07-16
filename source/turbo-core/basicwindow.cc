@@ -175,4 +175,58 @@ void resetWindowSchemeToDefault() noexcept
         windowSchemeActive[i] = windowSchemeDefault[i];
 }
 
+// Classic 16-colour (BIOS) window chrome. uchar(n) picks TColorDesired's
+// constexpr BIOS constructor (a bare int would select the RGB one). Blue window
+// interior with white/gray frames, cyan scrollbars and green buttons -- the
+// authentic Turbo Vision look, distinct on any terminal's 16-colour palette.
+namespace {
+constexpr TColorDesired
+    kwBlack  {uchar(0)},  kwBlue    {uchar(1)},  kwGreen  {uchar(2)},  kwCyan  {uchar(3)},
+    kwGray   {uchar(7)},  kwDkGray  {uchar(8)},  kwLtGrn  {uchar(10)}, kwYellow{uchar(14)},
+    kwWhite  {uchar(15)};
+} // namespace
+
+#define WINDOW_SCHEME_CLASSIC_BODY \
+    /* wndFramePassive             */ {kwGray,   kwBlue},  \
+    /* wndFrameActive              */ {kwWhite,  kwBlue},  \
+    /* wndFrameIcon                */ {kwLtGrn,  kwBlue},  \
+    /* wndScrollBarPageArea        */ {kwCyan,   kwBlue},  \
+    /* wndScrollBarControls        */ {kwWhite,  kwBlue},  \
+    /* wndStaticText               */ {kwGray,   kwBlue},  \
+    /* wndLabelNormal              */ {kwGray,   kwBlue},  \
+    /* wndLabelSelected            */ {kwWhite,  kwGreen}, \
+    /* wndLabelShortcut            */ {kwYellow, kwBlue},  \
+    /* wndButtonNormal             */ {kwBlack,  kwGreen}, \
+    /* wndButtonDefault            */ {kwWhite,  kwGreen}, \
+    /* wndButtonSelected           */ {kwWhite,  kwCyan},  \
+    /* wndButtonDisabled           */ {kwDkGray, kwGreen}, \
+    /* wndButtonShortcut           */ {kwYellow, kwGreen}, \
+    /* wndButtonShadow             */ {kwBlack,  {}},      \
+    /* wndClusterNormal            */ {kwGray,   kwBlue},  \
+    /* wndClusterSelected          */ {kwWhite,  kwGreen}, \
+    /* wndClusterShortcut          */ {kwYellow, kwBlue},  \
+    /* wndInputLineNormal          */ {kwBlack,  kwCyan},  \
+    /* wndInputLineSelected        */ {kwBlack,  kwCyan},  \
+    /* wndInputLineArrows          */ {kwBlue,   kwCyan},  \
+    /* wndHistoryArrow             */ {kwBlack,  kwCyan},  \
+    /* wndHistorySides             */ {kwLtGrn,  kwBlue},  \
+    /* wndHistWinScrollBarPageArea */ {kwCyan,   kwBlue},  \
+    /* wndHistWinScrollBarControls */ {kwWhite,  kwBlue},  \
+    /* wndListViewerNormal         */ {kwGray,   kwBlue},  \
+    /* wndListViewerFocused        */ {kwWhite,  kwGreen}, \
+    /* wndListViewerSelected       */ {kwBlack,  kwCyan},  \
+    /* wndListViewerDivider        */ {kwCyan,   kwBlue},  \
+    /* wndInfoPane                 */ {kwGray,   kwBlue},  \
+    /* wndClusterDisabled          */ {kwDkGray, kwBlue},
+
+extern const WindowColorScheme windowSchemeClassic = { WINDOW_SCHEME_CLASSIC_BODY };
+
+#undef WINDOW_SCHEME_CLASSIC_BODY
+
+void resetWindowSchemeToClassic() noexcept
+{
+    for (int i = 0; i < WindowPaletteItemCount; ++i)
+        windowSchemeActive[i] = windowSchemeClassic[i];
+}
+
 } // namespace turbo

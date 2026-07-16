@@ -1,4 +1,5 @@
 #define Uses_TColorAttr
+#define Uses_TScreen
 #include <tvision/tv.h>
 
 #include "theme.h"
@@ -96,8 +97,40 @@ static std::string formatStyleFlags(ushort f) noexcept
 
 // --- Settings <-> active scheme --------------------------------------------
 
+bool useClassicColors(const AppSettings &settings) noexcept
+{
+    if (settings.colorMode == "16")
+        return true;
+    if (settings.colorMode == "full")
+        return false;
+    // "auto":
+#ifdef _WIN32
+    // The Windows console reports truecolor whenever VT processing is on, even
+    // though cmd.exe/PowerShell render it poorly, so screenMode can't tell a
+    // good terminal from a bad one. Default to the classic fallback unless the
+    // terminal explicitly advertises truecolor via COLORTERM (Windows Terminal,
+    // VS Code, ...), which renders it well. Kept in lock-step with the start-up
+    // cap in applyColorDepthPreference().
+    return !terminalAdvertisesTrueColor();
+#else
+    // Elsewhere, classic only when the terminal genuinely lacks 256/true colour.
+    return !(TScreen::screenMode & (TScreen::smColor256 | TScreen::smColorHigh));
+#endif
+}
+
 void applyThemeFromSettings(const AppSettings &settings) noexcept
 {
+    if (useClassicColors(settings))
+    {
+        // Classic 16-colour fallback: use the hand-authored BIOS schemes and
+        // ignore any saved RGB per-item overrides, which would re-introduce
+        // 24-bit colour and defeat the fallback. (The colour dialog remains a
+        // full-colour feature.)
+        resetSchemeToClassic();
+        resetWindowSchemeToClassic();
+        return;
+    }
+
     // Start from the factory defaults, then layer any saved overrides on top so
     // unspecified attributes keep their built-in values.
     resetSchemeToDefault();

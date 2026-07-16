@@ -84,6 +84,14 @@ void loadSettings(AppSettings &s) noexcept
             chomp(val);
             s.treeIcons = val;
         }
+        else if (strncmp(line, "theme.colors=", 13) == 0)
+        {
+            // Handled before the generic "theme." branch below (which would
+            // otherwise stuff it into the theme-override map).
+            char *val = line + 13;
+            chomp(val);
+            s.colorMode = val;
+        }
         else if (strncmp(line, themePrefix, sizeof themePrefix - 1) == 0)
         {
             // theme.<item>.<fg|bg|style>=<value>
@@ -129,6 +137,8 @@ void saveSettings(const AppSettings &s) noexcept
     fprintf(f, "showhidden=%d\n", s.showHidden ? 1 : 0);
     if (!s.treeIcons.empty())
         fprintf(f, "tree.icons=%s\n", s.treeIcons.c_str());
+    if (!s.colorMode.empty())
+        fprintf(f, "theme.colors=%s\n", s.colorMode.c_str());
     if (!s.defaultAgent.empty())
         fprintf(f, "agent.default=%s\n", s.defaultAgent.c_str());
     for (auto &srv : s.lspServers)
@@ -138,4 +148,34 @@ void saveSettings(const AppSettings &s) noexcept
         if (!kv.first.empty())
             fprintf(f, "theme.%s=%s\n", kv.first.c_str(), kv.second.c_str());
     fclose(f);
+}
+
+bool terminalAdvertisesTrueColor() noexcept
+{
+    const char *ct = getenv("COLORTERM");
+    return ct && (std::strcmp(ct, "truecolor") == 0 || std::strcmp(ct, "24bit") == 0);
+}
+
+void applyColorDepthPreference() noexcept
+{
+    AppSettings s;
+    loadSettings(s);
+    // Pin Turbo Vision's colour depth to 16 for the classic fallback, so even
+    // views that draw with raw RGB attributes (the file tree, debug panels)
+    // render through the terminal's own 16-colour palette. "16" always; on
+    // Windows "auto" too, unless the terminal advertises truecolor -- the
+    // classic console reports truecolor but renders it poorly.
+    bool cap = (s.colorMode == "16");
+#ifdef _WIN32
+    if (s.colorMode == "auto" && !terminalAdvertisesTrueColor())
+        cap = true;
+#endif
+    if (cap)
+    {
+#ifdef _WIN32
+        _putenv_s("TVISION_COLORS", "16");
+#else
+        setenv("TVISION_COLORS", "16", 1);
+#endif
+    }
 }

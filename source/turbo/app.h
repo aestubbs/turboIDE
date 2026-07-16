@@ -251,6 +251,9 @@ struct TurboApp : public TApplication, EditorWindowParent
     // from the now-current active schemes, repaints the chrome, and persists.
     void editThemeSettings();
     void applyActiveTheme() noexcept;
+    // Switch the colour-depth mode ("auto"/"full"/"16"), persist it, and re-apply
+    // the active schemes live. Some panels update fully only on the next launch.
+    void setColorMode(const char *mode) noexcept;
     void closeAll();
     TRect newEditorBounds() const;
     turbo::TScintilla &createScintilla() noexcept;

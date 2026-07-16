@@ -95,6 +95,11 @@ enum : ushort
     // notification the dialog posts to the application on Apply/OK.
     cmThemeSettings,
     cmApplyTheme,
+    // Colour-depth mode (Settings menu): a radio choice persisted as
+    // theme.colors -- "auto" (detect), "full" (24-bit RGB) or "16" (classic).
+    cmColorModeAuto,
+    cmColorModeFull,
+    cmColorMode16,
     // File-tree right-click context menu actions.
     cmTreeOpen,
     cmTreeRename,
