@@ -101,6 +101,13 @@ const PaletteCommand kCommands[] =
     { "Build: Configure...",           cmBuildConfig,          "",             false },
     { "Tools: Configure...",           cmToolsConfig,          "",             false },
     { "Toggle Output Pane",            cmToggleOutput,         "",             false },
+    // Debug
+    { "Debug: Start",                  cmDebugStart,           "",             true  },
+    { "Debug: Stop",                   cmDebugStop,            "",             false },
+    { "Debug: Continue",               cmDebugContinue,        "",             false },
+    { "Debug: Step Over",              cmDebugStepOver,        "",             false },
+    { "Debug: Step Into",              cmDebugStepInto,        "",             false },
+    { "Debug: Step Out",               cmDebugStepOut,         "",             false },
     // Git
     { "Git: Commit...",                cmGitCommit,            "",             false },
     { "Git: Fetch",                    cmGitFetch,             "",             false },

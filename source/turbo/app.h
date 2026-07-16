@@ -27,6 +27,7 @@
 struct EditorWindow;
 class TClockView;
 class LspManager;
+class DapManager;
 class GitManager;
 class LuaManager;
 class McpServer;
@@ -79,6 +80,9 @@ struct TurboApp : public TApplication, EditorWindowParent
     AppSettings settings;
     FrecencyStore frecency;
     std::unique_ptr<LspManager> lsp;
+    // Debug Adapter Protocol session manager (debugger integration). Owns at
+    // most one live debug session; pumped each idle tick like lsp.
+    std::unique_ptr<DapManager> dap;
     std::unique_ptr<GitManager> git;
     std::unique_ptr<turbo::FileWatcher> watcher;
     // The global skills home (~/.claude/skills) lives outside the project, so the
@@ -116,6 +120,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     // the Run menu, pumped each idle tick, each streaming to its own Output tab.
     std::vector<ToolProcess> tools;
     int nextToolTabId {2};        // Output-pane tab-id allocator (0/1 = BUILD/GIT)
+    int debugConsoleTab {-1};     // Output-pane tab for the debuggee's stdio (-1 = none yet)
     int menuToolCount {0};        // tool-toggle slots currently built into the menu
     // Deferred action run on the next idle tick (used to start Run after a
     // build-first finishes, so we don't reassign buildRunner inside its pump).
@@ -331,6 +336,17 @@ struct TurboApp : public TApplication, EditorWindowParent
     bool needsBuildBeforeRun() const;
     // True if the configured artifact is missing or older than a project source.
     bool isArtifactStale() const;
+
+    // --- Debugger (Debug Adapter Protocol) -----------------------------------
+    // Construct the DapManager and wire its host callbacks to this app. Called
+    // once during startup, after the output pane exists.
+    void initDap() noexcept;
+    // Start debugging the focused editor's file (resolves its language + adapter).
+    void startDebug();
+    // Terminate the current debug session (no-op when none is active).
+    void stopDebug();
+    // Route a debug-adapter 'output' event into the Debug Console output tab.
+    void debugConsoleOutput(const std::string &category, const std::string &text) noexcept;
 
     // Terminal windows. newTerminal() opens one running the configured shell.
     // Each TerminalView registers itself so idle() can pump its PTY output.

@@ -32,6 +32,7 @@
 #include "doctree.h"
 #include "lspmanager.h"
 #include "lspdialog.h"
+#include "dapmanager.h"
 #include "gitmanager.h"
 #include "gitdialog.h"
 #include "luamanager.h"
@@ -260,6 +261,7 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
     applyThemeFromSettings(settings);
     lsp = std::make_unique<LspManager>();
     configureLsp();
+    initDap();
     git = std::make_unique<GitManager>();
     watcher = std::make_unique<turbo::FileWatcher>();
     // Watch the global skills home too: it sits outside the project, so the
@@ -550,6 +552,14 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount, int toolCount)
             newLine() +
             *new TMenuItem( "~R~efresh Status", cmGitRefresh, kbNoKey, hcNoContext ) +
         run +
+        *new TSubMenu( "~D~ebug", kbAltD ) +
+            *new TMenuItem( "~S~tart Debugging", cmDebugStart, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "St~o~p", cmDebugStop, kbNoKey, hcNoContext ) +
+            newLine() +
+            *new TMenuItem( "~C~ontinue", cmDebugContinue, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Step O~v~er", cmDebugStepOver, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Step ~I~nto", cmDebugStepInto, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Step Ou~t~", cmDebugStepOut, kbNoKey, hcNoContext ) +
         *new TSubMenu( "L~u~a", kbAltU ) +
             *new TMenuItem( "~R~un Script...", cmLuaRunScript, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~N~ew Script...", cmLuaNewScript, kbNoKey, hcNoContext ) +
@@ -632,6 +642,8 @@ void TurboApp::shutDown()
         mcp->stop(); // join the socket threads before luaMgr/editors tear down
     if (lsp)
         lsp->shutdown();
+    if (dap)
+        dap->shutdown();
     if (git)
         git->shutdown();
     if (watcher)
@@ -657,6 +669,8 @@ void TurboApp::idle()
         clock->update();
     if (lsp)
         lsp->pump();
+    if (dap)
+        dap->pump();
     if (mcp)
         mcp->pump();
     if (watcher)
@@ -730,6 +744,12 @@ void TurboApp::handleEvent(TEvent &event)
             case cmBuildConfig: editBuildConfig(); break;
             case cmToolsConfig: editToolsConfig(); break;
             case cmToggleOutput: toggleOutputView(); break;
+            case cmDebugStart: startDebug(); break;
+            case cmDebugStop: stopDebug(); break;
+            case cmDebugContinue: if (dap) dap->continueExec(); break;
+            case cmDebugStepOver: if (dap) dap->stepOver(); break;
+            case cmDebugStepInto: if (dap) dap->stepIn(); break;
+            case cmDebugStepOut: if (dap) dap->stepOut(); break;
             case cmLuaRunScript: runLuaScriptPicker(); break;
             case cmLuaNewScript: luaNewScript(); break;
             case cmLuaReload: reloadLuaConfig(); break;
@@ -1060,6 +1080,8 @@ void TurboApp::openProject(const std::string &dir) noexcept
     });
     if (lsp)
         lsp->setRootPath(root.c_str());
+    if (dap)
+        dap->setRootPath(root.c_str());
     if (git)
         git->setWorkspace(root.c_str());
     if (watcher)
@@ -3133,6 +3155,103 @@ void TurboApp::startTool(int i) noexcept
             outputWin->view->addLine(tab, {"Failed to start tool.", okError, "", -1});
         t.runner.reset();
     }
+}
+
+// --- Debugger (Debug Adapter Protocol) --------------------------------------
+
+// Maps Turbo's detected Language to a DAP adapter/language id. Returns "" when
+// no debug adapter is wired for the language (mirrors LSP's languageIdFor).
+static std::string dapLanguageId(const turbo::Language *lang) noexcept
+{
+    using turbo::Language;
+    if (!lang) return {};
+    if (lang == &Language::CPP)    return "cpp";
+    if (lang == &Language::Python) return "python";
+    if (lang == &Language::PHP)    return "php";
+    return {};
+}
+
+void TurboApp::initDap() noexcept
+{
+    dap = std::make_unique<DapManager>();
+    // Wake the event loop so pump() delivers adapter events (notably 'stopped')
+    // promptly, without waiting for the next keystroke.
+    dap->onWake = [] { TEventQueue::wakeUp(); };
+    dap->onOutput = [this] (const std::string &category, const std::string &text) {
+        debugConsoleOutput(category, text);
+    };
+    dap->onSessionState = [this] (bool active) {
+        if (outputWin && debugConsoleTab >= 0)
+            outputWin->view->addLine(debugConsoleTab,
+                { active ? std::string("[debug session started]")
+                         : std::string("[debug session ended]"),
+                  okInfo, "", -1 });
+    };
+    // onStopped / onContinued drive the editor's current-line marker and the
+    // Call Stack / Variables panels; wired in M2/M3.
+}
+
+void TurboApp::startDebug()
+{
+    if (!dap)
+        return;
+    EditorWindow *w = focusedEditor();
+    if (!w)
+    {
+        messageBox("Open a file to debug first.", mfInformation | mfOKButton);
+        return;
+    }
+    std::string path = w->filePath();
+    if (path.empty())
+    {
+        messageBox("Save the file before starting the debugger.", mfInformation | mfOKButton);
+        return;
+    }
+    std::string lang = dapLanguageId(w->getEditor().language);
+    if (lang.empty())
+    {
+        messageBox("No debug adapter is available for this file type.",
+                   mfInformation | mfOKButton);
+        return;
+    }
+    // Prepare (and reveal) the Debug Console tab for the debuggee's stdio.
+    if (outputWin)
+    {
+        if (debugConsoleTab < 0)
+            debugConsoleTab = nextToolTabId++;
+        outputWin->view->ensureTab(debugConsoleTab, "DEBUG");
+        outputWin->view->clear(debugConsoleTab);
+        showOutput();
+        outputWin->view->showTab(debugConsoleTab);
+    }
+    dap->start(lang, path); // failures are reported via onOutput
+}
+
+void TurboApp::stopDebug()
+{
+    if (dap)
+        dap->terminate();
+}
+
+void TurboApp::debugConsoleOutput(const std::string &category, const std::string &text) noexcept
+{
+    if (!outputWin || debugConsoleTab < 0)
+        return;
+    OutputKind kind = (category == "stderr") ? okError
+                    : (category == "important" || category == "console") ? okInfo
+                    : okNormal;
+    // The adapter batches output arbitrarily; split into lines for the list.
+    size_t start = 0;
+    while (start < text.size())
+    {
+        size_t nl = text.find('\n', start);
+        size_t end = (nl == std::string::npos) ? text.size() : nl;
+        outputWin->view->addLine(debugConsoleTab, {text.substr(start, end - start), kind, "", -1});
+        if (nl == std::string::npos)
+            break;
+        start = nl + 1;
+    }
+    showOutput();
 }
 
 void TurboApp::stopTool(int i) noexcept
