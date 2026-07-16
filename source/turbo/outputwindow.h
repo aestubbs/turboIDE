@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "debugpanels.h" // CallStackView (a swap-in debugger tab)
+
 // A single line in the output pane. 'file'/'line' are filled in (Phase 2) when
 // the line parses as a compiler error/warning referencing a source location, so
 // the line becomes clickable.
@@ -32,6 +34,12 @@ struct OutputLine
 // whatever tabs currently exist.
 enum OutputTab { otBuild = 0, otGit = 1 };
 
+// Debugger panels shown as extra tabs in the Output window. Unlike the text
+// tabs (Build/Git/tools/Debug console, which share the one OutputView), each of
+// these has its own view swapped in when its tab is active. Ids are kept well
+// above the tool-tab range so they never collide.
+enum DebugTab { otCallStack = 900, otVariables = 901 };
+
 // Shortest the docked pane is allowed to get, in rows: top frame + three lines of
 // output + the bottom frame (which carries the tabs). Enforced in three places
 // that must agree -- OutputWindow::sizeLimits, and the app's outputBounds /
@@ -39,6 +47,7 @@ enum OutputTab { otBuild = 0, otGit = 1 };
 enum { minOutputRows = 5 };
 
 struct OutputFrame;
+struct OutputWindow;
 
 // Scrolling list of output lines, backed by one buffer per tab (only the active
 // tab is drawn). Auto-follows the tail of its buffer unless the user scrolls up.
@@ -97,9 +106,15 @@ struct OutputView : public TListViewer
 // each draw, so they always match the tabs currently shown.
 struct OutputFrame : public TFrame
 {
-    OutputView *view {nullptr}; // set by OutputWindow once the view exists
-    std::vector<int> tabX0;     // per-tab hit-test ranges (parallel to view->buffers)
+    OutputView *view {nullptr};  // set by OutputWindow once the view exists
+    OutputWindow *win {nullptr}; // set by OutputWindow (for the debugger tabs)
+    // Per-tab hit-test ranges + identity, rebuilt each drawTabs(). A tab is
+    // either a text buffer (tabExtra[i]==0, tabId[i] = OutputView buffer id) or
+    // a debugger panel (tabExtra[i]==1, tabId[i] = otCallStack/otVariables).
+    std::vector<int> tabX0;
     std::vector<int> tabX1;
+    std::vector<int> tabId;
+    std::vector<char> tabExtra;
 
     OutputFrame(const TRect &bounds) noexcept;
 
@@ -125,6 +140,13 @@ struct OutputWindow : public TWindow
 {
     OutputView *view {nullptr};
     OutputFrame *tabFrame {nullptr}; // the frame, which also draws the tabs
+    TScrollBar *vScrollBar {nullptr}; // the list's scrollbar (hidden for debug tabs)
+    // Debugger panels, swapped in when their tab is active. The text tabs share
+    // 'view'; each debug panel is its own view. Present as tabs only while
+    // 'showDebugTabs' (set on a debug session start).
+    CallStackView *stackView {nullptr};
+    int activeExtra {0};        // 0 = a text tab is active; else otCallStack/otVariables
+    bool showDebugTabs {false}; // whether the debugger tabs appear in the bar
     OutputWindow **ptr;
     // Invoked while the user drags the pane's top border, with the dragged
     // border's screen row. The app turns that into a new pane height and
@@ -132,6 +154,13 @@ struct OutputWindow : public TWindow
     std::function<void(int borderScreenY)> onResizeTo;
 
     OutputWindow(const TRect &bounds, OutputWindow **ptr) noexcept;
+
+    // Activate a text tab (an OutputView buffer) or a debugger panel tab,
+    // swapping which view is shown. setDebugTabsVisible adds/removes the debug
+    // tabs from the bar (and, when hiding, returns to a text tab).
+    void showTextTab(int bufferId) noexcept;
+    void showExtraTab(int extraId) noexcept;
+    void setDebugTabsVisible(bool on) noexcept;
 
     // Hands TWindow an OutputFrame instead of a plain TFrame (passed to
     // TWindowInit, so it runs during construction, before 'view' exists).

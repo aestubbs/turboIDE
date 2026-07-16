@@ -377,6 +377,24 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
         outputWin->view->onActivate = [this] (const std::string &file, long line) {
             openOrFocus(file, line);
         };
+        // Activating a Call Stack frame jumps to it and moves the current-line
+        // marker there (re-scoping the Variables panel follows in M3b).
+        if (outputWin->stackView)
+            outputWin->stackView->onSelect = [this] (int idx) {
+                if (!outputWin || !outputWin->stackView)
+                    return;
+                auto &frames = outputWin->stackView->frames;
+                if (idx < 0 || idx >= (int) frames.size())
+                    return;
+                const StackFrameItem &fr = frames[idx];
+                if (!fr.file.empty() && fr.line >= 0)
+                {
+                    clearDebugCurrentLine();
+                    openOrFocus(fr.file, fr.line);
+                    if (auto *w = focusedEditor())
+                        w->getEditor().setCurrentLine(fr.line);
+                }
+            };
         // Dragging the pane's top border resizes it. The bottom is anchored to
         // the desktop bottom, so the height is (desktop bottom - dragged row).
         outputWin->onResizeTo = [this] (int borderScreenY) {
@@ -561,6 +579,7 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount, int toolCount)
             *new TMenuItem( "Step ~I~nto", cmDebugStepInto, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Step Ou~t~", cmDebugStepOut, kbNoKey, hcNoContext ) +
             newLine() +
+            *new TMenuItem( "Call Stac~k~", cmDebugCallStack, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Toggle ~B~reakpoint", cmToggleBreakpoint, kbNoKey, hcNoContext ) +
         *new TSubMenu( "L~u~a", kbAltU ) +
             *new TMenuItem( "~R~un Script...", cmLuaRunScript, kbNoKey, hcNoContext ) +
@@ -752,6 +771,13 @@ void TurboApp::handleEvent(TEvent &event)
             case cmDebugStepOver: if (dap) dap->stepOver(); break;
             case cmDebugStepInto: if (dap) dap->stepIn(); break;
             case cmDebugStepOut: if (dap) dap->stepOut(); break;
+            case cmDebugCallStack:
+                if (outputWin && dap && dap->sessionActive())
+                {
+                    showOutput();
+                    outputWin->showExtraTab(otCallStack);
+                }
+                break;
             case cmLuaRunScript: runLuaScriptPicker(); break;
             case cmLuaNewScript: luaNewScript(); break;
             case cmLuaReload: reloadLuaConfig(); break;
@@ -2856,7 +2882,7 @@ void TurboApp::runInOutput(const std::string &label, const std::string &command,
         return;
     // BUILD tab: wiped at the start of each run, then shown.
     outputWin->view->clear(otBuild);
-    outputWin->view->showTab(otBuild);
+    outputWin->showTextTab(otBuild);
     outputWin->view->addLine(otBuild, {"$ " + label, okInfo, "", -1});
 
     if (buildRunner)
@@ -2889,7 +2915,7 @@ void TurboApp::reportGitOutput(const std::string &label, int code,
         return;
     // GIT tab: a continuous log (never auto-cleared). Show it and echo the
     // command like a shell prompt, then the captured output verbatim.
-    outputWin->view->showTab(otGit);
+    outputWin->showTextTab(otGit);
     outputWin->view->addLine(otGit, {"$ " + label, okInfo, "", -1});
     size_t start = 0;
     while (start < output.size())
@@ -3135,7 +3161,7 @@ void TurboApp::startTool(int i) noexcept
         outputWin->view->ensureTab(tab, title);
         outputWin->view->clear(tab); // fresh run: wipe the previous output
         outputWin->view->addLine(tab, {"$ " + t.command, okInfo, "", -1});
-        outputWin->view->showTab(tab);
+        outputWin->showTextTab(tab);
     }
     t.runner = std::make_unique<CommandRunner>();
     t.runner->onLine = [this, tab] (std::string_view line) {
@@ -3188,8 +3214,14 @@ void TurboApp::initDap() noexcept
                 { active ? std::string("[debug session started]")
                          : std::string("[debug session ended]"),
                   okInfo, "", -1 });
+        if (outputWin)
+            outputWin->setDebugTabsVisible(active); // add/remove the Call Stack tab
         if (!active)
+        {
             clearDebugCurrentLine();
+            if (outputWin && outputWin->stackView)
+                outputWin->stackView->clearFrames();
+        }
     };
     dap->onStopped = [this] (const std::string &file, int line, const std::string &) {
         clearDebugCurrentLine();
@@ -3200,8 +3232,35 @@ void TurboApp::initDap() noexcept
                 w->getEditor().setCurrentLine(line - 1);
         }
     };
-    dap->onContinued = [this] { clearDebugCurrentLine(); };
-    // Call Stack list + Variables tree are wired in M3.
+    dap->onFrames = [this] (const std::vector<StackFrameInfo> &frames) {
+        if (!outputWin || !outputWin->stackView)
+            return;
+        std::vector<StackFrameItem> items;
+        items.reserve(frames.size());
+        for (const StackFrameInfo &f : frames)
+        {
+            std::string loc;
+            if (!f.file.empty())
+            {
+                std::string base = f.file;
+                auto slash = base.find_last_of("/\\");
+                if (slash != std::string::npos)
+                    base = base.substr(slash + 1);
+                loc = "  " + base + ":" + std::to_string(f.line);
+            }
+            StackFrameItem it;
+            it.label = f.name + loc;
+            it.file = f.file;
+            it.line = f.line > 0 ? f.line - 1 : -1; // 0-based for jump
+            items.push_back(std::move(it));
+        }
+        outputWin->stackView->setFrames(std::move(items));
+    };
+    dap->onContinued = [this] {
+        clearDebugCurrentLine();
+        if (outputWin && outputWin->stackView)
+            outputWin->stackView->clearFrames();
+    };
 }
 
 void TurboApp::startDebug()
@@ -3235,7 +3294,7 @@ void TurboApp::startDebug()
         outputWin->view->ensureTab(debugConsoleTab, "DEBUG");
         outputWin->view->clear(debugConsoleTab);
         showOutput();
-        outputWin->view->showTab(debugConsoleTab);
+        outputWin->showTextTab(debugConsoleTab);
     }
     dap->start(lang, path); // failures are reported via onOutput
 }
