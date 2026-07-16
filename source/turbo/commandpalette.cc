@@ -109,6 +109,7 @@ const PaletteCommand kCommands[] =
     { "Debug: Step Into",              cmDebugStepInto,        "",             false },
     { "Debug: Step Out",               cmDebugStepOut,         "",             false },
     { "Debug: Call Stack",             cmDebugCallStack,       "",             false },
+    { "Debug: Variables",              cmDebugVariables,       "",             false },
     { "Debug: Toggle Breakpoint",      cmToggleBreakpoint,     "",             true  },
     // Git
     { "Git: Commit...",                cmGitCommit,            "",             false },

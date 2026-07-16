@@ -15,6 +15,22 @@ struct StackFrameInfo
     int line {0};       // 1-based (DAP)
 };
 
+// A variable scope (Locals/Globals/...) for a stack frame.
+struct ScopeInfo
+{
+    std::string name;
+    int variablesReference {0}; // fetch its variables with this reference
+};
+
+// A single variable/child in the Variables tree. variablesReference > 0 means it
+// is expandable (a struct/object/array with children to fetch lazily).
+struct VariableInfo
+{
+    std::string name;
+    std::string value;
+    int variablesReference {0};
+};
+
 #ifdef TURBO_ENABLE_DAP
 
 #include <turbo/dap/client.h>
@@ -52,6 +68,9 @@ public:
     std::function<void(const std::string &file, int line, const std::string &reason)> onStopped;
     // The full call stack at the stop (top frame first); empty while running.
     std::function<void(const std::vector<StackFrameInfo> &frames)> onFrames;
+    // The variable scopes for the frame being inspected (top frame on stop, or a
+    // frame selected in the Call Stack); empty while running.
+    std::function<void(const std::vector<ScopeInfo> &scopes)> onScopes;
     // Execution resumed.
     std::function<void()> onContinued;
     // Session became active / ended (for status line, panels, markers).
@@ -72,6 +91,15 @@ public:
     // breakpoint set persists across sessions and is (re)sent to the adapter on
     // the next session's 'initialized', or immediately if a session is live.
     bool toggleBreakpoint(const std::string &file, int line) noexcept;
+
+    // Inspect variables. fetchScopes requests the scopes for 'frameId' and
+    // delivers them via onScopes (used on stop and on Call Stack frame select).
+    // fetchVariables requests the children of a variablesReference (a scope or
+    // an expandable value); 'cb' runs on the main thread with the result. Both
+    // are no-ops when no session is active.
+    void fetchScopes(int frameId) noexcept;
+    void fetchVariables(int variablesReference,
+                        std::function<void(std::vector<VariableInfo>)> cb) noexcept;
 
     // Session controls. No-ops when no session is active.
     void terminate() noexcept;       // stop debugging (disconnect + teardown)
@@ -134,12 +162,15 @@ public:
     std::function<void(const std::string &, const std::string &)> onOutput;
     std::function<void(const std::string &, int, const std::string &)> onStopped;
     std::function<void(const std::vector<StackFrameInfo> &)> onFrames;
+    std::function<void(const std::vector<ScopeInfo> &)> onScopes;
     std::function<void()> onContinued;
     std::function<void(bool)> onSessionState;
     void setRootPath(const char *) noexcept {}
     bool sessionActive() const noexcept { return false; }
     bool start(const std::string &, const std::string &) noexcept { return false; }
     bool toggleBreakpoint(const std::string &, int) noexcept { return false; }
+    void fetchScopes(int) noexcept {}
+    void fetchVariables(int, std::function<void(std::vector<VariableInfo>)>) noexcept {}
     void terminate() noexcept {}
     void continueExec() noexcept {}
     void stepOver() noexcept {}

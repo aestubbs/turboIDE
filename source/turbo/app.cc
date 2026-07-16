@@ -394,6 +394,29 @@ TurboApp::TurboApp(int argc, const char *argv[]) noexcept :
                     if (auto *w = focusedEditor())
                         w->getEditor().setCurrentLine(fr.line);
                 }
+                if (dap)
+                    dap->fetchScopes(fr.frameId); // re-scope Variables to this frame
+            };
+        // Expanding a Variables node lazily fetches its children.
+        if (outputWin->varsView)
+            outputWin->varsView->onExpand = [this] (int variablesReference, int token) {
+                if (!dap)
+                    return;
+                dap->fetchVariables(variablesReference,
+                    [this, token] (std::vector<VariableInfo> vars) {
+                        if (!outputWin || !outputWin->varsView)
+                            return;
+                        std::vector<VarItem> items;
+                        items.reserve(vars.size());
+                        for (const VariableInfo &v : vars)
+                        {
+                            std::string text = v.name;
+                            if (!v.value.empty())
+                                text += " = " + v.value;
+                            items.push_back(VarItem{text, v.variablesReference});
+                        }
+                        outputWin->varsView->fulfill(token, items);
+                    });
             };
         // Dragging the pane's top border resizes it. The bottom is anchored to
         // the desktop bottom, so the height is (desktop bottom - dragged row).
@@ -580,6 +603,7 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount, int toolCount)
             *new TMenuItem( "Step Ou~t~", cmDebugStepOut, kbNoKey, hcNoContext ) +
             newLine() +
             *new TMenuItem( "Call Stac~k~", cmDebugCallStack, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~V~ariables", cmDebugVariables, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Toggle ~B~reakpoint", cmToggleBreakpoint, kbNoKey, hcNoContext ) +
         *new TSubMenu( "L~u~a", kbAltU ) +
             *new TMenuItem( "~R~un Script...", cmLuaRunScript, kbNoKey, hcNoContext ) +
@@ -776,6 +800,15 @@ void TurboApp::handleEvent(TEvent &event)
                 {
                     showOutput();
                     outputWin->showExtraTab(otCallStack);
+                    outputWin->focus(); // so the panel takes keyboard input
+                }
+                break;
+            case cmDebugVariables:
+                if (outputWin && dap && dap->sessionActive())
+                {
+                    showOutput();
+                    outputWin->showExtraTab(otVariables);
+                    outputWin->focus();
                 }
                 break;
             case cmLuaRunScript: runLuaScriptPicker(); break;
@@ -3221,6 +3254,8 @@ void TurboApp::initDap() noexcept
             clearDebugCurrentLine();
             if (outputWin && outputWin->stackView)
                 outputWin->stackView->clearFrames();
+            if (outputWin && outputWin->varsView)
+                outputWin->varsView->clearTree();
         }
     };
     dap->onStopped = [this] (const std::string &file, int line, const std::string &) {
@@ -3252,14 +3287,26 @@ void TurboApp::initDap() noexcept
             it.label = f.name + loc;
             it.file = f.file;
             it.line = f.line > 0 ? f.line - 1 : -1; // 0-based for jump
+            it.frameId = f.id;
             items.push_back(std::move(it));
         }
         outputWin->stackView->setFrames(std::move(items));
+    };
+    dap->onScopes = [this] (const std::vector<ScopeInfo> &scopes) {
+        if (!outputWin || !outputWin->varsView)
+            return;
+        std::vector<VarItem> items;
+        items.reserve(scopes.size());
+        for (const ScopeInfo &s : scopes)
+            items.push_back(VarItem{s.name, s.variablesReference});
+        outputWin->varsView->setScopes(items);
     };
     dap->onContinued = [this] {
         clearDebugCurrentLine();
         if (outputWin && outputWin->stackView)
             outputWin->stackView->clearFrames();
+        if (outputWin && outputWin->varsView)
+            outputWin->varsView->clearTree();
     };
 }
 
