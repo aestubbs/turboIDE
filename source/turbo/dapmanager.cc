@@ -55,12 +55,18 @@ void DapManager::setRootPath(const char *path) noexcept
     rootPath = path ? path : "";
 }
 
+void DapManager::setConfig(DebugConfig cfg) noexcept
+{
+    debugConfig = std::move(cfg);
+}
+
 DapManager::AdapterSpec DapManager::resolveAdapter(const std::string &languageId) noexcept
 {
     AdapterSpec spec;
     spec.languageId = languageId;
 
     // 1. Environment override: TURBO_DAP_ADAPTER_<LANG> = "<cmd> <args...>".
+    // Wins outright (used to point tests at a mock adapter).
     std::string envName = "TURBO_DAP_ADAPTER_" + upper(languageId);
     if (const char *ov = std::getenv(envName.c_str()); ov && *ov)
     {
@@ -73,7 +79,7 @@ DapManager::AdapterSpec DapManager::resolveAdapter(const std::string &languageId
         return spec;
     }
 
-    // 2. Built-in defaults. (Project .turbo/debug.json config lands in M4.)
+    // 2. Built-in defaults for the language.
     if (languageId == "python")
     {
         spec.command = "python3";
@@ -81,13 +87,37 @@ DapManager::AdapterSpec DapManager::resolveAdapter(const std::string &languageId
     }
     else if (languageId == "cpp" || languageId == "c")
     {
-        spec.command = "lldb-dap"; // or `gdb --interpreter=dap` via env override
+        spec.command = "lldb-dap"; // or `gdb --interpreter=dap` via config/env
     }
     else if (languageId == "php")
     {
-        // Requires a configured adapter path (php-debug); attach to Xdebug.
+        // Xdebug: the php-debug adapter (configure its command in debug.json)
+        // listens for Xdebug's reverse connection, so turbo just attaches.
         spec.request = "attach";
+        spec.host = "127.0.0.1";
         spec.port = 9003;
+    }
+
+    // 3. Project config (.turbo/debug.json) overrides the defaults, field by
+    // field, so a project can supply an adapter command (required for php) or
+    // change the request/port/program without restating the rest.
+    if (const DebugAdapter *a = debugConfig.forLanguage(languageId))
+    {
+        if (!a->command.empty())
+        {
+            auto parts = splitArgs(a->command);
+            if (!parts.empty())
+            {
+                spec.command = parts.front();
+                spec.args.assign(parts.begin() + 1, parts.end());
+            }
+        }
+        if (!a->request.empty()) spec.request = a->request;
+        if (!a->program.empty()) spec.program = a->program;
+        if (!a->cwd.empty())     spec.cwd = a->cwd;
+        if (!a->host.empty())    spec.host = a->host;
+        if (a->port)             spec.port = a->port;
+        spec.stopOnEntry = a->stopOnEntry;
     }
     return spec;
 }
@@ -167,12 +197,16 @@ void DapManager::sendLaunchOrAttach() noexcept
             {"host", pending.host},
             {"port", pending.port},
         };
+        if (pending.stopOnEntry)
+            args["stopOnEntry"] = true;
     }
     else // launch
     {
+        std::string prog = pending.program.empty() ? pendingProgram : pending.program;
+        std::string wd = pending.cwd.empty() ? rootPath : pending.cwd;
         args = {
-            {"program", pendingProgram},
-            {"cwd", rootPath},
+            {"program", prog},
+            {"cwd", wd},
             {"args", Json::array()},
             {"stopOnEntry", pending.stopOnEntry},
         };

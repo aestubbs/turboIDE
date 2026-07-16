@@ -125,6 +125,7 @@ enum : ushort
     cmDebugStepOut,   // DAP 'stepOut'
     cmDebugCallStack, // reveal the Call Stack panel (Output-pane tab)
     cmDebugVariables, // reveal the Variables panel (Output-pane tab)
+    cmDebugSettings,  // per-project debug-adapter settings dialog (.turbo/debug.json)
     // Recent-windows list in the Windows menu: cmWindowBase + i selects the
     // i-th most-recently-used editor window (i in [0, windowListMax)).
     cmWindowBase = 1100,

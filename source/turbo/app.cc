@@ -33,6 +33,7 @@
 #include "lspmanager.h"
 #include "lspdialog.h"
 #include "dapmanager.h"
+#include "debugdialog.h"
 #include "gitmanager.h"
 #include "gitdialog.h"
 #include "luamanager.h"
@@ -619,6 +620,7 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount, int toolCount)
         *new TSubMenu( "~S~ettings", kbAltS ) +
             *new TMenuItem( "~C~olour Scheme...", cmThemeSettings, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~L~anguage Servers...", cmLspSettings, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "~D~ebuggers...", cmDebugSettings, kbNoKey, hcNoContext ) +
             newLine() +
             *new TMenuItem( "~A~uto-save on Focus Loss", cmToggleAutoSave, kbNoKey, hcNoContext ) +
         *new TSubMenu( "~H~elp", kbAltH ) +
@@ -827,6 +829,7 @@ void TurboApp::handleEvent(TEvent &event)
             case cmToggleHidden: toggleHiddenFiles(); break;
             case cmToggleAutoSave: toggleAutoSave(); break;
             case cmLspSettings: editLspSettings(); break;
+            case cmDebugSettings: editDebugSettings(); break;
             case cmThemeSettings: editThemeSettings(); break;
             case cmApplyTheme: applyActiveTheme(); break;
             case cmGitRefresh: gitRefresh(); break;
@@ -1129,6 +1132,9 @@ void TurboApp::openProject(const std::string &dir) noexcept
     std::filesystem::current_path(root, ec);
 
     buildConfig.load(projectRoot); // .turbo/config.json (no-op if absent)
+    debugConfig.load(projectRoot); // .turbo/debug.json (no-op if absent)
+    if (dap)
+        dap->setConfig(debugConfig);
     applyToolConfig();             // build the Run menu's tool toggles from it
     ensureTurboCacheIgnored(projectRoot); // retrofit .gitignore on existing .turbo
     docTree->tree->setShowHidden(settings.showHidden); // before the first scan
@@ -1935,6 +1941,22 @@ void TurboApp::editLspSettings()
     {
         saveSettings(settings);
         configureLsp();
+    }
+}
+
+void TurboApp::editDebugSettings()
+{
+    if (projectRoot.empty())
+    {
+        messageBox("Open a project to configure its debuggers (.turbo/debug.json).",
+                   mfInformation | mfOKButton);
+        return;
+    }
+    if (executeDebugDialog(debugConfig))
+    {
+        debugConfig.save(projectRoot);
+        if (dap)
+            dap->setConfig(debugConfig);
     }
 }
 

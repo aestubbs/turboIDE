@@ -22,6 +22,7 @@
 #include "outputwindow.h"
 #include "commandrunner.h"
 #include "buildconfig.h"
+#include "debugconfig.h"
 #include "cmds.h"
 
 struct EditorWindow;
@@ -116,6 +117,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     std::string projectRoot;      // cwd the app was opened from (build cwd)
     std::string lastBuildCommand; // remembered between Build invocations
     BuildConfig buildConfig;      // .turbo/config.json (build/test/run + tools)
+    DebugConfig debugConfig;      // .turbo/debug.json (per-language debug adapters)
     // Configured tool processes, mirroring buildConfig.extra. Toggled on/off from
     // the Run menu, pumped each idle tick, each streaming to its own Output tab.
     std::vector<ToolProcess> tools;
@@ -242,6 +244,8 @@ struct TurboApp : public TApplication, EditorWindowParent
     void updateEditorConflictBars() noexcept;
     void configureLsp();
     void editLspSettings();
+    // Per-project debug-adapter settings dialog (edits .turbo/debug.json).
+    void editDebugSettings();
     // Colour-scheme dialog. 'editThemeSettings' runs the dialog (which posts
     // cmApplyTheme on Apply/OK); 'applyActiveTheme' re-themes every open editor
     // from the now-current active schemes, repaints the chrome, and persists.
