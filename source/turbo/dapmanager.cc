@@ -258,30 +258,40 @@ void DapManager::onEvent(const std::string &event, const Json &body) noexcept
         // the UI can jump to and highlight the current line.
         if (client && currentThreadId)
         {
-            Json args = {{"threadId", currentThreadId}, {"startFrame", 0}, {"levels", 1}};
+            Json args = {{"threadId", currentThreadId}, {"startFrame", 0}, {"levels", 20}};
             client->sendRequest("stackTrace", args,
                 [this, reason](bool ok, const Json &b, const std::string &)
                 {
-                    std::string file;
-                    int line = 0;
-                    if (ok && b.contains("stackFrames") && b["stackFrames"].is_array()
-                        && !b["stackFrames"].empty())
-                    {
-                        const Json &fr = b["stackFrames"][0];
-                        line = fr.value("line", 0);
-                        if (fr.contains("source") && fr["source"].is_object())
+                    std::vector<StackFrameInfo> frames;
+                    if (ok && b.contains("stackFrames") && b["stackFrames"].is_array())
+                        for (const Json &fr : b["stackFrames"])
                         {
-                            const Json &src = fr["source"];
-                            if (src.contains("path") && src["path"].is_string())
-                                file = src["path"].get<std::string>();
+                            StackFrameInfo info;
+                            info.id = fr.value("id", 0);
+                            info.name = fr.value("name", std::string());
+                            info.line = fr.value("line", 0);
+                            if (fr.contains("source") && fr["source"].is_object())
+                            {
+                                const Json &src = fr["source"];
+                                if (src.contains("path") && src["path"].is_string())
+                                    info.file = src["path"].get<std::string>();
+                            }
+                            frames.push_back(std::move(info));
                         }
-                    }
                     if (onStopped)
-                        onStopped(file, line, reason);
+                        onStopped(frames.empty() ? std::string() : frames[0].file,
+                                  frames.empty() ? 0 : frames[0].line, reason);
+                    if (onFrames)
+                        onFrames(frames);
                 });
         }
-        else if (onStopped)
-            onStopped("", 0, reason);
+        else
+        {
+            if (onStopped)
+                onStopped("", 0, reason);
+            if (onFrames)
+                onFrames({});
+        }
     }
     else if (event == "continued")
     {

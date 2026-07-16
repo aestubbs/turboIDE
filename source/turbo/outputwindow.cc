@@ -320,15 +320,27 @@ void OutputFrame::drawTabs() noexcept
     TColorAttr cOff     {TColorRGB(winActive ? 0x8F9BC4 : 0x6C7590), bg};
     TColorAttr cOffEdge {TColorRGB(winActive ? 0x5C6A93 : 0x4A5470), bg};
 
-    int n = (int) view->buffers.size();
+    // Build the unified tab list: the text buffers first, then -- while a debug
+    // session is running -- the debugger panels (their own swap-in views).
+    struct T { int id; char extra; std::string title; bool on; };
+    std::vector<T> tabs;
+    int activeExtra = win ? win->activeExtra : 0;
+    for (auto &buf : view->buffers)
+        tabs.push_back({buf.id, 0, buf.title, activeExtra == 0 && view->activeId == buf.id});
+    if (win && win->showDebugTabs)
+        tabs.push_back({otCallStack, 1, "CALL STACK", activeExtra == otCallStack});
+
+    int n = (int) tabs.size();
     tabX0.assign(n, 0);
     tabX1.assign(n, 0);
+    tabId.assign(n, 0);
+    tabExtra.assign(n, 0);
     const int y = size.y - 1;
     int x = 2; // clear of the corner: '+-<tab>'
     for (int t = 0; t < n; ++t)
     {
-        const std::string &title = view->buffers[t].title;
-        bool on = view->activeId == view->buffers[t].id;
+        const std::string &title = tabs[t].title;
+        bool on = tabs[t].on;
         // The shoulders are one column each and butt straight up against the
         // label, with no padding: '<BUILD>'.
         int w = 1 + (int) strwidth(title.c_str()) + 1;
@@ -343,6 +355,8 @@ void OutputFrame::drawTabs() noexcept
         writeLine((short) x, (short) y, (ushort) w, 1, b);
         tabX0[t] = x;
         tabX1[t] = x + w;
+        tabId[t] = tabs[t].id;
+        tabExtra[t] = tabs[t].extra;
         x = tabX1[t] + 1; // one column of border rule between tabs
     }
 }
@@ -355,12 +369,17 @@ void OutputFrame::handleEvent(TEvent &ev)
     if (ev.what == evMouseDown && view)
     {
         TPoint m = makeLocal(ev.mouse.where);
-        int n = (int) min(view->buffers.size(), min(tabX0.size(), tabX1.size()));
+        int n = (int) tabX0.size(); // tabX0/tabX1/tabId/tabExtra are assigned together
         if (m.y == size.y - 1)
             for (int t = 0; t < n; ++t)
                 if (m.x >= tabX0[t] && m.x < tabX1[t])
                 {
-                    view->setActiveTab(view->buffers[t].id); // redraws this frame
+                    if (win && tabExtra[t])
+                        win->showExtraTab(tabId[t]);   // a debugger panel tab
+                    else if (win)
+                        win->showTextTab(tabId[t]);    // a text buffer tab
+                    else
+                        view->setActiveTab(tabId[t]);
                     clearEvent(ev);
                     return;
                 }
@@ -392,14 +411,69 @@ OutputWindow::OutputWindow(const TRect &bounds, OutputWindow **aptr) noexcept :
     view = new OutputView(inner, vsb);
     view->growMode = gfGrowHiX | gfGrowHiY;
     insert(view);
+    vScrollBar = vsb;
 
-    // TWindowInit built the frame before 'view' existed, so wire the two up now.
+    // The debugger panels share that interior, swapped in when their tab is
+    // active. Created hidden so BUILD (a text tab) is the default.
+    stackView = new CallStackView(inner);
+    stackView->growMode = gfGrowHiX | gfGrowHiY;
+    insert(stackView);
+    stackView->hide();
+
+    // TWindowInit built the frame before the views existed, so wire them now.
     tabFrame = (OutputFrame *) frame;
     if (tabFrame)
     {
         tabFrame->view = view;
+        tabFrame->win = this;
         view->tabFrame = tabFrame;
     }
+}
+
+void OutputWindow::showTextTab(int bufferId) noexcept
+{
+    activeExtra = 0;
+    if (stackView)
+        stackView->hide();
+    if (view)
+    {
+        view->show();
+        view->showTab(bufferId); // switch + follow the tail (redraws view + frame)
+    }
+    if (vScrollBar)
+        vScrollBar->show();
+    if (tabFrame)
+        tabFrame->drawView();
+}
+
+void OutputWindow::showExtraTab(int extraId) noexcept
+{
+    activeExtra = extraId;
+    if (view)
+        view->hide();
+    if (vScrollBar)
+        vScrollBar->hide(); // the debug panels manage their own (short) scroll
+    if (stackView)
+    {
+        if (extraId == otCallStack)
+        {
+            stackView->show();
+            stackView->select(); // take focus so keyboard navigation works
+        }
+        else
+            stackView->hide();
+    }
+    if (tabFrame)
+        tabFrame->drawView();
+}
+
+void OutputWindow::setDebugTabsVisible(bool on) noexcept
+{
+    showDebugTabs = on;
+    if (!on && activeExtra != 0)
+        showTextTab(view ? view->activeId : otBuild); // fall back to a text tab
+    else if (tabFrame)
+        tabFrame->drawView(); // (re)draw the tab bar with/without the debug tabs
 }
 
 void OutputWindow::setState(ushort aState, Boolean enable)
@@ -463,9 +537,14 @@ void OutputWindow::shutDown()
     if (view)
         view->tabFrame = nullptr; // drop the back-pointers before subviews are freed
     if (tabFrame)
+    {
         tabFrame->view = nullptr;
+        tabFrame->win = nullptr;
+    }
     view = nullptr;
     tabFrame = nullptr;
+    stackView = nullptr;
+    vScrollBar = nullptr;
     TWindow::shutDown();
 }
 

@@ -1,6 +1,20 @@
 #ifndef TURBO_DAPMANAGER_H
 #define TURBO_DAPMANAGER_H
 
+#include <functional>
+#include <string>
+#include <vector>
+
+// A stack frame surfaced to the Call Stack panel. Defined regardless of
+// TURBO_ENABLE_DAP so the app's callback wiring compiles in either build.
+struct StackFrameInfo
+{
+    int id {0};
+    std::string name;
+    std::string file;
+    int line {0};       // 1-based (DAP)
+};
+
 #ifdef TURBO_ENABLE_DAP
 
 #include <turbo/dap/client.h>
@@ -33,9 +47,11 @@ public:
     std::function<void()> onWake;
     // Adapter 'output' event: category is "stdout"/"stderr"/"console"/etc.
     std::function<void(const std::string &category, const std::string &text)> onOutput;
-    // Execution stopped (breakpoint/step/entry). file/line may be empty/0 until
-    // the stack frame is resolved (M2). 'reason' is the DAP stop reason.
+    // Execution stopped (breakpoint/step/entry). file/line locate the top frame
+    // (1-based line, 0 if unresolved). 'reason' is the DAP stop reason.
     std::function<void(const std::string &file, int line, const std::string &reason)> onStopped;
+    // The full call stack at the stop (top frame first); empty while running.
+    std::function<void(const std::vector<StackFrameInfo> &frames)> onFrames;
     // Execution resumed.
     std::function<void()> onContinued;
     // Session became active / ended (for status line, panels, markers).
@@ -117,6 +133,7 @@ public:
     std::function<void()> onWake;
     std::function<void(const std::string &, const std::string &)> onOutput;
     std::function<void(const std::string &, int, const std::string &)> onStopped;
+    std::function<void(const std::vector<StackFrameInfo> &)> onFrames;
     std::function<void()> onContinued;
     std::function<void(bool)> onSessionState;
     void setRootPath(const char *) noexcept {}
