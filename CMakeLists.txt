@@ -551,6 +551,10 @@ if (TURBO_BUILD_APP)
     set_source_files_properties(
         "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}/dapmanager.cc"
         PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+    # debugconfig.cc pulls in the large nlohmann/json header (like buildconfig.cc).
+    set_source_files_properties(
+        "${CMAKE_CURRENT_LIST_DIR}/source/${TURBO}/debugconfig.cc"
+        PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
     target_compile_features(${TURBO} PRIVATE cxx_std_17)
     turbo_set_warnings(${TURBO})
     target_link_libraries(${TURBO} PRIVATE

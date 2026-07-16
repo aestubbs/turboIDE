@@ -93,6 +93,7 @@ const PaletteCommand kCommands[] =
     { "Toggle Long Line Guide",        cmToggleEdge,           "",             true  },
     { "Colour Scheme...",              cmThemeSettings,        "",             false },
     { "Language Servers...",           cmLspSettings,          "",             false },
+    { "Debuggers...",                  cmDebugSettings,        "",             false },
     // Build / Run
     { "Build",                         cmBuild,                "F7",           false },
     { "Run",                           cmRun,                  "",             false },

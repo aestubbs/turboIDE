@@ -1,6 +1,8 @@
 #ifndef TURBO_DAPMANAGER_H
 #define TURBO_DAPMANAGER_H
 
+#include "debugconfig.h"
+
 #include <functional>
 #include <string>
 #include <vector>
@@ -79,6 +81,10 @@ public:
     // The workspace root, used as the default cwd for launched programs.
     void setRootPath(const char *path) noexcept;
 
+    // Apply the per-project debug configuration (from .turbo/debug.json). Takes
+    // effect for sessions started after this call.
+    void setConfig(DebugConfig cfg) noexcept;
+
     bool sessionActive() const noexcept { return active; }
 
     // Start a debug session for 'languageId' (e.g. "python", "cpp"), debugging
@@ -122,6 +128,8 @@ private:
         std::string command;             // adapter executable (on PATH)
         std::vector<std::string> args;   // adapter process arguments
         std::string request {"launch"};  // "launch" | "attach"
+        std::string program;             // launch: program ("" = the current file)
+        std::string cwd;                 // launch: working dir ("" = project root)
         bool stopOnEntry {false};
         std::string host {"127.0.0.1"};  // attach
         int port {0};                    // attach
@@ -138,6 +146,7 @@ private:
     void endSession() noexcept;
 
     std::string rootPath;
+    DebugConfig debugConfig; // per-project adapters (.turbo/debug.json)
 
     std::unique_ptr<turbo::dap::Client> client;
     bool active {false};
@@ -166,6 +175,7 @@ public:
     std::function<void()> onContinued;
     std::function<void(bool)> onSessionState;
     void setRootPath(const char *) noexcept {}
+    void setConfig(DebugConfig) noexcept {}
     bool sessionActive() const noexcept { return false; }
     bool start(const std::string &, const std::string &) noexcept { return false; }
     bool toggleBreakpoint(const std::string &, int) noexcept { return false; }
