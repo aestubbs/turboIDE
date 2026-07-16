@@ -560,6 +560,8 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount, int toolCount)
             *new TMenuItem( "Step O~v~er", cmDebugStepOver, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Step ~I~nto", cmDebugStepInto, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Step Ou~t~", cmDebugStepOut, kbNoKey, hcNoContext ) +
+            newLine() +
+            *new TMenuItem( "Toggle ~B~reakpoint", cmToggleBreakpoint, kbNoKey, hcNoContext ) +
         *new TSubMenu( "L~u~a", kbAltU ) +
             *new TMenuItem( "~R~un Script...", cmLuaRunScript, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~N~ew Script...", cmLuaNewScript, kbNoKey, hcNoContext ) +
@@ -3186,9 +3188,20 @@ void TurboApp::initDap() noexcept
                 { active ? std::string("[debug session started]")
                          : std::string("[debug session ended]"),
                   okInfo, "", -1 });
+        if (!active)
+            clearDebugCurrentLine();
     };
-    // onStopped / onContinued drive the editor's current-line marker and the
-    // Call Stack / Variables panels; wired in M2/M3.
+    dap->onStopped = [this] (const std::string &file, int line, const std::string &) {
+        clearDebugCurrentLine();
+        if (!file.empty() && line > 0)
+        {
+            openOrFocus(file, line - 1); // DAP 1-based -> editor 0-based
+            if (auto *w = focusedEditor())
+                w->getEditor().setCurrentLine(line - 1);
+        }
+    };
+    dap->onContinued = [this] { clearDebugCurrentLine(); };
+    // Call Stack list + Variables tree are wired in M3.
 }
 
 void TurboApp::startDebug()
@@ -3252,6 +3265,25 @@ void TurboApp::debugConsoleOutput(const std::string &category, const std::string
         start = nl + 1;
     }
     showOutput();
+}
+
+void TurboApp::editorToggleBreakpoint(EditorWindow &w, long line) noexcept
+{
+    if (!dap)
+        return;
+    std::string file = w.filePath();
+    if (file.empty())
+        return; // no breakpoints on unsaved scratch buffers
+    bool on = dap->toggleBreakpoint(file, (int) line);
+    w.getEditor().setBreakpointMarker(line, on);
+}
+
+void TurboApp::clearDebugCurrentLine() noexcept
+{
+    MRUlist.forEach([] (EditorWindow *w) {
+        if (w)
+            w->getEditor().setCurrentLine(-1);
+    });
 }
 
 void TurboApp::stopTool(int i) noexcept

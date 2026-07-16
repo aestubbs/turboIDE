@@ -72,6 +72,7 @@ public:
     bool foldingEnabled {true};         // code folding on by default
     bool changeHistoryEnabled {false};
     bool bookmarksUsed {false}; // becomes true once the bookmark margin is shown
+    bool breakpointsUsed {false}; // becomes true once the breakpoint margin is shown
     bool edgeEnabled {false};
     int edgeColumn {80};
     const Language *language {nullptr};
@@ -133,6 +134,10 @@ public:
     void toggleBookmark() noexcept;
     void nextBookmark() noexcept;
     void prevBookmark() noexcept;
+    // Debugger gutter markers. currentLine() is the caret's document line.
+    long currentLine() noexcept;
+    void setBreakpointMarker(long line, bool on) noexcept; // add/remove; reveals the gutter
+    void setCurrentLine(long line) noexcept;               // highlight stopped line (<0 clears)
     // Change history margin (modified-since-save indicators). Tracked manually
     // because this Scintilla predates SCI_SETCHANGEHISTORY.
     void toggleChangeHistory() noexcept;

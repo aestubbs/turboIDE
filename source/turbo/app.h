@@ -347,6 +347,9 @@ struct TurboApp : public TApplication, EditorWindowParent
     void stopDebug();
     // Route a debug-adapter 'output' event into the Debug Console output tab.
     void debugConsoleOutput(const std::string &category, const std::string &text) noexcept;
+    // Clear the current-execution-line highlight from every open editor (on
+    // continue / session end).
+    void clearDebugCurrentLine() noexcept;
 
     // Terminal windows. newTerminal() opens one running the configured shell.
     // Each TerminalView registers itself so idle() can pump its PTY output.
@@ -373,6 +376,7 @@ struct TurboApp : public TApplication, EditorWindowParent
     void editorRequestCompletion(EditorWindow &w) noexcept override;
     void editorHoverStart(EditorWindow &w, long pos) noexcept override;
     void editorHoverEnd(EditorWindow &w) noexcept override;
+    void editorToggleBreakpoint(EditorWindow &w, long line) noexcept override;
 };
 
 #endif
