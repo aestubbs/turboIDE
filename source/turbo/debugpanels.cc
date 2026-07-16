@@ -1,4 +1,7 @@
 #define Uses_TListViewer
+#define Uses_TOutline
+#define Uses_TOutlineViewer
+#define Uses_TScrollBar
 #define Uses_TDrawBuffer
 #define Uses_TEvent
 #define Uses_TKeys
@@ -111,4 +114,92 @@ void CallStackView::handleEvent(TEvent &ev)
         return;
     }
     TListViewer::handleEvent(ev);
+}
+
+// ---------------------------------------------------------------------------
+// VariablesView -- an expandable scopes/variables tree (lazy async children)
+
+namespace {
+
+VariablesView::VarNode *buildVarChildList(const std::vector<VarItem> &items) noexcept
+{
+    VariablesView::VarNode *first = nullptr, *last = nullptr;
+    for (const VarItem &it : items)
+    {
+        auto *n = new VariablesView::VarNode(it.text, it.variablesReference);
+        // Give an expandable value a placeholder child so the node always has a
+        // real child list (base hasChildren/getNumChildren stay consistent, and
+        // the outline never expands into an empty node). It is replaced with the
+        // real children on the first expansion (fulfill).
+        if (it.variablesReference > 0)
+            n->childList = new VariablesView::VarNode("...", 0);
+        if (!first) first = n; else last->next = n;
+        last = n;
+    }
+    return first;
+}
+
+// The tree always has one synthetic, always-expanded "Variables" root; the
+// scopes hang beneath it.
+VariablesView::VarNode *buildVarRoot(const std::vector<VarItem> &scopes) noexcept
+{
+    auto *r = new VariablesView::VarNode("Variables", 0);
+    r->expanded = True;
+    r->childList = buildVarChildList(scopes);
+    return r;
+}
+
+} // namespace
+
+VariablesView::VariablesView(const TRect &bounds, TScrollBar *vScrollBar) noexcept :
+    TOutline(bounds, nullptr, vScrollBar, buildVarRoot({}))
+{
+}
+
+void VariablesView::setTreeRoot(VarNode *newRoot) noexcept
+{
+    pending.clear(); // invalidate in-flight expansions; their nodes are freed next
+    if (root)
+        disposeNode(root);
+    root = newRoot;
+    foc = 0;
+    update();
+    drawView();
+}
+
+void VariablesView::setScopes(const std::vector<VarItem> &scopes) noexcept
+{
+    setTreeRoot(buildVarRoot(scopes));
+}
+
+void VariablesView::clearTree() noexcept
+{
+    setTreeRoot(buildVarRoot({}));
+}
+
+void VariablesView::fulfill(int token, const std::vector<VarItem> &children) noexcept
+{
+    auto it = pending.find(token);
+    if (it == pending.end())
+        return; // stale: the tree was rebuilt, the node may be freed -- do nothing
+    VarNode *node = it->second;
+    pending.erase(it);
+    if (node->childList)
+        disposeNode(node->childList); // replace the placeholder / prior children
+    node->childList = buildVarChildList(children);
+    update();
+    drawView();
+}
+
+void VariablesView::adjust(TNode *node, Boolean expand)
+{
+    auto *vn = (VarNode *) node;
+    if (expand && vn->variablesReference > 0 && !vn->loaded && onExpand)
+    {
+        vn->loaded = true; // fetch children only once
+        int token = nextToken++;
+        pending[token] = vn;
+        onExpand(vn->variablesReference, token);
+    }
+    TOutline::adjust(node, expand); // sets node->expanded
 }

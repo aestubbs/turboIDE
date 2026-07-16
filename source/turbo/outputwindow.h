@@ -145,6 +145,8 @@ struct OutputWindow : public TWindow
     // 'view'; each debug panel is its own view. Present as tabs only while
     // 'showDebugTabs' (set on a debug session start).
     CallStackView *stackView {nullptr};
+    VariablesView *varsView {nullptr};
+    TScrollBar *varsScrollBar {nullptr}; // the Variables tree's own scrollbar
     int activeExtra {0};        // 0 = a text tab is active; else otCallStack/otVariables
     bool showDebugTabs {false}; // whether the debugger tabs appear in the bar
     OutputWindow **ptr;

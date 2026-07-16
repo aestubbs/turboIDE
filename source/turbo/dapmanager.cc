@@ -234,6 +234,54 @@ void DapManager::sendAllBreakpoints() noexcept
         sendBreakpoints(kv.first);
 }
 
+void DapManager::fetchScopes(int frameId) noexcept
+{
+    if (!client)
+        return;
+    client->sendRequest("scopes", Json{{"frameId", frameId}},
+        [this](bool ok, const Json &b, const std::string &)
+        {
+            std::vector<ScopeInfo> scopes;
+            if (ok && b.contains("scopes") && b["scopes"].is_array())
+                for (const Json &s : b["scopes"])
+                {
+                    ScopeInfo info;
+                    info.name = s.value("name", std::string());
+                    info.variablesReference = s.value("variablesReference", 0);
+                    scopes.push_back(std::move(info));
+                }
+            if (onScopes)
+                onScopes(scopes);
+        });
+}
+
+void DapManager::fetchVariables(int variablesReference,
+                                std::function<void(std::vector<VariableInfo>)> cb) noexcept
+{
+    if (!client || variablesReference <= 0)
+    {
+        if (cb)
+            cb({});
+        return;
+    }
+    client->sendRequest("variables", Json{{"variablesReference", variablesReference}},
+        [cb = std::move(cb)](bool ok, const Json &b, const std::string &)
+        {
+            std::vector<VariableInfo> vars;
+            if (ok && b.contains("variables") && b["variables"].is_array())
+                for (const Json &v : b["variables"])
+                {
+                    VariableInfo info;
+                    info.name = v.value("name", std::string());
+                    info.value = v.value("value", std::string());
+                    info.variablesReference = v.value("variablesReference", 0);
+                    vars.push_back(std::move(info));
+                }
+            if (cb)
+                cb(std::move(vars));
+        });
+}
+
 void DapManager::onEvent(const std::string &event, const Json &body) noexcept
 {
     if (event == "initialized")
@@ -283,6 +331,9 @@ void DapManager::onEvent(const std::string &event, const Json &body) noexcept
                                   frames.empty() ? 0 : frames[0].line, reason);
                     if (onFrames)
                         onFrames(frames);
+                    // Populate the Variables panel for the innermost frame.
+                    if (!frames.empty())
+                        fetchScopes(frames[0].id);
                 });
         }
         else

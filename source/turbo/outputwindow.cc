@@ -328,7 +328,10 @@ void OutputFrame::drawTabs() noexcept
     for (auto &buf : view->buffers)
         tabs.push_back({buf.id, 0, buf.title, activeExtra == 0 && view->activeId == buf.id});
     if (win && win->showDebugTabs)
+    {
         tabs.push_back({otCallStack, 1, "CALL STACK", activeExtra == otCallStack});
+        tabs.push_back({otVariables, 1, "VARIABLES", activeExtra == otVariables});
+    }
 
     int n = (int) tabs.size();
     tabX0.assign(n, 0);
@@ -420,6 +423,15 @@ OutputWindow::OutputWindow(const TRect &bounds, OutputWindow **aptr) noexcept :
     insert(stackView);
     stackView->hide();
 
+    // The Variables tree gets its own (initially hidden) scrollbar, since a tree
+    // can be taller than the pane.
+    varsScrollBar = standardScrollBar(sbVertical | sbHandleKeyboard);
+    varsScrollBar->hide();
+    varsView = new VariablesView(inner, varsScrollBar);
+    varsView->growMode = gfGrowHiX | gfGrowHiY;
+    insert(varsView);
+    varsView->hide();
+
     // TWindowInit built the frame before the views existed, so wire them now.
     tabFrame = (OutputFrame *) frame;
     if (tabFrame)
@@ -435,6 +447,10 @@ void OutputWindow::showTextTab(int bufferId) noexcept
     activeExtra = 0;
     if (stackView)
         stackView->hide();
+    if (varsView)
+        varsView->hide();
+    if (varsScrollBar)
+        varsScrollBar->hide();
     if (view)
     {
         view->show();
@@ -449,19 +465,28 @@ void OutputWindow::showTextTab(int bufferId) noexcept
 void OutputWindow::showExtraTab(int extraId) noexcept
 {
     activeExtra = extraId;
+    // Hide everything, then reveal just the selected debug panel + its scrollbar.
     if (view)
         view->hide();
     if (vScrollBar)
-        vScrollBar->hide(); // the debug panels manage their own (short) scroll
+        vScrollBar->hide();
     if (stackView)
+        stackView->hide();
+    if (varsView)
+        varsView->hide();
+    if (varsScrollBar)
+        varsScrollBar->hide();
+    if (extraId == otCallStack && stackView)
     {
-        if (extraId == otCallStack)
-        {
-            stackView->show();
-            stackView->select(); // take focus so keyboard navigation works
-        }
-        else
-            stackView->hide();
+        stackView->show();
+        stackView->select(); // take focus so keyboard navigation works
+    }
+    else if (extraId == otVariables && varsView)
+    {
+        varsView->show();
+        if (varsScrollBar)
+            varsScrollBar->show();
+        varsView->select();
     }
     if (tabFrame)
         tabFrame->drawView();
@@ -544,7 +569,9 @@ void OutputWindow::shutDown()
     view = nullptr;
     tabFrame = nullptr;
     stackView = nullptr;
+    varsView = nullptr;
     vScrollBar = nullptr;
+    varsScrollBar = nullptr;
     TWindow::shutDown();
 }
 
