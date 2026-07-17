@@ -254,6 +254,9 @@ struct TurboApp : public TApplication, EditorWindowParent
     // Switch the colour-depth mode ("auto"/"full"/"16"), persist it, and re-apply
     // the active schemes live. Some panels update fully only on the next launch.
     void setColorMode(const char *mode) noexcept;
+    // Switch the file-tree glyph set ("auto"/"nerd"/"unicode"/"ascii"), persist
+    // it, and repaint the tree. Fully live.
+    void setTreeIcons(const char *mode) noexcept;
     void closeAll();
     TRect newEditorBounds() const;
     turbo::TScintilla &createScintilla() noexcept;

@@ -632,6 +632,11 @@ TMenuBar *TurboApp::makeMenuBar(TRect r, int recentCount, int toolCount)
             *new TMenuItem( "Colour Mode: ~F~ull (24-bit)", cmColorModeFull, kbNoKey, hcNoContext ) +
             *new TMenuItem( "Colour Mode: 1~6~-colour (classic)", cmColorMode16, kbNoKey, hcNoContext ) +
             newLine() +
+            *new TMenuItem( "Tree Icons: Au~t~o", cmTreeIconsAuto, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Tree Icons: ~N~erd Font", cmTreeIconsNerd, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Tree Icons: Uni~c~ode", cmTreeIconsUnicode, kbNoKey, hcNoContext ) +
+            *new TMenuItem( "Tree Icons: ASC~I~I", cmTreeIconsAscii, kbNoKey, hcNoContext ) +
+            newLine() +
             *new TMenuItem( "~L~anguage Servers...", cmLspSettings, kbNoKey, hcNoContext ) +
             *new TMenuItem( "~D~ebuggers...", cmDebugSettings, kbNoKey, hcNoContext ) +
             newLine() +
@@ -848,6 +853,10 @@ void TurboApp::handleEvent(TEvent &event)
             case cmColorModeAuto: setColorMode("auto"); break;
             case cmColorModeFull: setColorMode("full"); break;
             case cmColorMode16:   setColorMode("16");   break;
+            case cmTreeIconsAuto:    setTreeIcons("auto");    break;
+            case cmTreeIconsNerd:    setTreeIcons("nerd");    break;
+            case cmTreeIconsUnicode: setTreeIcons("unicode"); break;
+            case cmTreeIconsAscii:   setTreeIcons("ascii");   break;
             case cmGitRefresh: gitRefresh(); break;
             case cmGitCommit: gitCommitDialog(); break;
             case cmGitFetch: gitRemote(0); break;
@@ -1816,6 +1825,13 @@ void TurboApp::refreshMenuChecks() noexcept
     setMenuItemCheck(m, cmColorMode16,   settings.colorMode == "16");
     setMenuItemCheck(m, cmColorModeAuto, settings.colorMode != "full" &&
                                          settings.colorMode != "16");
+    // Tree-icon-set radio group (exactly one checked; any unknown value = auto).
+    setMenuItemCheck(m, cmTreeIconsNerd,    settings.treeIcons == "nerd");
+    setMenuItemCheck(m, cmTreeIconsUnicode, settings.treeIcons == "unicode");
+    setMenuItemCheck(m, cmTreeIconsAscii,   settings.treeIcons == "ascii");
+    setMenuItemCheck(m, cmTreeIconsAuto,    settings.treeIcons != "nerd" &&
+                                            settings.treeIcons != "unicode" &&
+                                            settings.treeIcons != "ascii");
 
     // Per-editor toggles reflect the active (most-recently-focused) editor.
     // With no editor open they all show unchecked.
@@ -2043,6 +2059,22 @@ void TurboApp::setColorMode(const char *mode) noexcept
                    "Colour mode set to \"%s\". Restart Turbo to apply it fully "
                    "(the file tree and debug panels update on the next launch).",
                    mode);
+}
+
+void TurboApp::setTreeIcons(const char *mode) noexcept
+{
+    if (settings.treeIcons == mode)
+        return;
+    settings.treeIcons = mode;
+    saveSettings(settings);
+    // Re-resolve the active glyph set and repaint the tree. Fully live: the set
+    // is read at draw time and the icon column can widen/collapse, so the tree
+    // is relaid out (update) as well as redrawn. "nerd" needs a Nerd Font in the
+    // terminal; without one its pictograms show as blank boxes.
+    setTreeIconSet(parseTreeIconSet(settings.treeIcons));
+    if (docTree)
+        docTree->tree->refreshIcons();
+    refreshMenuChecks();
 }
 
 void TurboApp::gitRefresh()

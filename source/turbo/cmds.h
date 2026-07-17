@@ -100,6 +100,12 @@ enum : ushort
     cmColorModeAuto,
     cmColorModeFull,
     cmColorMode16,
+    // File-tree glyph set (Settings menu): a radio choice persisted as
+    // tree.icons -- "auto", "nerd", "unicode" or "ascii". Applied live.
+    cmTreeIconsAuto,
+    cmTreeIconsNerd,
+    cmTreeIconsUnicode,
+    cmTreeIconsAscii,
     // File-tree right-click context menu actions.
     cmTreeOpen,
     cmTreeRename,

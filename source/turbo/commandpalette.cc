@@ -95,6 +95,10 @@ const PaletteCommand kCommands[] =
     { "Colour Mode: Auto",             cmColorModeAuto,        "",             false },
     { "Colour Mode: Full (24-bit)",    cmColorModeFull,        "",             false },
     { "Colour Mode: 16-colour (classic)", cmColorMode16,       "",             false },
+    { "Tree Icons: Auto",              cmTreeIconsAuto,        "",             false },
+    { "Tree Icons: Nerd Font",         cmTreeIconsNerd,        "",             false },
+    { "Tree Icons: Unicode",           cmTreeIconsUnicode,     "",             false },
+    { "Tree Icons: ASCII",             cmTreeIconsAscii,       "",             false },
     { "Language Servers...",           cmLspSettings,          "",             false },
     { "Debuggers...",                  cmDebugSettings,        "",             false },
     // Build / Run
