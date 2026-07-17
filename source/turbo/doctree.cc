@@ -1024,6 +1024,28 @@ RowColors treeColors(TreeRole role, bool active) noexcept
     // a dimmer shade when not) -- matching the frame and the other windows.
     TColorDesired bg = ::getBack(windowSchemeActive[active ? wndFrameActive
                                                            : wndFramePassive]);
+    // Classic 16-colour mode (the window scheme holds BIOS colours): use BIOS
+    // colours picked to stay distinct on the blue tree background. The 24-bit
+    // values below would quantise to 16 colours unpredictably -- the dim
+    // grey-blue guide in particular collapses into the blue background, so the
+    // connector lines vanish. Detected via the scheme's colour type, so no extra
+    // plumbing of the colour-mode setting is needed. (BIOS: black0 blue1 green2
+    // cyan3 gray7 darkGray8 white15.)
+    if (bg.isBIOS())
+    {
+        auto A = [] (uchar f, uchar b) {
+            return TColorAttr(TColorDesired(uchar(f)), TColorDesired(uchar(b)));
+        };
+        switch (role)
+        {
+            case TreeRole::Focused:  // the current row: dark text on cyan
+                return { A(0, 3), A(0, 3), A(0, 3), TColorDesired(uchar(3)) };
+            case TreeRole::Selected: // a marked row: dark text on light grey
+                return { A(0, 7), A(0, 7), A(0, 7), TColorDesired(uchar(7)) };
+            default:                 // light text, dim (but visible) grey guide
+                return { A(7, 1), A(7, 1), A(8, 1), TColorDesired(uchar(1)) };
+        }
+    }
     switch (role)
     {
         case TreeRole::Focused:

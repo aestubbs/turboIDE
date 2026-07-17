@@ -159,6 +159,11 @@ struct DocumentTreeView : public TOutline {
     void setShowHidden(bool show) noexcept;
     bool showsHidden() const noexcept { return showHidden; }
 
+    // Relayout + repaint after the tree glyph set changes (the icon column can
+    // widen or collapse, so the outline extent is recomputed). Node data is
+    // unchanged, so no rescan is needed.
+    void refreshIcons() noexcept { update(); drawView(); }
+
     // Associate/dissociate an open editor window with its file node (by path).
     void linkEditor(EditorWindow *w) noexcept;
     void unlinkEditor(EditorWindow *w) noexcept;
